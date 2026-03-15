@@ -41,7 +41,7 @@ Frontend (React/TypeScript :3000)     Backend (FastAPI/Python :8324)
 ### Backend
 
 ```bash
-bash backend/run/dev.sh
+bash backend/run.sh
 # API runs at http://localhost:8324
 # Docs at http://localhost:8324/docs
 ```
@@ -49,7 +49,7 @@ bash backend/run/dev.sh
 ### Frontend
 
 ```bash
-bash frontend/run/dev.sh
+bash frontend/run.sh
 # App runs at http://localhost:3000
 ```
 

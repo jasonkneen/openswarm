@@ -13,14 +13,14 @@ else
     # echo "NOT in macOS server START"
 fi
 chmod +x "$DEV_ABSPATH"
-source "$(dirname "$DEV_ABSPATH")/_utils.sh"
 
+FRONTEND_DIR_ABSPATH="$(dirname "$DEV_ABSPATH")"
 
-formatted_echo --green "Installing dependencies..."
+echo "Installing dependencies..."
 cd "$FRONTEND_DIR_ABSPATH"
 npm install
 
-formatted_echo --green "Building with development mode..."
+echo "Building with development mode..."
 npm run dev
 
 # exit back to the dir that we were in before

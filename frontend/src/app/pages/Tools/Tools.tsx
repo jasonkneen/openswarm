@@ -398,7 +398,7 @@ const Tools: React.FC = () => {
   // Registry browser
   const [registryOpen, setRegistryOpen] = useState(false);
   const [regQuery, setRegQuery] = useState('');
-  const [regSort, setRegSort] = useState<'name' | 'stars'>('name');
+  const [regSort, setRegSort] = useState<'name' | 'stars'>('stars');
   const [regSource, setRegSource] = useState<'' | 'community' | 'google'>('');
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity?: 'success' | 'error' }>({ open: false, message: '' });
@@ -609,11 +609,11 @@ const Tools: React.FC = () => {
     handleMenuClose();
     setRegistryOpen(true);
     setRegQuery('');
-    setRegSort('name');
+    setRegSort('stars');
     setRegSource('');
     setExpandedServer(null);
     dispatch(fetchRegistryStats());
-    dispatch(searchRegistry({ q: '', limit: 20, offset: 0, sort: 'name', source: '' }));
+    dispatch(searchRegistry({ q: '', limit: 20, offset: 0, sort: 'stars', source: '' }));
   };
 
   // --------------- Tool CRUD ---------------
