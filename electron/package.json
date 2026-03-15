@@ -7,6 +7,7 @@
     "start": "electron .",
     "dev": "ELECTRON_DEV=1 electron .",
     "dist": "electron-builder --mac --publish never",
+    "dist:publish": "electron-builder --mac --publish always",
     "dist:all": "electron-builder --mac --win --linux"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "get-port": "^5.1.1"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.0"
   },
@@ -28,8 +30,18 @@
       "icon": "build/icon.icns",
       "target": [
         {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
           "target": "zip",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "category": "public.app-category.developer-tools",
@@ -40,37 +52,63 @@
     "dmg": {
       "title": "OpenSwarm",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "extraResources": [
       {
         "from": "../frontend/dist",
         "to": "frontend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../backend",
         "to": "backend",
-        "filter": ["**/*", "!__pycache__/**", "!**/__pycache__/**", "!.venv/**", "!*.pyc"]
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/__pycache__/**",
+          "!.venv/**",
+          "!*.pyc"
+        ]
       },
       {
         "from": "../debugger",
         "to": "debugger",
-        "filter": ["**/*", "!__pycache__/**", "!**/__pycache__/**", "!*.pyc", "!.venv/**", "!**/node_modules/**"]
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/__pycache__/**",
+          "!*.pyc",
+          "!.venv/**",
+          "!**/.venv/**",
+          "!**/node_modules/**"
+        ]
       },
       {
         "from": "python-env",
         "to": "python-env",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "publish": {
       "provider": "github",
-      "owner": "clusterlabs",
-      "repo": "openswarm"
+      "owner": "openswarm-ai",
+      "repo": "production"
     },
-    "afterSign": null
+    "afterSign": "scripts/notarize.js"
   }
 }

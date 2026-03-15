@@ -43,6 +43,7 @@ export interface DashboardLayoutState {
   cards: Record<string, CardPosition>;
   viewCards: Record<string, ViewCardPosition>;
   browserCards: Record<string, BrowserCardPosition>;
+  persistedExpandedSessionIds: string[];
   loading: boolean;
   initialized: boolean;
 }
@@ -51,6 +52,7 @@ const initialState: DashboardLayoutState = {
   cards: {},
   viewCards: {},
   browserCards: {},
+  persistedExpandedSessionIds: [],
   loading: false,
   initialized: false,
 };
@@ -59,6 +61,7 @@ interface LayoutPayload {
   cards: Record<string, CardPosition>;
   viewCards: Record<string, ViewCardPosition>;
   browserCards: Record<string, BrowserCardPosition>;
+  expandedSessionIds: string[];
 }
 
 export const fetchLayout = createAsyncThunk(
@@ -71,6 +74,7 @@ export const fetchLayout = createAsyncThunk(
       cards: (layout.cards ?? {}) as Record<string, CardPosition>,
       viewCards: (layout.view_cards ?? {}) as Record<string, ViewCardPosition>,
       browserCards: (layout.browser_cards ?? {}) as Record<string, BrowserCardPosition>,
+      expandedSessionIds: (layout.expanded_session_ids ?? []) as string[],
     } satisfies LayoutPayload;
   },
 );
@@ -91,7 +95,12 @@ export const saveLayout = createAsyncThunk(
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            layout: { cards: payload.cards, view_cards: payload.viewCards, browser_cards: payload.browserCards },
+            layout: {
+              cards: payload.cards,
+              view_cards: payload.viewCards,
+              browser_cards: payload.browserCards,
+              expanded_session_ids: payload.expandedSessionIds,
+            },
           }),
         });
         resolve(payload);
@@ -379,6 +388,7 @@ const dashboardLayoutSlice = createSlice({
       state.cards = {};
       state.viewCards = {};
       state.browserCards = {};
+      state.persistedExpandedSessionIds = [];
       state.initialized = false;
     },
 
@@ -394,6 +404,7 @@ const dashboardLayoutSlice = createSlice({
         state.cards = action.payload.cards;
         state.viewCards = action.payload.viewCards;
         state.browserCards = action.payload.browserCards;
+        state.persistedExpandedSessionIds = action.payload.expandedSessionIds;
       })
       .addCase(fetchLayout.rejected, (state) => {
         state.loading = false;

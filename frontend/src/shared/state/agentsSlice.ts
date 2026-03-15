@@ -455,6 +455,10 @@ const agentsSlice = createSlice({
       state.expandedSessionIds = [];
     },
 
+    setExpandedSessionIds(state, action: PayloadAction<string[]>) {
+      state.expandedSessionIds = action.payload;
+    },
+
     updateSessionName(state, action: PayloadAction<{ sessionId: string; name: string }>) {
       const session = state.sessions[action.payload.sessionId];
       if (session) {
@@ -839,6 +843,7 @@ export const {
   expandSession,
   collapseSession,
   collapseAllSessions,
+  setExpandedSessionIds,
   updateSessionName,
   updateGroupMeta,
   setDraftSystemPrompt,

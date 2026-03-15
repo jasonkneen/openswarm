@@ -11,6 +11,7 @@ let backendPort = null;
 
 const isPackaged = app.isPackaged;
 const isDev = process.env.ELECTRON_DEV === '1';
+const iconPath = path.join(__dirname, 'build', 'icon.png');
 
 function getResourcePath(...segments) {
   if (isPackaged) {
@@ -118,6 +119,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'OpenSwarm',
+    icon: iconPath,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -185,6 +187,10 @@ function killBackend() {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'darwin' && !isPackaged) {
+    try { app.dock.setIcon(iconPath); } catch (_) {}
+  }
+
   try {
     if (isDev) {
       backendPort = parseInt(process.env.OPENSWARM_PORT || '8324', 10);

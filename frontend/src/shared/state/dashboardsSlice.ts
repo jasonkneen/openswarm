@@ -6,6 +6,7 @@ const DASHBOARDS_API = `${API_BASE}/dashboards`;
 export interface Dashboard {
   id: string;
   name: string;
+  auto_named: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +67,17 @@ export const duplicateDashboard = createAsyncThunk(
   },
 );
 
+export const generateDashboardName = createAsyncThunk(
+  'dashboards/generateName',
+  async (dashboardId: string) => {
+    const res = await fetch(`${DASHBOARDS_API}/${dashboardId}/generate-name`, {
+      method: 'POST',
+    });
+    const data = await res.json();
+    return { id: dashboardId, name: data.name as string, auto_named: data.auto_named as boolean };
+  },
+);
+
 const dashboardsSlice = createSlice({
   name: 'dashboards',
   initialState,
@@ -92,7 +104,12 @@ const dashboardsSlice = createSlice({
       .addCase(renameDashboard.fulfilled, (state, action) => {
         const d = action.payload;
         if (state.items[d.id]) {
-          state.items[d.id] = { ...state.items[d.id], name: d.name, updated_at: d.updated_at };
+          state.items[d.id] = {
+            ...state.items[d.id],
+            name: d.name,
+            auto_named: d.auto_named ?? false,
+            updated_at: d.updated_at,
+          };
         }
       })
       .addCase(deleteDashboard.fulfilled, (state, action) => {
@@ -100,6 +117,13 @@ const dashboardsSlice = createSlice({
       })
       .addCase(duplicateDashboard.fulfilled, (state, action) => {
         state.items[action.payload.id] = action.payload;
+      })
+      .addCase(generateDashboardName.fulfilled, (state, action) => {
+        const { id, name, auto_named } = action.payload;
+        if (state.items[id]) {
+          state.items[id].name = name;
+          state.items[id].auto_named = auto_named;
+        }
       });
   },
 });

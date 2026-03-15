@@ -3,20 +3,49 @@ set -euo pipefail
 
 # Master build script for the OpenSwarm desktop app.
 #
-# Steps:
-#   1. Build the React frontend (webpack production build)
-#   2. Set up the embedded Python environment
-#   3. Package everything with electron-builder
-#
-# Output: electron/dist/OpenSwarm-<version>.dmg
+# Usage:
+#   bash scripts/build-app.sh              Local dev build (unsigned)
+#   bash scripts/build-app.sh --publish    Production build (signed, notarized, published to GitHub Releases)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+ENV_FILE="$PROJECT_ROOT/backend/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
+PUBLISH_MODE=false
+if [[ "${1:-}" == "--publish" ]]; then
+    PUBLISH_MODE=true
+fi
+
 echo "========================================"
 echo "  OpenSwarm Desktop App Builder"
+if $PUBLISH_MODE; then
+    echo "  Mode: PRODUCTION (sign + notarize + publish)"
+else
+    echo "  Mode: LOCAL (unsigned)"
+fi
 echo "========================================"
 echo ""
+
+if $PUBLISH_MODE; then
+    missing_vars=()
+    [[ -z "${APPLE_ID:-}" ]] && missing_vars+=("APPLE_ID")
+    [[ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]] && missing_vars+=("APPLE_APP_SPECIFIC_PASSWORD")
+    [[ -z "${APPLE_TEAM_ID:-}" ]] && missing_vars+=("APPLE_TEAM_ID")
+    [[ -z "${GH_TOKEN:-}" ]] && missing_vars+=("GH_TOKEN")
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        echo "ERROR: Missing required environment variables for --publish mode:"
+        printf '  - %s\n' "${missing_vars[@]}"
+        echo ""
+        echo "See script header for details."
+        exit 1
+    fi
+fi
 
 # Step 1: Build frontend
 echo "[1/3] Building frontend..."
@@ -47,10 +76,12 @@ echo "[3/3] Packaging with electron-builder..."
 cd "$PROJECT_ROOT/electron"
 npm install
 
-# Skip code signing for local builds (set CSC_LINK for production signing)
-export CSC_IDENTITY_AUTO_DISCOVERY=false
-
-npx electron-builder --mac --publish never
+if $PUBLISH_MODE; then
+    npx electron-builder --mac --publish always
+else
+    export CSC_IDENTITY_AUTO_DISCOVERY=false
+    npx electron-builder --mac --publish never
+fi
 
 echo ""
 echo "========================================"
@@ -58,5 +89,6 @@ echo "  Build Complete!"
 echo "========================================"
 echo ""
 echo "Output files:"
-ls -lh "$PROJECT_ROOT/electron/dist/"*.zip 2>/dev/null || echo "  (no .zip found — check electron/dist/)"
+ls -lh "$PROJECT_ROOT/electron/dist/"*.dmg 2>/dev/null || true
+ls -lh "$PROJECT_ROOT/electron/dist/"*.zip 2>/dev/null || true
 echo ""

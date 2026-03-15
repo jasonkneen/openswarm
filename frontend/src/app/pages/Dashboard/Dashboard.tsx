@@ -13,6 +13,7 @@ import {
   launchAndSendFirstMessage,
   generateTitle,
   resumeSession,
+  setExpandedSessionIds,
 } from '@/shared/state/agentsSlice';
 import type { AgentConfig } from '@/shared/state/agentsSlice';
 import {
@@ -26,6 +27,7 @@ import {
   resetLayout,
 } from '@/shared/state/dashboardLayoutSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
+import { generateDashboardName } from '@/shared/state/dashboardsSlice';
 import { dashboardWs } from '@/shared/ws/WebSocketManager';
 import AgentCard from './AgentCard';
 import DashboardViewCard from './DashboardViewCard';
@@ -70,6 +72,7 @@ const DashboardInner: React.FC = () => {
   const viewCards = useAppSelector((state) => state.dashboardLayout.viewCards);
   const browserCards = useAppSelector((state) => state.dashboardLayout.browserCards);
   const layoutInitialized = useAppSelector((state) => state.dashboardLayout.initialized);
+  const persistedExpandedSessionIds = useAppSelector((state) => state.dashboardLayout.persistedExpandedSessionIds);
   const zoomSensitivity = useAppSelector((state) => state.settings.data.zoom_sensitivity);
   const newAgentShortcut = useAppSelector((state) => state.settings.data.new_agent_shortcut);
   const browserHomepage = useAppSelector((state) => state.settings.data.browser_homepage);
@@ -88,6 +91,7 @@ const DashboardInner: React.FC = () => {
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const spawnOriginsRef = useRef<Record<string, { x: number; y: number }>>({});
   const hasFittedRef = useRef(false);
+  const restoredExpandedRef = useRef(false);
 
   // ---- Multi-drag coordination ----
   const [multiDragDelta, setMultiDragDelta] = useState<{ dx: number; dy: number } | null>(null);
@@ -157,6 +161,7 @@ const DashboardInner: React.FC = () => {
   useEffect(() => {
     if (!dashboardId) return;
     hasFittedRef.current = false;
+    restoredExpandedRef.current = false;
     dispatch(resetLayout());
     dispatch(fetchSessions({ dashboardId }));
     dispatch(fetchHistory({ dashboardId }));
@@ -172,6 +177,14 @@ const DashboardInner: React.FC = () => {
     const timer = setTimeout(() => canvas.actions.fitToView(), 150);
     return () => clearTimeout(timer);
   }, [layoutInitialized, canvas.actions]);
+
+  useEffect(() => {
+    if (!layoutInitialized || restoredExpandedRef.current) return;
+    restoredExpandedRef.current = true;
+    if (persistedExpandedSessionIds.length > 0) {
+      dispatch(setExpandedSessionIds(persistedExpandedSessionIds));
+    }
+  }, [layoutInitialized, persistedExpandedSessionIds, dispatch]);
 
   const prevSessionIdsRef = useRef<string>('');
 
@@ -189,6 +202,7 @@ const DashboardInner: React.FC = () => {
   const cardsJson = JSON.stringify(cards);
   const viewCardsJson = JSON.stringify(viewCards);
   const browserCardsJson = JSON.stringify(browserCards);
+  const expandedJson = JSON.stringify(expandedSessionIds);
   const skipInitialSave = useRef(true);
   useEffect(() => {
     if (!layoutInitialized || !dashboardId) return;
@@ -196,8 +210,8 @@ const DashboardInner: React.FC = () => {
       skipInitialSave.current = false;
       return;
     }
-    dispatch(saveLayout({ dashboardId, cards, viewCards, browserCards }));
-  }, [cardsJson, viewCardsJson, browserCardsJson, layoutInitialized, dashboardId]);
+    dispatch(saveLayout({ dashboardId, cards, viewCards, browserCards, expandedSessionIds }));
+  }, [cardsJson, viewCardsJson, browserCardsJson, expandedJson, layoutInitialized, dashboardId]);
 
   useEffect(() => {
     const parts = newAgentShortcut.toLowerCase().split('+');
@@ -276,6 +290,22 @@ const DashboardInner: React.FC = () => {
           dispatch(generateTitle({ sessionId: realId, prompt }));
           spawnOriginsRef.current[realId] = spawnOriginsRef.current[draftId];
           delete spawnOriginsRef.current[draftId];
+
+          if (dashboardId) {
+            const currentSessions = store.getState().agents.sessions;
+            const agentCount = Object.values(currentSessions).filter(
+              (s) => s.status !== 'draft' && s.dashboard_id === dashboardId,
+            ).length;
+            const NAME_GEN_TRIGGERS = [1, 3, 6];
+            const currentDash = store.getState().dashboards.items[dashboardId];
+            const canAutoName =
+              currentDash &&
+              (currentDash.auto_named || currentDash.name === 'Untitled Dashboard');
+
+            if (NAME_GEN_TRIGGERS.includes(agentCount) && canAutoName) {
+              dispatch(generateDashboardName(dashboardId));
+            }
+          }
         } else {
           delete spawnOriginsRef.current[draftId];
         }

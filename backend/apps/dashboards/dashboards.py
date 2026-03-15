@@ -13,6 +13,7 @@ from backend.apps.dashboards.models import (
     DashboardLayout,
     CardPosition,
     ViewCardPosition,
+    BrowserCardPosition,
 )
 from fastapi import HTTPException
 
@@ -112,6 +113,7 @@ async def list_dashboards():
         items.append({
             "id": dumped["id"],
             "name": dumped.get("name", "Untitled"),
+            "auto_named": dumped.get("auto_named", False),
             "created_at": dumped.get("created_at"),
             "updated_at": dumped.get("updated_at"),
         })
@@ -125,6 +127,69 @@ async def create_dashboard(body: DashboardCreate):
     return dashboard.model_dump(mode="json")
 
 
+@dashboards.router.post("/{dashboard_id}/generate-name")
+async def generate_name(dashboard_id: str):
+    dashboard = _load(dashboard_id)
+
+    if not dashboard.auto_named and dashboard.name != "Untitled Dashboard":
+        return {"name": dashboard.name, "auto_named": dashboard.auto_named}
+
+    from backend.apps.agents.agent_manager import agent_manager
+
+    prompts = []
+    for session in agent_manager.sessions.values():
+        if getattr(session, "dashboard_id", None) != dashboard_id:
+            continue
+        for msg in session.messages:
+            if msg.role == "user" and isinstance(msg.content, str) and msg.content.strip():
+                prompts.append(msg.content.strip()[:200])
+                break
+
+    if not prompts:
+        return {"name": dashboard.name, "auto_named": dashboard.auto_named}
+
+    fallback = prompts[0][:40]
+    try:
+        import anthropic
+        from backend.apps.settings.settings import load_settings
+        global_settings = load_settings()
+        if not global_settings.anthropic_api_key:
+            raise ValueError("API key not configured")
+
+        client = anthropic.AsyncAnthropic(api_key=global_settings.anthropic_api_key)
+
+        if len(prompts) == 1:
+            system = (
+                "Generate a concise 2-5 word workspace name for a project based on this task. "
+                "Return only the name, nothing else."
+            )
+            user_content = prompts[0]
+        else:
+            system = (
+                "Generate a concise 2-5 word workspace name that captures the overall theme of these tasks. "
+                "Return only the name, nothing else."
+            )
+            user_content = "\n".join(f"- {p}" for p in prompts)
+
+        resp = await client.messages.create(
+            model="claude-haiku-4-20250414",
+            max_tokens=30,
+            system=system,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        generated = resp.content[0].text.strip().strip('"\'')
+        if generated:
+            fallback = generated
+    except Exception as e:
+        logger.warning(f"Dashboard name generation failed, using fallback: {e}")
+
+    dashboard.name = fallback
+    dashboard.auto_named = True
+    dashboard.updated_at = datetime.now()
+    _save(dashboard)
+    return {"name": dashboard.name, "auto_named": True}
+
+
 @dashboards.router.get("/{dashboard_id}")
 async def get_dashboard(dashboard_id: str):
     dashboard = _load(dashboard_id)
@@ -136,6 +201,7 @@ async def update_dashboard(dashboard_id: str, body: DashboardUpdate):
     dashboard = _load(dashboard_id)
     if body.name is not None:
         dashboard.name = body.name
+        dashboard.auto_named = False
     if body.layout is not None:
         dashboard.layout = body.layout
     dashboard.updated_at = datetime.now()
@@ -188,7 +254,11 @@ async def duplicate_dashboard(dashboard_id: str):
         "name": f"{source_data.get('name', 'Untitled')} (copy)",
         "created_at": now,
         "updated_at": now,
-        "layout": {"cards": {}, "view_cards": source_data.get("layout", {}).get("view_cards", {})},
+        "layout": {
+            "cards": {},
+            "view_cards": source_data.get("layout", {}).get("view_cards", {}),
+            "browser_cards": source_data.get("layout", {}).get("browser_cards", {}),
+        },
     }
     with open(os.path.join(DATA_DIR, f"{new_id}.json"), "w") as f:
         json.dump(new_dashboard, f, indent=2)
