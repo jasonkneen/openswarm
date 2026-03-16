@@ -71,3 +71,4 @@ class AgentSession(BaseModel):
     active_branch_id: str = "main"
     tool_group_meta: dict[str, "ToolGroupMeta"] = Field(default_factory=dict)
     dashboard_id: Optional[str] = None
+    browser_id: Optional[str] = None

@@ -20,9 +20,18 @@ class ViewCardPosition(BaseModel):
     height: float = 360
 
 
+class BrowserTab(BaseModel):
+    id: str
+    url: str = ""
+    title: str = ""
+    favicon: Optional[str] = None
+
+
 class BrowserCardPosition(BaseModel):
     browser_id: str
     url: str = ""
+    tabs: list[BrowserTab] = Field(default_factory=list)
+    activeTabId: str = ""
     x: float = 0
     y: float = 0
     width: float = 640
@@ -43,6 +52,7 @@ class Dashboard(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     layout: DashboardLayout = Field(default_factory=DashboardLayout)
+    thumbnail: Optional[str] = None
 
 
 class DashboardCreate(BaseModel):
@@ -52,3 +62,4 @@ class DashboardCreate(BaseModel):
 class DashboardUpdate(BaseModel):
     name: Optional[str] = None
     layout: Optional[DashboardLayout] = None
+    thumbnail: Optional[str] = None

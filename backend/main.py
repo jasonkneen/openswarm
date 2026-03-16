@@ -103,14 +103,45 @@ async def browser_command(request: Request):
     body = await request.json()
     action = body.get("action", "")
     browser_id = body.get("browser_id", "")
+    tab_id = body.get("tab_id", "")
     params = body.get("params", {})
 
     if not action or not browser_id:
         return JSONResponse({"error": "action and browser_id are required"}, status_code=400)
 
     request_id = uuid4().hex
-    result = await ws_manager.send_browser_command(request_id, action, browser_id, params)
+    result = await ws_manager.send_browser_command(request_id, action, browser_id, params, tab_id=tab_id)
     return JSONResponse(result)
+
+
+@app.post("/api/browser-agent/run")
+async def browser_agent_run(request: Request):
+    """Run one or more browser sub-agents in parallel.
+    Called by the browser_agent_mcp_server stdio subprocess."""
+    from backend.apps.settings.settings import load_settings
+    from backend.apps.agents.browser_agent import run_browser_agents
+
+    body = await request.json()
+    tasks = body.get("tasks", [])
+    model = body.get("model", "sonnet")
+    dashboard_id = body.get("dashboard_id", "")
+    pre_selected_browser_ids = body.get("pre_selected_browser_ids", [])
+
+    if not tasks:
+        return JSONResponse({"error": "tasks array is required"}, status_code=400)
+
+    settings = load_settings()
+    if not settings.anthropic_api_key:
+        return JSONResponse({"error": "Anthropic API key not configured"}, status_code=400)
+
+    results = await run_browser_agents(
+        tasks=tasks,
+        model=model,
+        api_key=settings.anthropic_api_key,
+        dashboard_id=dashboard_id or None,
+        pre_selected_browser_ids=pre_selected_browser_ids,
+    )
+    return JSONResponse({"results": results})
 
 
 if __name__ == "__main__":

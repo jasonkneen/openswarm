@@ -232,8 +232,67 @@ class AgentManager:
             + "\n</available_views>"
         )
 
-    def _compose_system_prompt(self, default_prompt: str | None, mode_prompt: str | None, session_prompt: str | None, connected_tools_ctx: str | None = None, outputs_ctx: str | None = None) -> str | None:
-        parts = [p for p in (default_prompt, mode_prompt, session_prompt, connected_tools_ctx, outputs_ctx) if p]
+    def _build_browser_context(self, dashboard_id: str | None) -> str | None:
+        """Build a context block listing browser cards and delegation instructions."""
+        if not dashboard_id:
+            return None
+        try:
+            from backend.apps.dashboards.dashboards import _load as load_dashboard
+            dashboard = load_dashboard(dashboard_id)
+        except Exception:
+            return None
+        raw = dashboard.model_dump(mode="json")
+        browser_cards = raw.get("layout", {}).get("browser_cards", {})
+
+        lines = [
+            "<browser_agent_instructions>",
+            "You have access to browser automation through the BrowserAgent and BrowserAgents tools.",
+            "",
+            "- **BrowserAgent(task, browser_id?, url?)**: Delegate a single browser task to a dedicated browser agent. "
+            "The browser agent will autonomously navigate, click, type, and interact with the page, then return a summary and screenshot.",
+            "- **BrowserAgents(tasks)**: Run multiple browser tasks in parallel, each on a different browser.",
+            "",
+            "You do NOT have direct access to low-level browser tools (click, type, screenshot, etc.). "
+            "Instead, describe what you want accomplished and the browser agent will handle the details.",
+            "",
+            "If you omit browser_id, a new browser card will be auto-created. "
+            "If you provide a url without a browser_id, the new browser navigates there first.",
+        ]
+
+        if browser_cards:
+            lines.append("")
+            lines.append("Available browser cards on the dashboard:")
+            for card in browser_cards.values():
+                bid = card.get("browser_id", "")
+                tabs = card.get("tabs", [])
+                active_tab_id = card.get("activeTabId", "")
+                active_tab = next((t for t in tabs if t.get("id") == active_tab_id), None)
+                url = (active_tab or {}).get("url", card.get("url", ""))
+                title = (active_tab or {}).get("title", "")
+                lines.append(f"- browser_id: \"{bid}\"")
+                if title:
+                    lines.append(f"  Title: {title}")
+                if url:
+                    lines.append(f"  URL: {url}")
+
+        lines.append("</browser_agent_instructions>")
+        return "\n".join(lines)
+
+    def _get_pre_selected_browser_ids(self, dashboard_id: str | None) -> list[str]:
+        """Return browser_ids of all browser cards currently on the dashboard."""
+        if not dashboard_id:
+            return []
+        try:
+            from backend.apps.dashboards.dashboards import _load as load_dashboard
+            dashboard = load_dashboard(dashboard_id)
+        except Exception:
+            return []
+        raw = dashboard.model_dump(mode="json")
+        browser_cards = raw.get("layout", {}).get("browser_cards", {})
+        return [card.get("browser_id", "") for card in browser_cards.values() if card.get("browser_id")]
+
+    def _compose_system_prompt(self, default_prompt: str | None, mode_prompt: str | None, session_prompt: str | None, connected_tools_ctx: str | None = None, outputs_ctx: str | None = None, browser_ctx: str | None = None) -> str | None:
+        parts = [p for p in (default_prompt, mode_prompt, session_prompt, connected_tools_ctx, outputs_ctx, browser_ctx) if p]
         return "\n\n".join(parts) if parts else None
 
     async def launch_agent(self, config: AgentConfig) -> AgentSession:
@@ -543,19 +602,26 @@ class AgentManager:
             _, mode_sys_prompt, _ = self._resolve_mode(session.mode)
             connected_tools_ctx = self._build_connected_tools_context(session.allowed_tools)
             outputs_ctx = self._build_outputs_context()
+            browser_ctx = self._build_browser_context(session.dashboard_id)
             global_settings = load_settings()
-            composed_prompt = self._compose_system_prompt(global_settings.default_system_prompt, mode_sys_prompt, session.system_prompt, connected_tools_ctx, outputs_ctx)
+            composed_prompt = self._compose_system_prompt(global_settings.default_system_prompt, mode_sys_prompt, session.system_prompt, connected_tools_ctx, outputs_ctx, browser_ctx)
 
             mcp_servers = await self._build_mcp_servers(session.allowed_tools)
 
-            browser_server_path = os.path.join(
-                os.path.dirname(__file__), "browser_mcp_server.py"
+            browser_agent_server_path = os.path.join(
+                os.path.dirname(__file__), "browser_agent_mcp_server.py"
             )
             backend_port = os.environ.get("OPENSWARM_PORT", "8324")
-            mcp_servers["openswarm-browser"] = {
+            pre_selected_bids = self._get_pre_selected_browser_ids(session.dashboard_id)
+            mcp_servers["openswarm-browser-agent"] = {
                 "command": sys.executable,
-                "args": [browser_server_path],
-                "env": {"OPENSWARM_PORT": backend_port},
+                "args": [browser_agent_server_path],
+                "env": {
+                    "OPENSWARM_PORT": backend_port,
+                    "OPENSWARM_AGENT_MODEL": session.model,
+                    "OPENSWARM_DASHBOARD_ID": session.dashboard_id or "",
+                    "OPENSWARM_PRE_SELECTED_BROWSER_IDS": ",".join(pre_selected_bids),
+                },
                 "type": "stdio",
             }
 
@@ -581,10 +647,11 @@ class AgentManager:
                     else:
                         effective_allowed.append(f"mcp__{name}__*")
 
-            effective_allowed.append("mcp__openswarm-browser__*")
+            effective_allowed.append("mcp__openswarm-browser-agent__*")
 
             options_kwargs = {
                 "model": session.model,
+                "max_buffer_size": 5 * 1024 * 1024,
                 "can_use_tool": can_use_tool,
                 "hooks": {
                     "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_hook])],

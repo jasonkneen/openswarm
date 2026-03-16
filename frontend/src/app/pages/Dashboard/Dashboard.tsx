@@ -2,13 +2,12 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import DashboardIcon from '@mui/icons-material/Dashboard';
+import DashboardHeader from './DashboardHeader';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { store } from '@/shared/state/store';
 import {
   fetchSessions,
   fetchHistory,
-  collapseAllSessions,
   collapseSession,
   launchAndSendFirstMessage,
   generateTitle,
@@ -25,9 +24,11 @@ import {
   addBrowserCard,
   moveCards,
   resetLayout,
+  setGlowingBrowserCards,
+  EXPANDED_CARD_MIN_H,
 } from '@/shared/state/dashboardLayoutSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
-import { generateDashboardName } from '@/shared/state/dashboardsSlice';
+import { generateDashboardName, updateDashboardThumbnail } from '@/shared/state/dashboardsSlice';
 import { dashboardWs } from '@/shared/ws/WebSocketManager';
 import { initBrowserCommandHandler } from '@/shared/browserCommandHandler';
 import AgentCard from './AgentCard';
@@ -35,12 +36,13 @@ import DashboardViewCard from './DashboardViewCard';
 import BrowserCard from './BrowserCard';
 import CanvasControls from './CanvasControls';
 import DashboardToolbar from './DashboardToolbar';
+import { captureDashboardThumbnail } from './captureDashboardThumbnail';
 import { useCanvasControls } from './useCanvasControls';
 import { useDashboardSelection } from './useDashboardSelection';
 import type { CardType } from './useDashboardSelection';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import type { ContextPath } from '@/app/components/DirectoryBrowser';
-import { ElementSelectionProvider } from '@/app/components/ElementSelectionContext';
+import { ElementSelectionProvider, useElementSelection } from '@/app/components/ElementSelectionContext';
 import { useDomElementSelector } from '@/app/components/useDomElementSelector';
 import SelectionOverlay from '@/app/components/SelectionOverlay';
 
@@ -64,6 +66,8 @@ const DashboardInner: React.FC = () => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
   const { id: dashboardId } = useParams<{ id: string }>();
+  const elementSelectionCtx = useElementSelection();
+  const isElementSelectMode = elementSelectionCtx?.selectMode ?? false;
   const dashboardName = useAppSelector((state) =>
     dashboardId ? state.dashboards.items[dashboardId]?.name : undefined,
   );
@@ -90,9 +94,23 @@ const DashboardInner: React.FC = () => {
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   const [toolbarOpen, setToolbarOpen] = useState(false);
+  const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleHighlightCard = useCallback((cardId: string) => {
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    setHighlightedCardId(cardId);
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedCardId(null);
+      highlightTimerRef.current = null;
+    }, 2000);
+  }, []);
+
   const spawnOriginsRef = useRef<Record<string, { x: number; y: number }>>({});
   const hasFittedRef = useRef(false);
   const restoredExpandedRef = useRef(false);
+  const canvasStateRef = useRef({ panX: canvas.panX, panY: canvas.panY, zoom: canvas.zoom });
+  canvasStateRef.current = { panX: canvas.panX, panY: canvas.panY, zoom: canvas.zoom };
 
   // ---- Multi-drag coordination ----
   const [multiDragDelta, setMultiDragDelta] = useState<{ dx: number; dy: number } | null>(null);
@@ -142,12 +160,21 @@ const DashboardInner: React.FC = () => {
     if (e.button !== 0) return;
     if (isCardTarget(e.target, e.currentTarget)) return;
 
+    if (isElementSelectMode) {
+      // Cmd/Ctrl held → allow panning even in element select mode
+      if (e.metaKey || e.ctrlKey) {
+        canvas.handlers.onMouseDown(e);
+      }
+      return;
+    }
+
     if (e.metaKey || e.ctrlKey || canvas.spaceHeld) {
       selection.handleCanvasMouseDown(e.nativeEvent);
     } else {
+      selection.deselectAll();
       canvas.handlers.onMouseDown(e);
     }
-  }, [canvas, selection]);
+  }, [canvas.handlers, canvas.spaceHeld, selection, isElementSelectMode]);
 
   const handleViewportMouseMove = useCallback((e: React.MouseEvent) => {
     canvas.handlers.onMouseMove(e);
@@ -173,6 +200,51 @@ const DashboardInner: React.FC = () => {
     return () => { cleanupBrowserHandler(); dashboardWs.disconnect(); };
   }, [dispatch, dashboardId]);
 
+  // Capture a thumbnail screenshot of the dashboard.
+  // Uses Electron's native capturePage for pixel-perfect results.
+  // Captures current viewport as-is (no DOM mutation) to avoid visual flashes.
+  // Re-captures when layout is saved (piggybacking on the save debounce).
+  const pendingThumbnailRef = useRef<string | null>(null);
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureNow = useCallback(() => {
+    const viewportEl = canvas.viewportRef.current;
+    const contentEl = canvas.contentRef.current;
+    if (!viewportEl || !contentEl) return;
+    const layoutState = store.getState().dashboardLayout;
+    const allCards = {
+      cards: layoutState.cards,
+      viewCards: layoutState.viewCards,
+      browserCards: layoutState.browserCards,
+    };
+    const hasCards = Object.keys(allCards.cards).length > 0
+      || Object.keys(allCards.viewCards).length > 0
+      || Object.keys(allCards.browserCards).length > 0;
+    if (!hasCards) return;
+    captureDashboardThumbnail(viewportEl, contentEl, allCards)
+      .then((thumbnail) => { if (thumbnail) pendingThumbnailRef.current = thumbnail; })
+      .catch(() => {});
+  }, [canvas.viewportRef, canvas.contentRef]);
+
+  useEffect(() => {
+    if (!dashboardId || !layoutInitialized) return;
+    if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+    captureTimerRef.current = setTimeout(captureNow, 2000);
+    return () => { if (captureTimerRef.current) clearTimeout(captureTimerRef.current); };
+  }, [dashboardId, layoutInitialized, captureNow]);
+
+  // On exit, save the captured thumbnail to the backend
+  useEffect(() => {
+    if (!dashboardId) return;
+    const exitingId = dashboardId;
+    return () => {
+      const thumbnail = pendingThumbnailRef.current;
+      if (thumbnail) {
+        store.dispatch(updateDashboardThumbnail({ id: exitingId, thumbnail }));
+        pendingThumbnailRef.current = null;
+      }
+    };
+  }, [dashboardId]);
+
   useEffect(() => {
     if (!layoutInitialized || hasFittedRef.current) return;
     hasFittedRef.current = true;
@@ -183,9 +255,7 @@ const DashboardInner: React.FC = () => {
   useEffect(() => {
     if (!layoutInitialized || restoredExpandedRef.current) return;
     restoredExpandedRef.current = true;
-    if (persistedExpandedSessionIds.length > 0) {
-      dispatch(setExpandedSessionIds(persistedExpandedSessionIds));
-    }
+    dispatch(setExpandedSessionIds(persistedExpandedSessionIds));
   }, [layoutInitialized, persistedExpandedSessionIds, dispatch]);
 
   const prevSessionIdsRef = useRef<string>('');
@@ -193,27 +263,47 @@ const DashboardInner: React.FC = () => {
   useEffect(() => {
     if (!layoutInitialized) return;
     const dashboardSessionIds = Object.values(sessions)
-      .filter((s) => s.dashboard_id === dashboardId)
+      .filter((s) => s.dashboard_id === dashboardId && s.mode !== 'browser-agent')
       .map((s) => s.id);
     const liveIds = dashboardSessionIds.sort().join(',');
     if (liveIds === prevSessionIdsRef.current) return;
     prevSessionIdsRef.current = liveIds;
-    dispatch(reconcileSessions(dashboardSessionIds));
-  }, [sessions, layoutInitialized, dispatch, dashboardId]);
+    dispatch(reconcileSessions({ sessionIds: dashboardSessionIds, expandedSessionIds }));
+  }, [sessions, layoutInitialized, dispatch, dashboardId, expandedSessionIds]);
 
-  const cardsJson = JSON.stringify(cards);
-  const viewCardsJson = JSON.stringify(viewCards);
-  const browserCardsJson = JSON.stringify(browserCards);
-  const expandedJson = JSON.stringify(expandedSessionIds);
   const skipInitialSave = useRef(true);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<Parameters<typeof saveLayout>[0] | null>(null);
+
   useEffect(() => {
     if (!layoutInitialized || !dashboardId) return;
     if (skipInitialSave.current) {
       skipInitialSave.current = false;
       return;
     }
-    dispatch(saveLayout({ dashboardId, cards, viewCards, browserCards, expandedSessionIds }));
-  }, [cardsJson, viewCardsJson, browserCardsJson, expandedJson, layoutInitialized, dashboardId]);
+    const payload = { dashboardId, cards, viewCards, browserCards, expandedSessionIds };
+    pendingSaveRef.current = payload;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      dispatch(saveLayout(payload));
+      pendingSaveRef.current = null;
+      saveTimerRef.current = null;
+      captureNow();
+    }, 500);
+  }, [cards, viewCards, browserCards, expandedSessionIds, layoutInitialized, dashboardId, dispatch, captureNow]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (pendingSaveRef.current) {
+        dispatch(saveLayout(pendingSaveRef.current));
+        pendingSaveRef.current = null;
+      }
+    };
+  }, [dispatch]);
 
   useEffect(() => {
     const parts = newAgentShortcut.toLowerCase().split('+');
@@ -253,6 +343,7 @@ const DashboardInner: React.FC = () => {
       contextPaths?: ContextPath[],
       forcedTools?: string[],
       attachedSkills?: Array<{ id: string; name: string; content: string }>,
+      selectedBrowserIds?: string[],
     ) => {
       setToolbarOpen(false);
 
@@ -265,9 +356,10 @@ const DashboardInner: React.FC = () => {
         const vr = vpEl.getBoundingClientRect();
         const toolbarCenterX = tr.left + tr.width / 2;
         const toolbarTopY = tr.top;
+        const { panX, panY, zoom } = canvasStateRef.current;
         spawnOriginsRef.current[draftId] = {
-          x: (toolbarCenterX - vr.left - canvas.panX) / canvas.zoom,
-          y: (toolbarTopY - vr.top - canvas.panY) / canvas.zoom,
+          x: (toolbarCenterX - vr.left - panX) / zoom,
+          y: (toolbarTopY - vr.top - panY) / zoom,
         };
       }
 
@@ -290,6 +382,9 @@ const DashboardInner: React.FC = () => {
         if (launchAndSendFirstMessage.fulfilled.match(action)) {
           const realId = action.payload.session.id;
           dispatch(generateTitle({ sessionId: realId, prompt }));
+          if (selectedBrowserIds?.length) {
+            dispatch(setGlowingBrowserCards({ browserIds: selectedBrowserIds, sessionId: realId }));
+          }
           spawnOriginsRef.current[realId] = spawnOriginsRef.current[draftId];
           delete spawnOriginsRef.current[draftId];
 
@@ -313,16 +408,16 @@ const DashboardInner: React.FC = () => {
         }
       });
     },
-    [canvas.zoom, canvas.panX, canvas.panY, canvas.viewportRef, dispatch, dashboardId],
+    [canvas.viewportRef, dispatch, dashboardId],
   );
 
   const handleAddView = useCallback((outputId: string) => {
-    dispatch(addViewCard({ outputId }));
-  }, [dispatch]);
+    dispatch(addViewCard({ outputId, expandedSessionIds }));
+  }, [dispatch, expandedSessionIds]);
 
   const handleAddBrowser = useCallback(() => {
-    dispatch(addBrowserCard({ url: browserHomepage }));
-  }, [dispatch, browserHomepage]);
+    dispatch(addBrowserCard({ url: browserHomepage, expandedSessionIds }));
+  }, [dispatch, browserHomepage, expandedSessionIds]);
 
   const handleHistoryResume = useCallback((sessionId: string) => {
     dispatch(resumeSession({ sessionId })).then((action) => {
@@ -333,19 +428,21 @@ const DashboardInner: React.FC = () => {
   }, [dispatch]);
 
   const handleTidy = useCallback(() => {
-    dispatch(collapseAllSessions());
-    dispatch(tidyLayout());
+    const currentExpanded = store.getState().agents.expandedSessionIds;
+    dispatch(tidyLayout({ expandedSessionIds: currentExpanded }));
 
+    const expandedSet = new Set(currentExpanded);
     const { cards: tidied, viewCards: tidiedViews, browserCards: tidiedBrowsers } = store.getState().dashboardLayout;
     const allRects = [
-      ...Object.values(tidied).map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
+      ...Object.values(tidied).map((c) => ({
+        x: c.x, y: c.y, width: c.width,
+        height: expandedSet.has(c.session_id) ? Math.max(EXPANDED_CARD_MIN_H, c.height) : c.height,
+      })),
       ...Object.values(tidiedViews).map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
       ...Object.values(tidiedBrowsers).map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
     ];
     canvas.actions.fitToCards(allRects);
   }, [dispatch, canvas.actions]);
-
-  const nonDraftCount = sessionList.filter((s) => s.status !== 'draft' && s.dashboard_id === dashboardId).length;
 
   const dotSize = Math.max(1, 1.5 * canvas.zoom);
   const dotSpacing = 24 * canvas.zoom;
@@ -369,35 +466,17 @@ const DashboardInner: React.FC = () => {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', pointerEvents: 'auto' }}>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              bgcolor: c.bg.surface,
-              border: `1px solid ${c.border.medium}`,
-              borderRadius: `${c.radius.lg}px`,
-              boxShadow: c.shadow.sm,
-              py: 0.75,
-              px: 1.5,
-            }}
-          >
-            <DashboardIcon sx={{ fontSize: 'small', color: c.accent.primary }} />
-            <Typography
-              sx={{
-                fontSize: '0.9rem',
-                fontWeight: 600,
-                color: c.text.primary,
-                lineHeight: 1,
-              }}
-            >
-              {dashboardName || 'Dashboard'}
-              <Box component="span" sx={{ color: c.text.muted, fontWeight: 400, mx: 0.75 }}>·</Box>
-              <Box component="span" sx={{ color: c.text.tertiary, fontWeight: 400 }}>
-                {nonDraftCount} agent{nonDraftCount !== 1 ? 's' : ''} running
-              </Box>
-            </Typography>
-          </Box>
+          <DashboardHeader
+            dashboardName={dashboardName}
+            sessions={sessions}
+            cards={cards}
+            viewCards={viewCards}
+            browserCards={browserCards}
+            outputs={outputs}
+            dashboardId={dashboardId}
+            canvasActions={canvas.actions}
+            onHighlightCard={handleHighlightCard}
+          />
         </Box>
       </Box>
 
@@ -478,6 +557,7 @@ const DashboardInner: React.FC = () => {
                   zoom={canvas.zoom}
                   spawnFrom={origin}
                   isSelected={selection.isSelected(session.id)}
+                  isHighlighted={highlightedCardId === session.id}
                   multiDragDelta={multiDragDelta}
                   onCardSelect={handleCardSelect}
                   onDragStart={handleCardDragStart}
@@ -499,6 +579,7 @@ const DashboardInner: React.FC = () => {
                   cardHeight={vc.height}
                   zoom={canvas.zoom}
                   isSelected={selection.isSelected(vc.output_id)}
+                  isHighlighted={highlightedCardId === vc.output_id}
                   multiDragDelta={multiDragDelta}
                   onCardSelect={handleCardSelect}
                   onDragStart={handleCardDragStart}
@@ -511,13 +592,15 @@ const DashboardInner: React.FC = () => {
               <BrowserCard
                 key={`browser-${bc.browser_id}`}
                 browserId={bc.browser_id}
-                url={bc.url}
+                tabs={bc.tabs}
+                activeTabId={bc.activeTabId}
                 cardX={bc.x}
                 cardY={bc.y}
                 cardWidth={bc.width}
                 cardHeight={bc.height}
                 zoom={canvas.zoom}
                 isSelected={selection.isSelected(bc.browser_id)}
+                isHighlighted={highlightedCardId === bc.browser_id}
                 multiDragDelta={multiDragDelta}
                 onCardSelect={handleCardSelect}
                 onDragStart={handleCardDragStart}

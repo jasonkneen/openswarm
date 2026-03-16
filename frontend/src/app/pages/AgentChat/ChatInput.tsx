@@ -60,7 +60,7 @@ export interface ForcedToolGroup {
 export type { AttachedSkill } from '@/app/components/richEditorUtils';
 
 interface Props {
-  onSend: (message: string, images?: Array<{ data: string; media_type: string }>, contextPaths?: ContextPath[], forcedTools?: string[], attachedSkills?: Array<{ id: string; name: string; content: string }>) => void;
+  onSend: (message: string, images?: Array<{ data: string; media_type: string }>, contextPaths?: ContextPath[], forcedTools?: string[], attachedSkills?: Array<{ id: string; name: string; content: string }>, selectedBrowserIds?: string[]) => void;
   disabled?: boolean;
   mode: string;
   onModeChange: (mode: string) => void;
@@ -293,41 +293,19 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
 
         if (el.semanticType === 'browser-card' && el.semanticData?.selectId) {
           const wv = getWebview(el.semanticData.selectId as string);
-          if (wv) {
-            const url = el.semanticData.url || wv.getURL();
-            const title = el.semanticData.name || wv.getTitle();
-            lines.push(`${i + 1}. [Browser Card] ${title}`);
-            lines.push(`   ID: ${el.semanticData.selectId}`);
-            lines.push(`   URL: ${url}`);
-
-            try {
-              const nativeImage = await wv.capturePage();
-              const dataUrl = nativeImage.toDataURL();
-              const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-              allImages.push({ data: base64, media_type: 'image/png' });
-              lines.push(`   [Screenshot captured and attached as image]`);
-            } catch { /* screenshot unavailable */ }
-
-            try {
-              const pageText: string = await wv.executeJavaScript(
-                'document.body.innerText.substring(0, 15000)'
-              );
-              if (pageText?.trim()) {
-                lines.push(`   Page text content:\n   ---\n${pageText.trim().split('\n').map(l => '   ' + l).join('\n')}\n   ---`);
-              }
-            } catch { /* text extraction unavailable */ }
-          } else {
-            lines.push(`${i + 1}. [Browser Card] ${el.semanticLabel || ''}`);
-            if (el.semanticData.selectId) lines.push(`   ID: ${el.semanticData.selectId}`);
-            if (el.semanticData.url) lines.push(`   URL: ${el.semanticData.url}`);
-          }
+          const url = wv ? (el.semanticData.url || wv.getURL()) : (el.semanticData.url || '');
+          const title = wv ? (el.semanticData.name || wv.getTitle()) : (el.semanticLabel || '');
+          lines.push(`${i + 1}. [Browser Card] ${title}`);
+          lines.push(`   browser_id: ${el.semanticData.selectId}`);
+          if (url) lines.push(`   URL: ${url}`);
+          lines.push(`   (Use BrowserAgent with this browser_id to interact with it)`);
         } else if (el.semanticType && el.semanticData) {
           const typeLabel = {
             'agent-card': 'Agent Card',
             'message': 'Message',
             'tool-call': 'Tool Call',
             'tool-group': 'Tool Group',
-            'view-card': 'View Card',
+            'view-card': 'App Card',
             'browser-card': 'Browser Card',
             'dom-element': 'Element',
           }[el.semanticType] || el.semanticType;
@@ -364,12 +342,16 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     const sendSkills = currentSkills.length > 0
       ? currentSkills.map((s) => ({ id: s.id, name: s.name, content: s.content }))
       : undefined;
+    const browserIds = selectedEls
+      .filter((el) => el.semanticType === 'browser-card' && el.semanticData?.selectId)
+      .map((el) => el.semanticData!.selectId as string);
     onSend(
       trimmed,
       sendImages,
       contextPaths.length > 0 ? contextPaths : undefined,
       allForcedToolNames.length > 0 ? allForcedToolNames : undefined,
       sendSkills,
+      browserIds.length > 0 ? browserIds : undefined,
     );
     editor.innerHTML = '';
     setImages([]);

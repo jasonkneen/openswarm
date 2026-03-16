@@ -1,0 +1,464 @@
+"""
+Browser sub-agent runner.
+
+Provides a lightweight Anthropic API tool-use loop that drives browser
+interactions directly through ws_manager (no MCP subprocess needed).
+Sub-agents appear as visible AgentSession cards on the dashboard.
+"""
+
+import asyncio
+import json
+import logging
+import time
+from datetime import datetime
+from uuid import uuid4
+
+import anthropic
+
+from backend.apps.agents.models import AgentSession, Message
+from backend.apps.agents.ws_manager import ws_manager
+
+logger = logging.getLogger(__name__)
+
+MODEL_MAP = {
+    "sonnet": "claude-sonnet-4-20250514",
+    "opus": "claude-opus-4-20250514",
+    "haiku": "claude-haiku-4-20250414",
+}
+
+BROWSER_TOOLS_SCHEMA = [
+    {
+        "name": "BrowserScreenshot",
+        "description": (
+            "Capture a screenshot of the browser page. Returns the screenshot as a "
+            "base64-encoded PNG image. Use this to see what is currently displayed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "BrowserGetText",
+        "description": (
+            "Get the visible text content of the browser page. Returns up to 15000 characters."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "BrowserNavigate",
+        "description": "Navigate the browser to a URL.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to navigate to."},
+            },
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "BrowserClick",
+        "description": "Click an element identified by a CSS selector. Use BrowserGetElements first to discover valid selectors.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS selector of the element to click."},
+            },
+            "required": ["selector"],
+        },
+    },
+    {
+        "name": "BrowserType",
+        "description": "Type text into an input element. Clears existing value first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS selector of the input element."},
+                "text": {"type": "string", "description": "The text to type."},
+            },
+            "required": ["selector", "text"],
+        },
+    },
+    {
+        "name": "BrowserEvaluate",
+        "description": "Evaluate a JavaScript expression in the browser page and return the result.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "JavaScript expression to evaluate."},
+            },
+            "required": ["expression"],
+        },
+    },
+    {
+        "name": "BrowserGetElements",
+        "description": (
+            "Get a list of interactive elements on the page with CSS selectors. "
+            "Call this BEFORE clicking or typing so you know which selectors are valid."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": "Optional CSS selector to scope the search (e.g. 'form', '#main'). Defaults to 'body'.",
+                },
+            },
+            "required": [],
+        },
+    },
+]
+
+ACTION_MAP = {
+    "BrowserScreenshot": "screenshot",
+    "BrowserGetText": "get_text",
+    "BrowserNavigate": "navigate",
+    "BrowserClick": "click",
+    "BrowserType": "type",
+    "BrowserEvaluate": "evaluate",
+    "BrowserGetElements": "get_elements",
+}
+
+SYSTEM_PROMPT = (
+    "You are a browser automation agent. You control a single browser tab and "
+    "execute the task you are given.\n\n"
+    "Strategy:\n"
+    "1. Start by taking a screenshot or calling BrowserGetElements to understand the page.\n"
+    "2. Use BrowserGetElements BEFORE clicking or typing to discover valid CSS selectors.\n"
+    "3. After performing actions, take a screenshot to verify the result.\n"
+    "4. If an action fails, try alternative selectors or approaches.\n"
+    "5. When the task is complete, provide a clear summary of what you accomplished.\n\n"
+    "You have access ONLY to browser tools. Do not ask the user questions — "
+    "complete the task autonomously to the best of your ability."
+)
+
+MAX_TURNS = 25
+
+
+async def execute_browser_tool(
+    tool_name: str, tool_input: dict, browser_id: str, tab_id: str = "",
+) -> dict:
+    """Execute a browser tool via ws_manager directly (no MCP/HTTP round-trip)."""
+    action = ACTION_MAP.get(tool_name)
+    if not action:
+        return {"error": f"Unknown browser tool: {tool_name}"}
+
+    params = {k: v for k, v in tool_input.items()}
+    request_id = uuid4().hex
+    result = await ws_manager.send_browser_command(
+        request_id, action, browser_id, params, tab_id=tab_id,
+    )
+    return result
+
+
+def _format_tool_result(result: dict, tool_name: str) -> list[dict]:
+    """Convert a browser command result dict into Anthropic API content blocks."""
+    if "error" in result:
+        return [{"type": "text", "text": f"Error: {result['error']}"}]
+
+    if tool_name == "BrowserScreenshot" and result.get("image"):
+        blocks = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": result["image"],
+                },
+            },
+            {"type": "text", "text": f"Screenshot captured. URL: {result.get('url', 'unknown')}"},
+        ]
+        return blocks
+
+    text = result.get("text", json.dumps(result))
+    return [{"type": "text", "text": str(text)}]
+
+
+async def run_browser_agent(
+    task: str,
+    browser_id: str,
+    model: str,
+    api_key: str,
+    dashboard_id: str | None = None,
+    tab_id: str = "",
+    pre_selected: bool = False,
+    initial_url: str | None = None,
+) -> dict:
+    """Run a browser sub-agent loop for a single browser card.
+
+    Creates a visible AgentSession, streams progress via WebSocket,
+    and returns the full action log + summary + final screenshot.
+    """
+    from backend.apps.agents.agent_manager import agent_manager
+
+    session_id = uuid4().hex
+    session = AgentSession(
+        id=session_id,
+        name=f"Browser Agent",
+        model=model,
+        mode="browser-agent",
+        status="running",
+        dashboard_id=dashboard_id,
+        browser_id=browser_id,
+        system_prompt=SYSTEM_PROMPT,
+    )
+    agent_manager.sessions[session_id] = session
+
+    await ws_manager.send_to_session(session_id, "agent:status", {
+        "session_id": session_id,
+        "status": "running",
+        "session": session.model_dump(mode="json"),
+    })
+
+    if initial_url:
+        nav_result = await execute_browser_tool(
+            "BrowserNavigate", {"url": initial_url}, browser_id, tab_id,
+        )
+        logger.info(f"Browser agent {session_id}: navigated to {initial_url}: {nav_result.get('text', nav_result.get('error', ''))}")
+
+    api_model = MODEL_MAP.get(model, model)
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+
+    messages: list[dict] = [{"role": "user", "content": task}]
+    action_log: list[dict] = []
+    final_screenshot: str | None = None
+
+    user_msg = Message(role="user", content=task)
+    session.messages.append(user_msg)
+    await ws_manager.send_to_session(session_id, "agent:message", {
+        "session_id": session_id,
+        "message": user_msg.model_dump(mode="json"),
+    })
+
+    try:
+        for turn in range(MAX_TURNS):
+            response = await client.messages.create(
+                model=api_model,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                tools=BROWSER_TOOLS_SCHEMA,
+                messages=messages,
+            )
+
+            assistant_content = []
+            text_parts = []
+            tool_uses = []
+
+            for block in response.content:
+                if block.type == "text":
+                    text_parts.append(block.text)
+                    assistant_content.append({"type": "text", "text": block.text})
+                elif block.type == "tool_use":
+                    tool_uses.append(block)
+                    assistant_content.append({
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    })
+
+            if text_parts:
+                asst_msg = Message(
+                    role="assistant",
+                    content="\n".join(text_parts),
+                )
+                session.messages.append(asst_msg)
+                await ws_manager.send_to_session(session_id, "agent:message", {
+                    "session_id": session_id,
+                    "message": asst_msg.model_dump(mode="json"),
+                })
+
+            for tu in tool_uses:
+                tool_msg = Message(
+                    role="tool_call",
+                    content={"id": tu.id, "tool": tu.name, "input": tu.input},
+                )
+                session.messages.append(tool_msg)
+                await ws_manager.send_to_session(session_id, "agent:message", {
+                    "session_id": session_id,
+                    "message": tool_msg.model_dump(mode="json"),
+                })
+
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            if response.stop_reason != "tool_use":
+                break
+
+            tool_results = []
+            for tu in tool_uses:
+                start = time.time()
+                result = await execute_browser_tool(
+                    tu.name, tu.input, browser_id, tab_id,
+                )
+                elapsed_ms = int((time.time() - start) * 1000)
+
+                action_log.append({
+                    "tool": tu.name,
+                    "input": tu.input,
+                    "result_summary": result.get("text", result.get("error", ""))[:200],
+                    "elapsed_ms": elapsed_ms,
+                })
+
+                if tu.name == "BrowserScreenshot" and result.get("image"):
+                    final_screenshot = result["image"]
+
+                content_blocks = _format_tool_result(result, tu.name)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": content_blocks,
+                })
+
+                result_text = result.get("text", result.get("error", ""))
+                result_msg = Message(
+                    role="tool_result",
+                    content={"text": result_text, "tool_name": tu.name, "elapsed_ms": elapsed_ms},
+                )
+                session.messages.append(result_msg)
+                await ws_manager.send_to_session(session_id, "agent:message", {
+                    "session_id": session_id,
+                    "message": result_msg.model_dump(mode="json"),
+                })
+
+            messages.append({"role": "user", "content": tool_results})
+
+        summary_parts = text_parts if text_parts else ["Task completed."]
+        summary = "\n".join(summary_parts)
+
+        if not final_screenshot:
+            try:
+                ss_result = await execute_browser_tool(
+                    "BrowserScreenshot", {}, browser_id, tab_id,
+                )
+                if ss_result.get("image"):
+                    final_screenshot = ss_result["image"]
+            except Exception:
+                pass
+
+        session.status = "completed"
+        await ws_manager.send_to_session(session_id, "agent:status", {
+            "session_id": session_id,
+            "status": "completed",
+            "session": session.model_dump(mode="json"),
+        })
+
+        await asyncio.sleep(2.5)
+        try:
+            await agent_manager.close_session(session_id)
+        except Exception:
+            logger.warning(f"Failed to auto-close browser agent session {session_id}")
+
+        return {
+            "session_id": session_id,
+            "browser_id": browser_id,
+            "summary": summary,
+            "action_log": action_log,
+            "final_screenshot": final_screenshot,
+        }
+
+    except Exception as e:
+        logger.exception(f"Browser agent {session_id} error: {e}")
+        session.status = "error"
+        error_msg = Message(role="system", content=f"Error: {str(e)}")
+        session.messages.append(error_msg)
+        await ws_manager.send_to_session(session_id, "agent:message", {
+            "session_id": session_id,
+            "message": error_msg.model_dump(mode="json"),
+        })
+        await ws_manager.send_to_session(session_id, "agent:status", {
+            "session_id": session_id,
+            "status": "error",
+            "session": session.model_dump(mode="json"),
+        })
+
+        await asyncio.sleep(2.5)
+        try:
+            await agent_manager.close_session(session_id)
+        except Exception:
+            logger.warning(f"Failed to auto-close browser agent session {session_id} after error")
+
+        return {
+            "session_id": session_id,
+            "browser_id": browser_id,
+            "summary": f"Error: {str(e)}",
+            "action_log": action_log,
+            "final_screenshot": None,
+        }
+
+
+async def _create_browser_card(dashboard_id: str, url: str) -> str:
+    """Create a new browser card on the dashboard and return its browser_id."""
+    from backend.apps.dashboards.dashboards import _load, _save
+    from backend.apps.dashboards.models import BrowserCardPosition, BrowserTab
+
+    dashboard = _load(dashboard_id)
+    browser_id = f"browser-{uuid4().hex[:8]}"
+    tab_id = f"tab-{uuid4().hex[:8]}"
+    tab = BrowserTab(id=tab_id, url=url or "https://www.google.com", title="")
+    card = BrowserCardPosition(
+        browser_id=browser_id,
+        url=url or "https://www.google.com",
+        tabs=[tab],
+        activeTabId=tab_id,
+        x=40,
+        y=100,
+    )
+    dashboard.layout.browser_cards[browser_id] = card
+    dashboard.updated_at = datetime.now()
+    _save(dashboard)
+
+    await ws_manager.broadcast_global("dashboard:browser_card_added", {
+        "dashboard_id": dashboard_id,
+        "browser_card": card.model_dump(mode="json"),
+    })
+    return browser_id
+
+
+async def run_browser_agents(
+    tasks: list[dict],
+    model: str,
+    api_key: str,
+    dashboard_id: str | None = None,
+    pre_selected_browser_ids: list[str] | None = None,
+) -> list[dict]:
+    """Run multiple browser sub-agents in parallel.
+
+    Each task dict has: { browser_id (optional), task, url (optional) }
+    Returns a list of result dicts, one per task.
+    """
+    pre_selected = set(pre_selected_browser_ids or [])
+
+    async def _run_one(task_def: dict) -> dict:
+        browser_id = task_def.get("browser_id", "")
+        task_text = task_def.get("task", "")
+        url = task_def.get("url", "")
+
+        if not browser_id and dashboard_id:
+            browser_id = await _create_browser_card(dashboard_id, url)
+            await asyncio.sleep(2.0)
+
+        is_pre_selected = browser_id in pre_selected
+        return await run_browser_agent(
+            task=task_text,
+            browser_id=browser_id,
+            model=model,
+            api_key=api_key,
+            dashboard_id=dashboard_id,
+            pre_selected=is_pre_selected,
+            initial_url=url if url and browser_id not in pre_selected else None,
+        )
+
+    results = await asyncio.gather(*[_run_one(t) for t in tasks], return_exceptions=True)
+
+    final = []
+    for r in results:
+        if isinstance(r, Exception):
+            final.append({"summary": f"Error: {str(r)}", "action_log": [], "final_screenshot": None})
+        else:
+            final.append(r)
+    return final

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, RefObject } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, RefObject } from 'react';
 
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 3.0;
@@ -32,6 +32,8 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
   const [cmdHeld, setCmdHeld] = useState(false);
 
   const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const spaceRef = useRef(false);
   const cmdRef = useRef(false);
   const sensitivityRef = useRef(zoomSensitivity);
@@ -171,10 +173,10 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     panStartRef.current = {
       x: e.clientX,
       y: e.clientY,
-      panX: state.panX,
-      panY: state.panY,
+      panX: stateRef.current.panX,
+      panY: stateRef.current.panY,
     };
-  }, [state.panX, state.panY]);
+  }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const start = panStartRef.current;
@@ -274,7 +276,7 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     });
   }, []);
 
-  const fitToCards = useCallback((cardRects: Array<{ x: number; y: number; width: number; height: number }>) => {
+  const fitToCards = useCallback((cardRects: Array<{ x: number; y: number; width: number; height: number }>, maxZoom?: number) => {
     const viewport = viewportRef.current;
     if (!viewport || cardRects.length === 0) {
       setState({ panX: 0, panY: 0, zoom: 1 });
@@ -300,12 +302,23 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     const contentHeight = maxY - minY;
     const availW = vRect.width - FIT_PADDING * 2;
     const availH = vRect.height - FIT_PADDING * 2;
-    const newZoom = clamp(Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, MAX_ZOOM);
+    const ceiling = maxZoom ?? MAX_ZOOM;
+    const newZoom = clamp(Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, ceiling);
     const newPanX = (vRect.width - contentWidth * newZoom) / 2 - minX * newZoom;
     const newPanY = (vRect.height - contentHeight * newZoom) / 2 - minY * newZoom;
 
     setState({ panX: newPanX, panY: newPanY, zoom: newZoom });
   }, []);
+
+  const handlers = useMemo(() => ({
+    onMouseDown: handleMouseDown,
+    onMouseMove: handleMouseMove,
+    onMouseUp: handleMouseUp,
+  }), [handleMouseDown, handleMouseMove, handleMouseUp]);
+
+  const actions = useMemo(() => ({
+    zoomIn, zoomOut, resetZoom, fitToView, fitToCards,
+  }), [zoomIn, zoomOut, resetZoom, fitToView, fitToCards]);
 
   return {
     ...state,
@@ -314,12 +327,8 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     cmdHeld,
     viewportRef,
     contentRef,
-    handlers: {
-      onMouseDown: handleMouseDown,
-      onMouseMove: handleMouseMove,
-      onMouseUp: handleMouseUp,
-    },
-    actions: { zoomIn, zoomOut, resetZoom, fitToView, fitToCards },
+    handlers,
+    actions,
   } as const;
 }
 

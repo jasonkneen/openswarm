@@ -5,6 +5,9 @@ const SELECT_ATTR = 'data-select-type';
 const SELECT_ID_ATTR = 'data-select-id';
 const SELECT_META_ATTR = 'data-select-meta';
 
+const DRAG_SELECT_TYPES = ['agent-card', 'view-card', 'browser-card'] as const;
+const DRAG_SELECTOR = DRAG_SELECT_TYPES.map((t) => `[${SELECT_ATTR}="${t}"]`).join(',');
+
 export interface OverlayState {
   visible: boolean;
   top: number;
@@ -167,7 +170,7 @@ export function useDomElementSelector(): DomSelectorState {
         dragPreviewRafRef.current = requestAnimationFrame(() => {
           const b = dragBoundsRef.current;
           if (!b) return;
-          const allSelectables = document.querySelectorAll(`[${SELECT_ATTR}]`);
+          const allSelectables = document.querySelectorAll(DRAG_SELECTOR);
           const preview: DragPreviewElement[] = [];
           const seen = new Set<string>();
           const excId = excludeIdRef.current;
@@ -240,6 +243,7 @@ export function useDomElementSelector(): DomSelectorState {
 
   const handleMouseDown = useCallback((e: MouseEvent) => {
     if (e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey) return;
     const target = e.target as Element;
     // Only start drag on "empty" canvas areas (not on selectable elements)
     if (target && findSelectableAncestor(target, excludeIdRef.current)) return;
@@ -258,7 +262,7 @@ export function useDomElementSelector(): DomSelectorState {
         bottom: Math.max(dragOriginRef.current.y, e.clientY),
       };
 
-      const allSelectables = document.querySelectorAll(`[${SELECT_ATTR}]`);
+      const allSelectables = document.querySelectorAll(DRAG_SELECTOR);
       const processed = new Set<string>();
 
       const excId = excludeIdRef.current;
@@ -326,12 +330,16 @@ export function useDomElementSelector(): DomSelectorState {
       return;
     }
 
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+
     document.addEventListener('mousemove', handleMouseMove, true);
     document.addEventListener('mousedown', handleMouseDown, true);
     document.addEventListener('mouseup', handleMouseUp, true);
     document.addEventListener('click', handleClick, true);
 
     return () => {
+      document.body.style.userSelect = prevUserSelect;
       document.removeEventListener('mousemove', handleMouseMove, true);
       document.removeEventListener('mousedown', handleMouseDown, true);
       document.removeEventListener('mouseup', handleMouseUp, true);

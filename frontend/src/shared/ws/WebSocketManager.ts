@@ -15,6 +15,7 @@ import {
   setActiveBranch,
   closeSessionFromWs,
 } from '../state/agentsSlice';
+import { addBrowserCardFromBackend } from '../state/dashboardLayoutSlice';
 
 type WSEvent = {
   event: string;
@@ -228,6 +229,12 @@ class WebSocketManager {
             cost_usd: data.cost_usd ?? 0,
             dashboard_id: data.dashboard_id,
           }));
+        }
+        break;
+
+      case 'dashboard:browser_card_added':
+        if (data.browser_card) {
+          store.dispatch(addBrowserCardFromBackend(data.browser_card));
         }
         break;
     }
