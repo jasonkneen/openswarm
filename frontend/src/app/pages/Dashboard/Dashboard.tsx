@@ -29,6 +29,7 @@ import {
 import { fetchOutputs } from '@/shared/state/outputsSlice';
 import { generateDashboardName } from '@/shared/state/dashboardsSlice';
 import { dashboardWs } from '@/shared/ws/WebSocketManager';
+import { initBrowserCommandHandler } from '@/shared/browserCommandHandler';
 import AgentCard from './AgentCard';
 import DashboardViewCard from './DashboardViewCard';
 import BrowserCard from './BrowserCard';
@@ -168,7 +169,8 @@ const DashboardInner: React.FC = () => {
     dispatch(fetchLayout(dashboardId));
     dispatch(fetchOutputs());
     dashboardWs.connect();
-    return () => dashboardWs.disconnect();
+    const cleanupBrowserHandler = initBrowserCommandHandler();
+    return () => { cleanupBrowserHandler(); dashboardWs.disconnect(); };
   }, [dispatch, dashboardId]);
 
   useEffect(() => {

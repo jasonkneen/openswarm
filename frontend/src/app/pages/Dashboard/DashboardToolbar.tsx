@@ -202,10 +202,12 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
 
     const isExpanded = inputOpen || viewPickerOpen || historyOpen;
 
+    const prevInputOpenRef = useRef(inputOpen);
     useEffect(() => {
-      if (!inputOpen && elementSelection?.selectMode) {
+      if (prevInputOpenRef.current && !inputOpen && elementSelection?.selectMode) {
         elementSelection.setSelectMode(false);
       }
+      prevInputOpenRef.current = inputOpen;
     }, [inputOpen, elementSelection]);
 
     useEffect(() => {

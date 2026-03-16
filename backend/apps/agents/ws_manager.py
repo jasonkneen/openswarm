@@ -12,6 +12,7 @@ class ConnectionManager:
         self.connections: dict[str, list[WebSocket]] = {}
         self.global_connections: list[WebSocket] = []
         self.pending_futures: dict[str, asyncio.Future] = {}
+        self.browser_futures: dict[str, asyncio.Future] = {}
 
     async def connect_session(self, session_id: str, websocket: WebSocket):
         await websocket.accept()
@@ -84,5 +85,33 @@ class ConnectionManager:
         future = self.pending_futures.get(request_id)
         if future and not future.done():
             future.set_result(decision)
+
+    async def send_browser_command(
+        self, request_id: str, action: str, browser_id: str, params: dict
+    ) -> dict:
+        """Send a browser command to the frontend and wait for the result."""
+        future = asyncio.get_event_loop().create_future()
+        self.browser_futures[request_id] = future
+
+        await self.broadcast_global("browser:command", {
+            "request_id": request_id,
+            "action": action,
+            "browser_id": browser_id,
+            "params": params,
+        })
+
+        try:
+            result = await asyncio.wait_for(future, timeout=30.0)
+            return result
+        except asyncio.TimeoutError:
+            return {"error": "Browser command timed out"}
+        finally:
+            self.browser_futures.pop(request_id, None)
+
+    def resolve_browser_command(self, request_id: str, result: dict):
+        """Resolve a pending browser command Future with the frontend's result."""
+        future = self.browser_futures.get(request_id)
+        if future and not future.done():
+            future.set_result(result)
 
 ws_manager = ConnectionManager()

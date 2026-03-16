@@ -9,7 +9,7 @@ export interface SelectedElement {
   computedStyles: Record<string, string>;
   screenshot?: string;
   boundingRect: { x: number; y: number; width: number; height: number };
-  semanticType?: 'agent-card' | 'message' | 'tool-call' | 'tool-group' | 'view-card' | 'dom-element';
+  semanticType?: 'agent-card' | 'message' | 'tool-call' | 'tool-group' | 'view-card' | 'browser-card' | 'dom-element';
   semanticLabel?: string;
   semanticData?: Record<string, any>;
 }
@@ -18,6 +18,8 @@ interface ElementSelectionContextValue {
   selectMode: boolean;
   toggleSelectMode: () => void;
   setSelectMode: (active: boolean) => void;
+  excludeSelectId: string | null;
+  setExcludeSelectId: (id: string | null) => void;
   selectedElements: SelectedElement[];
   addSelectedElement: (el: SelectedElement) => void;
   updateSelectedElement: (id: string, patch: Partial<SelectedElement>) => void;
@@ -34,11 +36,15 @@ export function useElementSelection() {
 
 export const ElementSelectionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [selectMode, setSelectMode] = useState(false);
+  const [excludeSelectId, setExcludeSelectId] = useState<string | null>(null);
   const [selectedElements, setSelectedElements] = useState<SelectedElement[]>([]);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const toggleSelectMode = useCallback(() => {
-    setSelectMode((prev) => !prev);
+    setSelectMode((prev) => {
+      if (prev) setExcludeSelectId(null);
+      return !prev;
+    });
   }, []);
 
   const addSelectedElement = useCallback((el: SelectedElement) => {
@@ -66,6 +72,8 @@ export const ElementSelectionProvider: React.FC<{ children: React.ReactNode }> =
         selectMode,
         toggleSelectMode,
         setSelectMode,
+        excludeSelectId,
+        setExcludeSelectId,
         selectedElements,
         addSelectedElement,
         updateSelectedElement,

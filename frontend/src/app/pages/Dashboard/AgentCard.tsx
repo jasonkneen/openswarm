@@ -455,118 +455,129 @@ const AgentCard: React.FC<Props> = ({
         />
       ))}
 
-      {/* Header: always visible – entire bar is draggable */}
+      {/* Drag zone: header + metadata – entire region above separator is draggable */}
       <Box
         onPointerDown={handleDragPointerDown}
         onPointerMove={handleDragPointerMove}
         onPointerUp={handleDragPointerUp}
         sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          mb: 1,
-          flexShrink: 0,
+          mx: -2,
+          mt: -2,
+          px: 2,
+          pt: 2,
+          pb: 1.5,
           cursor: isDragging ? 'grabbing' : 'grab',
           touchAction: 'none',
+          userSelect: 'none',
+          flexShrink: 0,
         }}
       >
         <Box
-          className="drag-handle"
           sx={{
             display: 'flex',
             alignItems: 'center',
-            mr: 0.5,
-            color: c.text.ghost,
+            justifyContent: 'space-between',
+            mb: 1,
+            flexShrink: 0,
           }}
         >
-          <DragIndicatorIcon sx={{ fontSize: 16 }} />
-        </Box>
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            borderRadius: 1,
-          }}
-        >
-          <Typography sx={{ color: c.text.primary, fontWeight: 600, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {session.name}
-          </Typography>
-          <Chip
-            label={session.status.replace('_', ' ')}
-            size="small"
+          <Box
+            className="drag-handle"
             sx={{
-              bgcolor: statusStyle.bg,
-              color: statusStyle.color,
-              fontWeight: 600,
-              fontSize: '0.7rem',
-              height: 22,
-              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              mr: 0.5,
+              color: c.text.ghost,
             }}
-          />
+          >
+            <DragIndicatorIcon sx={{ fontSize: 16 }} />
+          </Box>
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              borderRadius: 1,
+            }}
+          >
+            <Typography sx={{ color: c.text.primary, fontWeight: 600, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {session.name}
+            </Typography>
+            <Chip
+              label={session.status.replace('_', ' ')}
+              size="small"
+              sx={{
+                bgcolor: statusStyle.bg,
+                color: statusStyle.color,
+                fontWeight: 600,
+                fontSize: '0.7rem',
+                height: 22,
+                flexShrink: 0,
+              }}
+            />
+          </Box>
+          <Box
+            onPointerDown={(e) => e.stopPropagation()}
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 0.5 }}
+          >
+            {expanded ? (
+              <Tooltip title="Collapse">
+                <IconButton
+                  size="small"
+                  onClick={handleCollapse}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    color: c.text.ghost,
+                    p: 0.5,
+                    '&:hover': { color: c.text.secondary, bgcolor: c.bg.secondary },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            ) : (
+              <Tooltip title={isDraft ? 'Remove' : 'Close chat'}>
+                <IconButton
+                  size="small"
+                  onClick={handleRemove}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    color: c.text.ghost,
+                    p: 0.5,
+                    '&:hover': { color: c.status.error, bgcolor: `${c.status.errorBg}` },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
         </Box>
-        <Box
-          onPointerDown={(e) => e.stopPropagation()}
-          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 0.5 }}
-        >
-          {expanded ? (
-            <Tooltip title="Collapse">
-              <IconButton
-                size="small"
-                onClick={handleCollapse}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{
-                  color: c.text.ghost,
-                  p: 0.5,
-                  '&:hover': { color: c.text.secondary, bgcolor: c.bg.secondary },
-                }}
-              >
-                <CloseIcon sx={{ fontSize: 16 }} />
-              </IconButton>
-            </Tooltip>
-          ) : (
-            <Tooltip title={isDraft ? 'Remove' : 'Close chat'}>
-              <IconButton
-                size="small"
-                onClick={handleRemove}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{
-                  color: c.text.ghost,
-                  p: 0.5,
-                  '&:hover': { color: c.status.error, bgcolor: `${c.status.errorBg}` },
-                }}
-              >
-                <CloseIcon sx={{ fontSize: 16 }} />
-              </IconButton>
-            </Tooltip>
+
+        {/* Metadata row */}
+        <Box sx={{
+          display: isDraft && !expanded ? 'none' : 'flex',
+          gap: 1.5,
+          flexShrink: 0,
+          ...(isDraft && { visibility: 'hidden' }),
+        }}>
+          <Typography variant="caption" sx={{ color: c.text.tertiary }}>
+            {session.model}
+          </Typography>
+          <Typography variant="caption" sx={{ color: c.text.tertiary }}>
+            {session.mode}
+          </Typography>
+          <Typography variant="caption" sx={{ color: c.text.tertiary }}>
+            {formatDuration(session.created_at)}
+          </Typography>
+          {session.cost_usd > 0 && (
+            <Typography variant="caption" sx={{ color: c.accent.primary }}>
+              ${session.cost_usd.toFixed(4)}
+            </Typography>
           )}
         </Box>
-      </Box>
-
-      {/* Metadata row */}
-      <Box sx={{
-        display: isDraft && !expanded ? 'none' : 'flex',
-        gap: 1.5,
-        mb: 1.5,
-        flexShrink: 0,
-        ...(isDraft && { visibility: 'hidden' }),
-      }}>
-        <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-          {session.model}
-        </Typography>
-        <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-          {session.mode}
-        </Typography>
-        <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-          {formatDuration(session.created_at)}
-        </Typography>
-        {session.cost_usd > 0 && (
-          <Typography variant="caption" sx={{ color: c.accent.primary }}>
-            ${session.cost_usd.toFixed(4)}
-          </Typography>
-        )}
       </Box>
 
       {/* Expanded: inline chat fills remaining space */}

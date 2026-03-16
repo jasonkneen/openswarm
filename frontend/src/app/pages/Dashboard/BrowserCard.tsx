@@ -5,12 +5,14 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import InputBase from '@mui/material/InputBase';
 import LinearProgress from '@mui/material/LinearProgress';
+import CircularProgress from '@mui/material/CircularProgress';
 import LanguageIcon from '@mui/icons-material/Language';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import LockIcon from '@mui/icons-material/Lock';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import {
   setBrowserCardPosition,
   setBrowserCardSize,
@@ -19,6 +21,9 @@ import {
 } from '@/shared/state/dashboardLayoutSlice';
 import { useAppDispatch } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
+import { registerWebview, unregisterWebview, type BrowserWebview } from '@/shared/browserRegistry';
+import { useBrowserActivity } from '@/shared/useBrowserActivity';
+import { getActionLabel } from '@/shared/browserCommandHandler';
 
 type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
@@ -45,19 +50,7 @@ const HANDLE_DEFS: { dir: ResizeDir; sx: Record<string, any> }[] = [
 
 const isElectron = navigator.userAgent.includes('Electron');
 
-interface WebviewElement extends HTMLElement {
-  src: string;
-  loadURL: (url: string) => Promise<void>;
-  goBack: () => void;
-  goForward: () => void;
-  reload: () => void;
-  canGoBack: () => boolean;
-  canGoForward: () => boolean;
-  getURL: () => string;
-  getTitle: () => string;
-  addEventListener: (event: string, listener: (...args: any[]) => void) => void;
-  removeEventListener: (event: string, listener: (...args: any[]) => void) => void;
-}
+type WebviewElement = BrowserWebview;
 
 interface Props {
   browserId: string;
@@ -89,6 +82,10 @@ const BrowserCard: React.FC<Props> = ({
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
   const webviewRef = useRef<WebviewElement | null>(null);
+  const activity = useBrowserActivity(browserId);
+  const agentActive = activity.active;
+  const agentAction = activity.action;
+  const lastAction = activity.lastAction;
 
   const [currentUrl, setCurrentUrl] = useState(url);
   const [urlBarValue, setUrlBarValue] = useState(url);
@@ -143,6 +140,14 @@ const BrowserCard: React.FC<Props> = ({
       wv.removeEventListener('new-window', onNewWindow);
     };
   }, [browserId, dispatch]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const wv = webviewRef.current;
+    if (!wv) return;
+    registerWebview(browserId, wv);
+    return () => { unregisterWebview(browserId); };
+  }, [browserId]);
 
   const navigate = useCallback((targetUrl: string) => {
     const finalUrl = ensureProtocol(targetUrl);
@@ -306,10 +311,26 @@ const BrowserCard: React.FC<Props> = ({
 
   const isSecure = currentUrl.startsWith('https://');
 
+  const accentColor = c.accent.primary;
+  const accentHover = c.accent.hover;
+
+  const agentBorder = agentActive
+    ? `2px solid ${accentColor}`
+    : isSelected ? '2px solid #3b82f6' : `1px solid ${c.border.medium}`;
+
+  const agentShadow = agentActive
+    ? `0 0 0 2px ${accentColor}40, 0 0 18px ${accentColor}30, 0 0 40px ${accentColor}15`
+    : isDragging || isResizing
+      ? c.shadow.lg
+      : isSelected
+        ? `0 0 0 1px #3b82f6, ${c.shadow.md}`
+        : c.shadow.md;
+
   return (
     <Box
       data-select-type="browser-card"
       data-select-id={browserId}
+      data-select-meta={JSON.stringify({ name: pageTitle || 'Browser', url: currentUrl })}
       onClick={(e: React.MouseEvent) => {
         if (justDraggedRef.current) return;
         onCardSelect?.(browserId, 'browser', e.shiftKey);
@@ -321,21 +342,49 @@ const BrowserCard: React.FC<Props> = ({
         width: displayW,
         height: displayH,
         borderRadius: `${c.radius.lg}px`,
-        border: isSelected ? '2px solid #3b82f6' : `1px solid ${c.border.medium}`,
+        border: agentBorder,
         bgcolor: c.bg.surface,
-        boxShadow: isDragging || isResizing
-          ? c.shadow.lg
-          : isSelected
-            ? `0 0 0 1px #3b82f6, ${c.shadow.md}`
-            : c.shadow.md,
+        boxShadow: agentShadow,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        zIndex: (isDragging || isResizing) ? 100 : 1,
-        transition: noTransition ? 'none' : 'box-shadow 0.2s',
+        zIndex: (isDragging || isResizing) ? 100 : agentActive ? 50 : 1,
+        transition: noTransition ? 'none' : 'box-shadow 0.4s ease, border 0.3s ease',
         '&:hover .resize-handle': { opacity: 1 },
+        ...(agentActive && {
+          animation: 'agent-glow-pulse 2s ease-in-out infinite',
+          '@keyframes agent-glow-pulse': {
+            '0%, 100%': {
+              boxShadow: `0 0 0 2px ${accentColor}40, 0 0 18px ${accentColor}30, 0 0 40px ${accentColor}15`,
+            },
+            '50%': {
+              boxShadow: `0 0 0 3px ${accentColor}60, 0 0 28px ${accentColor}45, 0 0 56px ${accentColor}25`,
+            },
+          },
+        }),
       }}
     >
+      {/* Animated border glow (top edge overlay) */}
+      {agentActive && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '2px',
+            zIndex: 20,
+            background: `linear-gradient(90deg, transparent, ${accentColor}, ${accentHover}, ${accentColor}, transparent)`,
+            backgroundSize: '200% 100%',
+            animation: 'border-shimmer 2s linear infinite',
+            '@keyframes border-shimmer': {
+              '0%': { backgroundPosition: '200% 0' },
+              '100%': { backgroundPosition: '-200% 0' },
+            },
+          }}
+        />
+      )}
+
       {/* Header / drag handle */}
       <Box
         onPointerDown={handleDragPointerDown}
@@ -347,12 +396,13 @@ const BrowserCard: React.FC<Props> = ({
           gap: 0.5,
           px: 1,
           py: 0.5,
-          bgcolor: c.bg.secondary,
-          borderBottom: `1px solid ${c.border.subtle}`,
+          bgcolor: agentActive ? `${accentColor}0a` : c.bg.secondary,
+          borderBottom: `1px solid ${agentActive ? `${accentColor}30` : c.border.subtle}`,
           cursor: isDragging ? 'grabbing' : 'grab',
           flexShrink: 0,
           minHeight: 36,
           userSelect: 'none',
+          transition: 'background 0.3s ease',
         }}
       >
         <LanguageIcon sx={{ fontSize: 16, color: c.accent.primary, flexShrink: 0 }} />
@@ -370,6 +420,44 @@ const BrowserCard: React.FC<Props> = ({
         >
           {pageTitle || 'Browser'}
         </Typography>
+
+        {/* Agent activity badge */}
+        {agentActive && (
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.5,
+              px: 0.75,
+              py: 0.25,
+              borderRadius: '6px',
+              bgcolor: `${accentColor}18`,
+              border: `1px solid ${accentColor}30`,
+              animation: 'badge-fade-in 0.25s ease-out',
+              '@keyframes badge-fade-in': {
+                '0%': { opacity: 0, transform: 'scale(0.85)' },
+                '100%': { opacity: 1, transform: 'scale(1)' },
+              },
+            }}
+          >
+            <Box
+              sx={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                bgcolor: accentColor,
+                animation: 'badge-dot-pulse 1.4s ease-in-out infinite',
+                '@keyframes badge-dot-pulse': {
+                  '0%, 100%': { opacity: 0.5, transform: 'scale(0.8)' },
+                  '50%': { opacity: 1, transform: 'scale(1.3)' },
+                },
+              }}
+            />
+            <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: accentColor, lineHeight: 1 }}>
+              AI
+            </Typography>
+          </Box>
+        )}
 
         <Tooltip title="Back" placement="top">
           <span>
@@ -457,14 +545,16 @@ const BrowserCard: React.FC<Props> = ({
         />
       </Box>
 
-      {/* Loading indicator */}
-      {loading && (
+      {/* Loading indicator — accent-colored when agent is navigating */}
+      {(loading || (agentActive && agentAction === 'navigate')) && (
         <LinearProgress
           sx={{
             height: 2,
             flexShrink: 0,
             bgcolor: 'transparent',
-            '& .MuiLinearProgress-bar': { bgcolor: c.accent.primary },
+            '& .MuiLinearProgress-bar': {
+              bgcolor: agentActive ? accentColor : c.accent.primary,
+            },
           }}
         />
       )}
@@ -502,6 +592,163 @@ const BrowserCard: React.FC<Props> = ({
             >
               <Typography sx={{ fontSize: '0.68rem', color: c.status.warning }}>
                 iframe mode — some sites may not load. Use the Electron build for full browser support.
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        {/* ===== Action micro-animations ===== */}
+
+        {/* Camera flash — screenshot */}
+        {(agentAction === 'screenshot' || lastAction === 'screenshot') && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              bgcolor: '#fff',
+              pointerEvents: 'none',
+              zIndex: 15,
+              animation: 'camera-flash 0.4s ease-out forwards',
+              '@keyframes camera-flash': {
+                '0%': { opacity: 0.45 },
+                '100%': { opacity: 0 },
+              },
+            }}
+          />
+        )}
+
+        {/* Scanning line — get_text */}
+        {agentAction === 'get_text' && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              height: '3px',
+              zIndex: 15,
+              pointerEvents: 'none',
+              background: `linear-gradient(180deg, transparent, ${accentColor}90, transparent)`,
+              boxShadow: `0 0 12px ${accentColor}60`,
+              animation: 'scan-sweep 1.5s ease-in-out infinite',
+              '@keyframes scan-sweep': {
+                '0%': { top: '0%' },
+                '100%': { top: '100%' },
+              },
+            }}
+          />
+        )}
+
+        {/* Click ripple */}
+        {(agentAction === 'click' || lastAction === 'click') && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              border: `2px solid ${accentColor}`,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              zIndex: 15,
+              animation: 'click-ripple 0.5s ease-out forwards',
+              '@keyframes click-ripple': {
+                '0%': { opacity: 0.8, width: 10, height: 10, borderWidth: '2px' },
+                '100%': { opacity: 0, width: 60, height: 60, borderWidth: '1px' },
+              },
+            }}
+          />
+        )}
+
+        {/* Typing indicator */}
+        {agentAction === 'type' && (
+          <Box
+            sx={{
+              position: 'absolute',
+              bottom: 8,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              gap: '4px',
+              alignItems: 'center',
+              px: 1,
+              py: 0.5,
+              borderRadius: '8px',
+              bgcolor: `${accentColor}20`,
+              border: `1px solid ${accentColor}40`,
+              zIndex: 15,
+              pointerEvents: 'none',
+            }}
+          >
+            {[0, 1, 2].map((i) => (
+              <Box
+                key={i}
+                sx={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  bgcolor: accentColor,
+                  animation: `typing-dot 1s ease-in-out ${i * 0.15}s infinite`,
+                  '@keyframes typing-dot': {
+                    '0%, 60%, 100%': { opacity: 0.3, transform: 'scale(0.8)' },
+                    '30%': { opacity: 1, transform: 'scale(1.2)' },
+                  },
+                }}
+              />
+            ))}
+          </Box>
+        )}
+
+        {/* ===== Frosted glass overlay ===== */}
+        {agentActive && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 16,
+              backdropFilter: 'blur(2px)',
+              bgcolor: 'rgba(0,0,0,0.15)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1.5,
+              animation: 'overlay-fade-in 0.25s ease-out',
+              '@keyframes overlay-fade-in': {
+                '0%': { opacity: 0 },
+                '100%': { opacity: 1 },
+              },
+            }}
+          >
+            <CircularProgress
+              size={28}
+              thickness={3}
+              sx={{ color: accentColor }}
+            />
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.75,
+                px: 1.5,
+                py: 0.75,
+                borderRadius: '10px',
+                bgcolor: 'rgba(0,0,0,0.55)',
+                backdropFilter: 'blur(8px)',
+                border: `1px solid ${accentColor}30`,
+              }}
+            >
+              <SmartToyOutlinedIcon sx={{ fontSize: 14, color: accentColor }} />
+              <Typography
+                sx={{
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: '#fff',
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {getActionLabel(agentAction ?? '')}
               </Typography>
             </Box>
           </Box>

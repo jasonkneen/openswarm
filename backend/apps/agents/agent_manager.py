@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from uuid import uuid4
@@ -547,6 +548,17 @@ class AgentManager:
 
             mcp_servers = await self._build_mcp_servers(session.allowed_tools)
 
+            browser_server_path = os.path.join(
+                os.path.dirname(__file__), "browser_mcp_server.py"
+            )
+            backend_port = os.environ.get("OPENSWARM_PORT", "8324")
+            mcp_servers["openswarm-browser"] = {
+                "command": sys.executable,
+                "args": [browser_server_path],
+                "env": {"OPENSWARM_PORT": backend_port},
+                "type": "stdio",
+            }
+
             effective_allowed = [
                 t for t in session.allowed_tools
                 if _builtin_perms.get(t, "always_allow") == "always_allow"
@@ -568,6 +580,8 @@ class AgentManager:
                                 effective_allowed.append(f"mcp__{name}__{tn}")
                     else:
                         effective_allowed.append(f"mcp__{name}__*")
+
+            effective_allowed.append("mcp__openswarm-browser__*")
 
             options_kwargs = {
                 "model": session.model,

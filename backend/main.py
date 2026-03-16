@@ -1,6 +1,8 @@
 import os
+from uuid import uuid4
 
 from fastapi.responses import JSONResponse
+from fastapi import Request
 from backend.config.Apps import MainApp
 from backend.apps.health.health import health
 from backend.apps.agents.agents import agents
@@ -85,8 +87,31 @@ async def websocket_dashboard(websocket: WebSocket):
                     "message": payload.get("message"),
                     "updated_input": payload.get("updated_input"),
                 })
+            elif event == "browser:result":
+                ws_manager.resolve_browser_command(
+                    payload.get("request_id", ""),
+                    payload,
+                )
     except WebSocketDisconnect:
         ws_manager.disconnect_global(websocket)
+
+
+@app.post("/api/browser/command")
+async def browser_command(request: Request):
+    """HTTP endpoint called by the browser MCP server subprocess.
+    Proxies commands to the frontend via WebSocket and waits for results."""
+    body = await request.json()
+    action = body.get("action", "")
+    browser_id = body.get("browser_id", "")
+    params = body.get("params", {})
+
+    if not action or not browser_id:
+        return JSONResponse({"error": "action and browser_id are required"}, status_code=400)
+
+    request_id = uuid4().hex
+    result = await ws_manager.send_browser_command(request_id, action, browser_id, params)
+    return JSONResponse(result)
+
 
 if __name__ == "__main__":
     import argparse
