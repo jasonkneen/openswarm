@@ -350,6 +350,16 @@ const dashboardLayoutSlice = createSlice({
       };
     },
 
+    addBrowserCardFromBackend(state, action: PayloadAction<BrowserCardPosition>) {
+      const card = action.payload;
+      if (state.browserCards[card.browser_id]) return;
+      state.browserCards[card.browser_id] = {
+        ...card,
+        width: card.width || DEFAULT_BROWSER_CARD_W,
+        height: card.height || DEFAULT_BROWSER_CARD_H,
+      };
+    },
+
     setBrowserCardPosition(
       state,
       action: PayloadAction<{ browserId: string; x: number; y: number }>
@@ -596,6 +606,7 @@ export const {
   setViewCardSize,
   removeViewCard,
   addBrowserCard,
+  addBrowserCardFromBackend,
   setBrowserCardPosition,
   setBrowserCardSize,
   removeBrowserCard,

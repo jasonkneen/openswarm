@@ -39,6 +39,8 @@ import {
 import { useBrowserActivity } from '@/shared/useBrowserActivity';
 import { getActionLabel } from '@/shared/browserCommandHandler';
 import { resolveInput, isGoogleSearch } from '@/shared/resolveUrl';
+import BrowserAgentOverlay from './BrowserAgentOverlay';
+import { useElementSelection } from '@/app/components/ElementSelectionContext';
 
 type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
@@ -99,6 +101,16 @@ const BrowserCard: React.FC<Props> = ({
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
   const browserHomepage = useAppSelector((state) => state.settings.data.browser_homepage);
+  const elementSelectionCtx = useElementSelection();
+  const isElementSelectMode = elementSelectionCtx?.selectMode ?? false;
+
+  const browserAgentSession = useAppSelector((state) => {
+    const sessions = state.agents.sessions;
+    return Object.values(sessions).find(
+      (s) => s.browser_id === browserId && s.mode === 'browser-agent'
+        && (s.status === 'running' || s.status === 'completed' || s.status === 'error'),
+    ) ?? null;
+  });
 
   const activity = useBrowserActivity(browserId);
   const agentActive = activity.active;
@@ -576,6 +588,26 @@ const BrowserCard: React.FC<Props> = ({
         }),
       }}
     >
+      {/* Selection overlay – blocks content interaction while selected, enabling drag from anywhere */}
+      {isSelected && (
+        <Box
+          onPointerDown={handleDragPointerDown}
+          onPointerMove={handleDragPointerMove}
+          onPointerUp={handleDragPointerUp}
+          onClick={(e: React.MouseEvent) => {
+            if (justDraggedRef.current) return;
+            onCardSelect?.(browserId, 'browser', e.shiftKey);
+          }}
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 15,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            touchAction: 'none',
+          }}
+        />
+      )}
+
       {/* Rotating gradient border glow for element selection / streaming */}
       {showGlow && !agentActive && (
         <Box
@@ -633,6 +665,8 @@ const BrowserCard: React.FC<Props> = ({
         onPointerMove={handleDragPointerMove}
         onPointerUp={handleDragPointerUp}
         sx={{
+          position: 'relative',
+          zIndex: 16,
           display: 'flex',
           alignItems: 'stretch',
           bgcolor: agentActive ? `${accentColor}0a` : c.bg.secondary,
@@ -940,6 +974,9 @@ const BrowserCard: React.FC<Props> = ({
 
       {/* ====== Browser body — multiple webviews stacked ====== */}
       <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {isElementSelectMode && (
+          <Box sx={{ position: 'absolute', inset: 0, zIndex: 10 }} />
+        )}
         {isElectron ? (
           tabs.map((tab) => (
             <webview
@@ -1120,7 +1157,7 @@ const BrowserCard: React.FC<Props> = ({
         )}
 
         {/* ===== Frosted glass overlay ===== */}
-        {agentActive && (
+        {agentActive && !browserAgentSession && (
           <Box
             sx={{
               position: 'absolute',
@@ -1171,6 +1208,15 @@ const BrowserCard: React.FC<Props> = ({
               </Typography>
             </Box>
           </Box>
+        )}
+
+        {/* ===== Browser Agent Overlay ===== */}
+        {browserAgentSession && (
+          <BrowserAgentOverlay
+            session={browserAgentSession}
+            browserWidth={displayW}
+            browserHeight={displayH}
+          />
         )}
       </Box>
 

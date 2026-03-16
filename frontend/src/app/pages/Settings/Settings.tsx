@@ -316,29 +316,23 @@ const Settings: React.FC = () => {
           <Typography sx={{ ...descSx, mb: 1.5 }}>
             Prepended to every agent session before mode-specific instructions. Modes can override with their own.
           </Typography>
-          <Box
+          <TextField
+            value={form.default_system_prompt ?? DEFAULT_SYSTEM_PROMPT}
+            onChange={(e) => setForm({ ...form, default_system_prompt: e.target.value || null })}
+            multiline
+            minRows={3}
+            maxRows={8}
+            fullWidth
+            size="small"
             sx={{
-              p: 1.5,
-              borderRadius: `${c.radius.sm}px`,
-              border: `1px solid ${c.border.subtle}`,
-              bgcolor: c.bg.secondary,
-              fontFamily: c.font.mono,
-              fontSize: '0.8rem',
-              color: c.text.secondary,
-              lineHeight: 1.6,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              maxHeight: 200,
-              overflow: 'auto',
-              '&::-webkit-scrollbar': { width: 5 },
-              '&::-webkit-scrollbar-track': { background: 'transparent' },
-              '&::-webkit-scrollbar-thumb': { background: c.border.medium, borderRadius: 3, '&:hover': { background: c.border.strong } },
-              scrollbarWidth: 'thin',
-              scrollbarColor: `${c.border.medium} transparent`,
+              '& .MuiOutlinedInput-root': {
+                fontFamily: c.font.mono,
+                fontSize: '0.8rem',
+                lineHeight: 1.6,
+                color: c.text.secondary,
+              },
             }}
-          >
-            {form.default_system_prompt || DEFAULT_SYSTEM_PROMPT}
-          </Box>
+          />
         </Box>
 
         <Box sx={rowSx}>

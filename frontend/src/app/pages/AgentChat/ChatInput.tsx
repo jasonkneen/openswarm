@@ -293,34 +293,12 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
 
         if (el.semanticType === 'browser-card' && el.semanticData?.selectId) {
           const wv = getWebview(el.semanticData.selectId as string);
-          if (wv) {
-            const url = el.semanticData.url || wv.getURL();
-            const title = el.semanticData.name || wv.getTitle();
-            lines.push(`${i + 1}. [Browser Card] ${title}`);
-            lines.push(`   ID: ${el.semanticData.selectId}`);
-            lines.push(`   URL: ${url}`);
-
-            try {
-              const nativeImage = await wv.capturePage();
-              const dataUrl = nativeImage.toDataURL();
-              const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-              allImages.push({ data: base64, media_type: 'image/png' });
-              lines.push(`   [Screenshot captured and attached as image]`);
-            } catch { /* screenshot unavailable */ }
-
-            try {
-              const pageText: string = await wv.executeJavaScript(
-                'document.body.innerText.substring(0, 15000)'
-              );
-              if (pageText?.trim()) {
-                lines.push(`   Page text content:\n   ---\n${pageText.trim().split('\n').map(l => '   ' + l).join('\n')}\n   ---`);
-              }
-            } catch { /* text extraction unavailable */ }
-          } else {
-            lines.push(`${i + 1}. [Browser Card] ${el.semanticLabel || ''}`);
-            if (el.semanticData.selectId) lines.push(`   ID: ${el.semanticData.selectId}`);
-            if (el.semanticData.url) lines.push(`   URL: ${el.semanticData.url}`);
-          }
+          const url = wv ? (el.semanticData.url || wv.getURL()) : (el.semanticData.url || '');
+          const title = wv ? (el.semanticData.name || wv.getTitle()) : (el.semanticLabel || '');
+          lines.push(`${i + 1}. [Browser Card] ${title}`);
+          lines.push(`   browser_id: ${el.semanticData.selectId}`);
+          if (url) lines.push(`   URL: ${url}`);
+          lines.push(`   (Use BrowserAgent with this browser_id to interact with it)`);
         } else if (el.semanticType && el.semanticData) {
           const typeLabel = {
             'agent-card': 'Agent Card',

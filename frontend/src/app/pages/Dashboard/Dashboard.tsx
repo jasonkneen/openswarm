@@ -42,7 +42,7 @@ import { useDashboardSelection } from './useDashboardSelection';
 import type { CardType } from './useDashboardSelection';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import type { ContextPath } from '@/app/components/DirectoryBrowser';
-import { ElementSelectionProvider } from '@/app/components/ElementSelectionContext';
+import { ElementSelectionProvider, useElementSelection } from '@/app/components/ElementSelectionContext';
 import { useDomElementSelector } from '@/app/components/useDomElementSelector';
 import SelectionOverlay from '@/app/components/SelectionOverlay';
 
@@ -66,6 +66,8 @@ const DashboardInner: React.FC = () => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
   const { id: dashboardId } = useParams<{ id: string }>();
+  const elementSelectionCtx = useElementSelection();
+  const isElementSelectMode = elementSelectionCtx?.selectMode ?? false;
   const dashboardName = useAppSelector((state) =>
     dashboardId ? state.dashboards.items[dashboardId]?.name : undefined,
   );
@@ -158,12 +160,21 @@ const DashboardInner: React.FC = () => {
     if (e.button !== 0) return;
     if (isCardTarget(e.target, e.currentTarget)) return;
 
+    if (isElementSelectMode) {
+      // Cmd/Ctrl held → allow panning even in element select mode
+      if (e.metaKey || e.ctrlKey) {
+        canvas.handlers.onMouseDown(e);
+      }
+      return;
+    }
+
     if (e.metaKey || e.ctrlKey || canvas.spaceHeld) {
       selection.handleCanvasMouseDown(e.nativeEvent);
     } else {
+      selection.deselectAll();
       canvas.handlers.onMouseDown(e);
     }
-  }, [canvas.handlers, canvas.spaceHeld, selection]);
+  }, [canvas.handlers, canvas.spaceHeld, selection, isElementSelectMode]);
 
   const handleViewportMouseMove = useCallback((e: React.MouseEvent) => {
     canvas.handlers.onMouseMove(e);
@@ -252,7 +263,7 @@ const DashboardInner: React.FC = () => {
   useEffect(() => {
     if (!layoutInitialized) return;
     const dashboardSessionIds = Object.values(sessions)
-      .filter((s) => s.dashboard_id === dashboardId)
+      .filter((s) => s.dashboard_id === dashboardId && s.mode !== 'browser-agent')
       .map((s) => s.id);
     const liveIds = dashboardSessionIds.sort().join(',');
     if (liveIds === prevSessionIdsRef.current) return;

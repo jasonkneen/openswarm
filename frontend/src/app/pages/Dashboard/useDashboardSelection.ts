@@ -173,6 +173,7 @@ export function useDashboardSelection(
       if (!isDraggingMarqueeRef.current) {
         if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
         isDraggingMarqueeRef.current = true;
+        document.body.style.userSelect = 'none';
       }
 
       const start = screenToCanvas(origin.screenX, origin.screenY);
@@ -205,6 +206,7 @@ export function useDashboardSelection(
       marqueeOriginRef.current = null;
       isDraggingMarqueeRef.current = false;
       setMarquee(null);
+      document.body.style.userSelect = '';
     },
     [deselectAll],
   );

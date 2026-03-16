@@ -304,12 +304,34 @@ const DashboardViewCard: React.FC<Props> = ({
         }),
       }}
     >
+      {/* Selection overlay – blocks content interaction while selected, enabling drag from anywhere */}
+      {isSelected && (
+        <Box
+          onPointerDown={handleDragPointerDown}
+          onPointerMove={handleDragPointerMove}
+          onPointerUp={handleDragPointerUp}
+          onClick={(e: React.MouseEvent) => {
+            if (justDraggedRef.current) return;
+            onCardSelect?.(output.id, 'view', e.shiftKey);
+          }}
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 15,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            touchAction: 'none',
+          }}
+        />
+      )}
+
       {/* Header */}
       <Box
         onPointerDown={handleDragPointerDown}
         onPointerMove={handleDragPointerMove}
         onPointerUp={handleDragPointerUp}
         sx={{
+          position: 'relative',
+          zIndex: 16,
           display: 'flex',
           alignItems: 'center',
           gap: 0.75,

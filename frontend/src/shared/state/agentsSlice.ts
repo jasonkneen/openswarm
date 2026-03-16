@@ -68,6 +68,7 @@ export interface AgentSession {
   target_directory?: string | null;
   tool_group_meta: Record<string, ToolGroupMeta>;
   dashboard_id?: string;
+  browser_id?: string | null;
 }
 
 export interface AgentConfig {

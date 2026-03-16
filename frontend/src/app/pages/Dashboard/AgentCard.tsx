@@ -481,12 +481,35 @@ const AgentCard: React.FC<Props> = ({
         />
       ))}
 
+      {/* Selection overlay – blocks content interaction while selected, enabling drag from anywhere */}
+      {isSelected && (
+        <Box
+          onPointerDown={handleDragPointerDown}
+          onPointerMove={handleDragPointerMove}
+          onPointerUp={handleDragPointerUp}
+          onClick={(e: React.MouseEvent) => {
+            if (justDraggedRef.current) return;
+            onCardSelect?.(session.id, 'agent', e.shiftKey);
+          }}
+          onDoubleClick={() => dispatch(toggleExpandSession(session.id))}
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 15,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            touchAction: 'none',
+          }}
+        />
+      )}
+
       {/* Drag zone: header + metadata – entire region above separator is draggable */}
       <Box
         onPointerDown={handleDragPointerDown}
         onPointerMove={handleDragPointerMove}
         onPointerUp={handleDragPointerUp}
         sx={{
+          position: 'relative',
+          zIndex: 16,
           mx: -2,
           mt: -2,
           px: 2,
