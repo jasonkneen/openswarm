@@ -1,4 +1,8 @@
+import os
+from uuid import uuid4
+
 from fastapi.responses import JSONResponse
+from fastapi import Request
 from backend.config.Apps import MainApp
 from backend.apps.health.health import health
 from backend.apps.agents.agents import agents
@@ -83,9 +87,56 @@ async def websocket_dashboard(websocket: WebSocket):
                     "message": payload.get("message"),
                     "updated_input": payload.get("updated_input"),
                 })
+            elif event == "browser:result":
+                ws_manager.resolve_browser_command(
+                    payload.get("request_id", ""),
+                    payload,
+                )
     except WebSocketDisconnect:
         ws_manager.disconnect_global(websocket)
 
+
+@app.post("/api/browser/command")
+async def browser_command(request: Request):
+    """HTTP endpoint called by the browser MCP server subprocess.
+    Proxies commands to the frontend via WebSocket and waits for results."""
+    body = await request.json()
+    action = body.get("action", "")
+    browser_id = body.get("browser_id", "")
+    params = body.get("params", {})
+
+    if not action or not browser_id:
+        return JSONResponse({"error": "action and browser_id are required"}, status_code=400)
+
+    request_id = uuid4().hex
+    result = await ws_manager.send_browser_command(request_id, action, browser_id, params)
+    return JSONResponse(result)
+
+
 if __name__ == "__main__":
+    import argparse
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8324, reload=True)
+
+    parser = argparse.ArgumentParser(description="OpenSwarm backend server")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("OPENSWARM_PORT", "8324")))
+    parser.add_argument("--host", default=os.environ.get("OPENSWARM_HOST", "127.0.0.1"))
+    parser.add_argument("--reload", action="store_true", default=False)
+    args = parser.parse_args()
+
+    os.environ["OPENSWARM_PORT"] = str(args.port)
+
+    import uvicorn.config
+
+    class _ReadyServer(uvicorn.Server):
+        """Subclass that prints a machine-readable READY line on startup."""
+        async def startup(self, sockets=None):
+            await super().startup(sockets)
+            print(f"READY:PORT={args.port}", flush=True)
+
+    if args.reload:
+        uvicorn.run("backend.main:app", host=args.host, port=args.port, reload=True)
+    else:
+        config = uvicorn.Config("backend.main:app", host=args.host, port=args.port)
+        server = _ReadyServer(config)
+        import asyncio
+        asyncio.run(server.serve())

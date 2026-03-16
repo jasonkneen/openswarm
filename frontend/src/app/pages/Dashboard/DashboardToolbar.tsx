@@ -10,6 +10,7 @@ import AddIcon from '@mui/icons-material/Add';
 import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
+import LanguageIcon from '@mui/icons-material/Language';
 import SearchIcon from '@mui/icons-material/Search';
 import { motion } from 'framer-motion';
 import ChatInput from '@/app/pages/AgentChat/ChatInput';
@@ -36,6 +37,7 @@ interface Props {
   ) => void;
   onAddView: (outputId: string) => void;
   onHistoryResume: (sessionId: string) => void;
+  onAddBrowser: () => void;
   dashboardId?: string;
 }
 
@@ -79,7 +81,7 @@ function formatRelativeTime(dateStr: string | null): string {
 }
 
 const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
-  ({ inputOpen, onNewAgent, onCancel, onSend, onAddView, onHistoryResume, dashboardId }, ref) => {
+  ({ inputOpen, onNewAgent, onCancel, onSend, onAddView, onHistoryResume, onAddBrowser, dashboardId }, ref) => {
     const c = useClaudeTokens();
     const dispatch = useAppDispatch();
     const elementSelection = useElementSelection();
@@ -156,16 +158,32 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
     }, [onAddView]);
 
     const handleOpenViewPicker = useCallback(() => {
+      if (viewPickerOpen) {
+        setViewPickerOpen(false);
+        setViewSearch('');
+        return;
+      }
+      setHistoryOpen(false);
+      setHistoryQuery('');
+      dispatch(clearHistorySearch());
       setViewPickerOpen(true);
       setViewSearch('');
-    }, []);
+    }, [viewPickerOpen, dispatch]);
 
     const handleOpenHistory = useCallback(() => {
+      if (historyOpen) {
+        setHistoryOpen(false);
+        setHistoryQuery('');
+        dispatch(clearHistorySearch());
+        return;
+      }
+      setViewPickerOpen(false);
+      setViewSearch('');
       setHistoryOpen(true);
       setHistoryQuery('');
       dispatch(clearHistorySearch());
       dispatch(searchHistory({ q: '', limit: HISTORY_PAGE_SIZE, offset: 0, dashboardId }));
-    }, [dispatch, dashboardId]);
+    }, [historyOpen, dispatch, dashboardId]);
 
     const handleHistorySelect = useCallback((sessionId: string) => {
       onHistoryResume(sessionId);
@@ -184,10 +202,12 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
 
     const isExpanded = inputOpen || viewPickerOpen || historyOpen;
 
+    const prevInputOpenRef = useRef(inputOpen);
     useEffect(() => {
-      if (!inputOpen && elementSelection?.selectMode) {
+      if (prevInputOpenRef.current && !inputOpen && elementSelection?.selectMode) {
         elementSelection.setSelectMode(false);
       }
+      prevInputOpenRef.current = inputOpen;
     }, [inputOpen, elementSelection]);
 
     useEffect(() => {
@@ -233,6 +253,21 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
         setTimeout(() => historyInputRef.current?.focus(), 60);
       }
     }, [historyOpen]);
+
+    useEffect(() => {
+      const handleKey = (e: KeyboardEvent) => {
+        if (e.metaKey && e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          handleOpenViewPicker();
+        }
+        if (e.metaKey && e.key.toLowerCase() === 'o' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          handleOpenHistory();
+        }
+      };
+      window.addEventListener('keydown', handleKey);
+      return () => window.removeEventListener('keydown', handleKey);
+    }, [handleOpenViewPicker, handleOpenHistory]);
 
     useEffect(() => {
       if (!historyOpen) return;
@@ -526,8 +561,6 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               </Box>
             </WarmTooltip>
 
-            <Box sx={{ width: '1px', height: 24, bgcolor: c.border.medium, mx: '6px', flexShrink: 0 }} />
-
             <WarmTooltip
               tokens={c}
               placement="top"
@@ -535,7 +568,7 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               enterDelay={200}
               title={
                 <Box sx={{ textAlign: 'center' }}>
-                  <Box sx={{ fontWeight: 600 }}>Add View</Box>
+                  <Box sx={{ fontWeight: 600 }}>Add View  ⌘M</Box>
                 </Box>
               }
             >
@@ -568,7 +601,7 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               enterDelay={200}
               title={
                 <Box sx={{ textAlign: 'center' }}>
-                  <Box sx={{ fontWeight: 600 }}>History</Box>
+                  <Box sx={{ fontWeight: 600 }}>History  ⌘O</Box>
                 </Box>
               }
             >
@@ -591,6 +624,39 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
                 }}
               >
                 <HistoryRoundedIcon sx={{ fontSize: 22 }} />
+              </Box>
+            </WarmTooltip>
+
+            <WarmTooltip
+              tokens={c}
+              placement="top"
+              arrow
+              enterDelay={200}
+              title={
+                <Box sx={{ textAlign: 'center' }}>
+                  <Box sx={{ fontWeight: 600 }}>Browser</Box>
+                </Box>
+              }
+            >
+              <Box
+                role="button"
+                aria-label="Browser"
+                tabIndex={0}
+                onClick={onAddBrowser}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: BTN,
+                  height: BTN,
+                  borderRadius: `${c.radius.md}px`,
+                  color: c.text.tertiary,
+                  cursor: 'pointer',
+                  transition: 'opacity 0.15s, background-color 0.15s',
+                  '&:hover': { opacity: 1, bgcolor: c.bg.secondary, color: c.accent.primary },
+                }}
+              >
+                <LanguageIcon sx={{ fontSize: 22 }} />
               </Box>
             </WarmTooltip>
 

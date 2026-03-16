@@ -1,12 +1,15 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { launchAndSendFirstMessage } from './agentsSlice';
+import { API_BASE } from '@/shared/config';
 
-const API_BASE = `http://${window.location.hostname}:8324/api/dashboards`;
+const DASHBOARDS_API = `${API_BASE}/dashboards`;
 
 export const DEFAULT_CARD_W = 480;
 export const DEFAULT_CARD_H = 280;
 export const DEFAULT_VIEW_CARD_W = 480;
 export const DEFAULT_VIEW_CARD_H = 360;
+export const DEFAULT_BROWSER_CARD_W = 640;
+export const DEFAULT_BROWSER_CARD_H = 480;
 const GRID_GAP = 24;
 const GRID_ORIGIN = { x: 40, y: 100 };
 const GRID_COLS_FALLBACK = 4;
@@ -27,9 +30,20 @@ export interface ViewCardPosition {
   height: number;
 }
 
+export interface BrowserCardPosition {
+  browser_id: string;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface DashboardLayoutState {
   cards: Record<string, CardPosition>;
   viewCards: Record<string, ViewCardPosition>;
+  browserCards: Record<string, BrowserCardPosition>;
+  persistedExpandedSessionIds: string[];
   loading: boolean;
   initialized: boolean;
 }
@@ -37,6 +51,8 @@ export interface DashboardLayoutState {
 const initialState: DashboardLayoutState = {
   cards: {},
   viewCards: {},
+  browserCards: {},
+  persistedExpandedSessionIds: [],
   loading: false,
   initialized: false,
 };
@@ -44,17 +60,21 @@ const initialState: DashboardLayoutState = {
 interface LayoutPayload {
   cards: Record<string, CardPosition>;
   viewCards: Record<string, ViewCardPosition>;
+  browserCards: Record<string, BrowserCardPosition>;
+  expandedSessionIds: string[];
 }
 
 export const fetchLayout = createAsyncThunk(
   'dashboardLayout/fetch',
   async (dashboardId: string) => {
-    const res = await fetch(`${API_BASE}/${dashboardId}`);
+    const res = await fetch(`${DASHBOARDS_API}/${dashboardId}`);
     const data = await res.json();
     const layout = data.layout ?? {};
     return {
       cards: (layout.cards ?? {}) as Record<string, CardPosition>,
       viewCards: (layout.view_cards ?? {}) as Record<string, ViewCardPosition>,
+      browserCards: (layout.browser_cards ?? {}) as Record<string, BrowserCardPosition>,
+      expandedSessionIds: (layout.expanded_session_ids ?? []) as string[],
     } satisfies LayoutPayload;
   },
 );
@@ -71,11 +91,16 @@ export const saveLayout = createAsyncThunk(
     if (saveTimeout) clearTimeout(saveTimeout);
     return new Promise<SaveLayoutPayload>((resolve) => {
       saveTimeout = setTimeout(async () => {
-        await fetch(`${API_BASE}/${payload.dashboardId}`, {
+        await fetch(`${DASHBOARDS_API}/${payload.dashboardId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            layout: { cards: payload.cards, view_cards: payload.viewCards },
+            layout: {
+              cards: payload.cards,
+              view_cards: payload.viewCards,
+              browser_cards: payload.browserCards,
+              expanded_session_ids: payload.expandedSessionIds,
+            },
           }),
         });
         resolve(payload);
@@ -165,10 +190,14 @@ const dashboardLayoutSlice = createSlice({
       }
 
       const hasDraftCard = Object.keys(state.cards).some((id) => id.startsWith('draft-'));
+      const extraOccupied: Record<string, { x: number; y: number }> = {
+        ...Object.fromEntries(Object.values(state.viewCards).map((c) => [c.output_id, c])),
+        ...Object.fromEntries(Object.values(state.browserCards).map((c) => [c.browser_id, c])),
+      };
       const newIds = action.payload.filter((id) => !state.cards[id]);
       for (const id of newIds) {
         if (hasDraftCard && !id.startsWith('draft-')) continue;
-        const pos = findOpenGridCell(state.cards, new Set(), state.viewCards);
+        const pos = findOpenGridCell(state.cards, new Set(), extraOccupied);
         state.cards[id] = {
           session_id: id,
           x: pos.x,
@@ -182,12 +211,14 @@ const dashboardLayoutSlice = createSlice({
     tidyLayout(state) {
       const agentCards = Object.values(state.cards);
       const viewCards = Object.values(state.viewCards);
-      const total = agentCards.length + viewCards.length;
+      const bCards = Object.values(state.browserCards);
+      const total = agentCards.length + viewCards.length + bCards.length;
       if (total === 0) return;
 
       const allItems = [
         ...agentCards.map((c) => ({ kind: 'agent' as const, id: c.session_id, x: c.x, y: c.y })),
         ...viewCards.map((c) => ({ kind: 'view' as const, id: c.output_id, x: c.x, y: c.y })),
+        ...bCards.map((c) => ({ kind: 'browser' as const, id: c.browser_id, x: c.x, y: c.y })),
       ];
       allItems.sort((a, b) => a.y - b.y || a.x - b.x);
 
@@ -210,9 +241,12 @@ const dashboardLayoutSlice = createSlice({
         if (item.kind === 'agent') {
           const card = state.cards[item.id];
           if (card) { card.x = nx; card.y = ny; card.width = DEFAULT_CARD_W; card.height = DEFAULT_CARD_H; }
-        } else {
+        } else if (item.kind === 'view') {
           const card = state.viewCards[item.id];
           if (card) { card.x = nx; card.y = ny; card.width = DEFAULT_VIEW_CARD_W; card.height = DEFAULT_VIEW_CARD_H; }
+        } else {
+          const card = state.browserCards[item.id];
+          if (card) { card.x = nx; card.y = ny; card.width = DEFAULT_BROWSER_CARD_W; card.height = DEFAULT_BROWSER_CARD_H; }
         }
       });
     },
@@ -255,6 +289,89 @@ const dashboardLayoutSlice = createSlice({
       delete state.viewCards[action.payload];
     },
 
+    addBrowserCard(state, action: PayloadAction<{ url: string }>) {
+      const id = `browser-${Date.now().toString(36)}`;
+      const allOccupied: Record<string, { x: number; y: number }> = {
+        ...Object.fromEntries(Object.values(state.viewCards).map((c) => [c.output_id, c])),
+        ...Object.fromEntries(Object.values(state.browserCards).map((c) => [c.browser_id, c])),
+      };
+      const pos = findOpenGridCell(state.cards, new Set(), allOccupied);
+      state.browserCards[id] = {
+        browser_id: id,
+        url: action.payload.url,
+        x: pos.x,
+        y: pos.y,
+        width: DEFAULT_BROWSER_CARD_W,
+        height: DEFAULT_BROWSER_CARD_H,
+      };
+    },
+
+    setBrowserCardPosition(
+      state,
+      action: PayloadAction<{ browserId: string; x: number; y: number }>
+    ) {
+      const { browserId, x, y } = action.payload;
+      const card = state.browserCards[browserId];
+      if (card) { card.x = x; card.y = y; }
+    },
+
+    setBrowserCardSize(
+      state,
+      action: PayloadAction<{ browserId: string; width: number; height: number }>
+    ) {
+      const { browserId, width, height } = action.payload;
+      const card = state.browserCards[browserId];
+      if (card) {
+        card.width = Math.max(400, width);
+        card.height = Math.max(300, height);
+      }
+    },
+
+    removeBrowserCard(state, action: PayloadAction<string>) {
+      delete state.browserCards[action.payload];
+    },
+
+    updateBrowserCardUrl(
+      state,
+      action: PayloadAction<{ browserId: string; url: string }>
+    ) {
+      const { browserId, url } = action.payload;
+      const card = state.browserCards[browserId];
+      if (card) { card.url = url; }
+    },
+
+    moveCards(
+      state,
+      action: PayloadAction<{
+        items: Array<{ id: string; type: 'agent' | 'view' | 'browser' }>;
+        dx: number;
+        dy: number;
+      }>,
+    ) {
+      const { items, dx, dy } = action.payload;
+      for (const item of items) {
+        if (item.type === 'agent') {
+          const card = state.cards[item.id];
+          if (card) {
+            card.x += dx;
+            card.y += dy;
+          }
+        } else if (item.type === 'view') {
+          const card = state.viewCards[item.id];
+          if (card) {
+            card.x += dx;
+            card.y += dy;
+          }
+        } else {
+          const card = state.browserCards[item.id];
+          if (card) {
+            card.x += dx;
+            card.y += dy;
+          }
+        }
+      }
+    },
+
     replaceDraftId(
       state,
       action: PayloadAction<{ oldId: string; newId: string }>
@@ -270,6 +387,8 @@ const dashboardLayoutSlice = createSlice({
     resetLayout(state) {
       state.cards = {};
       state.viewCards = {};
+      state.browserCards = {};
+      state.persistedExpandedSessionIds = [];
       state.initialized = false;
     },
 
@@ -284,6 +403,8 @@ const dashboardLayoutSlice = createSlice({
         state.initialized = true;
         state.cards = action.payload.cards;
         state.viewCards = action.payload.viewCards;
+        state.browserCards = action.payload.browserCards;
+        state.persistedExpandedSessionIds = action.payload.expandedSessionIds;
       })
       .addCase(fetchLayout.rejected, (state) => {
         state.loading = false;
@@ -311,6 +432,12 @@ export const {
   setViewCardPosition,
   setViewCardSize,
   removeViewCard,
+  addBrowserCard,
+  setBrowserCardPosition,
+  setBrowserCardSize,
+  removeBrowserCard,
+  updateBrowserCardUrl,
+  moveCards,
   resetLayout,
 } = dashboardLayoutSlice.actions;
 

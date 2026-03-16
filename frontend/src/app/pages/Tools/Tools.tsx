@@ -398,7 +398,7 @@ const Tools: React.FC = () => {
   // Registry browser
   const [registryOpen, setRegistryOpen] = useState(false);
   const [regQuery, setRegQuery] = useState('');
-  const [regSort, setRegSort] = useState<'name' | 'stars'>('name');
+  const [regSort, setRegSort] = useState<'name' | 'stars'>('stars');
   const [regSource, setRegSource] = useState<'' | 'community' | 'google'>('');
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity?: 'success' | 'error' }>({ open: false, message: '' });
@@ -609,11 +609,11 @@ const Tools: React.FC = () => {
     handleMenuClose();
     setRegistryOpen(true);
     setRegQuery('');
-    setRegSort('name');
+    setRegSort('stars');
     setRegSource('');
     setExpandedServer(null);
     dispatch(fetchRegistryStats());
-    dispatch(searchRegistry({ q: '', limit: 20, offset: 0, sort: 'name', source: '' }));
+    dispatch(searchRegistry({ q: '', limit: 20, offset: 0, sort: 'stars', source: '' }));
   };
 
   // --------------- Tool CRUD ---------------
@@ -681,8 +681,7 @@ const Tools: React.FC = () => {
     try { parsedConfig = JSON.parse(mcpConfigJson); } catch { setMcpConfigError('Invalid JSON'); return; }
 
     const f = serverToToolForm(mcpConfigServer);
-    const isStdioConfig = parsedConfig.type === 'stdio' || !!parsedConfig.command;
-    const authStatus = (mcpAuthType !== 'none' || isStdioConfig) ? 'configured' : 'none';
+    const authStatus = 'configured';
 
     await dispatch(createTool({
       name: f.name,
@@ -1038,7 +1037,7 @@ const Tools: React.FC = () => {
                 const isExpanded = expandedToolId === tool.id;
                 const isMcp = tool.mcp_config && Object.keys(tool.mcp_config).length > 0;
                 const isStdio = isMcp && (tool.mcp_config.type === 'stdio' || !!tool.mcp_config.command);
-                const canDiscover = isMcp && (isStdio || tool.auth_status !== 'none');
+                const canDiscover = isMcp;
                 const perms = tool.tool_permissions || {};
                 const services = perms._services as Record<string, { read?: string[]; write?: string[] }> | undefined;
                 const descriptions = (perms._tool_descriptions || {}) as Record<string, string>;
@@ -1303,7 +1302,7 @@ const Tools: React.FC = () => {
                                 Discover Tools
                               </Button>
                               {!canDiscover && (
-                                <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>Connect the tool first to discover available permissions</Typography>
+                                <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>Add an MCP configuration to enable tool discovery</Typography>
                               )}
                             </Box>
                           ) : (

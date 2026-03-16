@@ -169,6 +169,12 @@ interface Props {
   cardHeight: number;
   zoom?: number;
   spawnFrom?: { x: number; y: number };
+  isSelected?: boolean;
+  multiDragDelta?: { dx: number; dy: number } | null;
+  onCardSelect?: (id: string, type: 'agent' | 'view', shiftKey: boolean) => void;
+  onDragStart?: (id: string, type: 'agent' | 'view') => void;
+  onDragMove?: (dx: number, dy: number) => void;
+  onDragEnd?: (dx: number, dy: number, didDrag: boolean) => void;
 }
 
 const MIN_W = 480;
@@ -177,7 +183,10 @@ const EXPANDED_OVERLAY_H = 620;
 
 const SPAWN_SPRING = { type: 'spring' as const, stiffness: 400, damping: 28, mass: 0.6 };
 
-const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth, cardHeight, zoom = 1, spawnFrom }) => {
+const AgentCard: React.FC<Props> = ({
+  session, expanded, cardX, cardY, cardWidth, cardHeight, zoom = 1, spawnFrom,
+  isSelected = false, multiDragDelta, onCardSelect, onDragStart, onDragMove, onDragEnd,
+}) => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
 
@@ -199,6 +208,7 @@ const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth
   const [isDragging, setIsDragging] = useState(false);
   const [localDragPos, setLocalDragPos] = useState<{ x: number; y: number } | null>(null);
   const didDrag = useRef(false);
+  const justDraggedRef = useRef(false);
 
   const handleDragPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -207,7 +217,8 @@ const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth
     didDrag.current = false;
     setIsDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }, [cardX, cardY]);
+    onDragStart?.(session.id, 'agent');
+  }, [cardX, cardY, onDragStart, session.id]);
 
   const handleDragPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragState.current) return;
@@ -215,31 +226,35 @@ const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth
     const rawDy = e.clientY - dragState.current.startY;
     if (!didDrag.current && Math.sqrt(rawDx * rawDx + rawDy * rawDy) < DRAG_THRESHOLD) return;
     didDrag.current = true;
+    const dx = rawDx / zoom;
+    const dy = rawDy / zoom;
     setLocalDragPos({
-      x: dragState.current.origX + rawDx / zoom,
-      y: dragState.current.origY + rawDy / zoom,
+      x: dragState.current.origX + dx,
+      y: dragState.current.origY + dy,
     });
-  }, [zoom]);
+    onDragMove?.(dx, dy);
+  }, [zoom, onDragMove]);
 
   const handleDragPointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragState.current) return;
+    const dx = (e.clientX - dragState.current.startX) / zoom;
+    const dy = (e.clientY - dragState.current.startY) / zoom;
     if (didDrag.current) {
-      const dx = (e.clientX - dragState.current.startX) / zoom;
-      const dy = (e.clientY - dragState.current.startY) / zoom;
       dispatch(setCardPosition({
         sessionId: session.id,
         x: dragState.current.origX + dx,
         y: dragState.current.origY + dy,
       }));
-    } else if (expanded) {
-      dispatch(toggleExpandSession(session.id));
+      justDraggedRef.current = true;
+      requestAnimationFrame(() => { justDraggedRef.current = false; });
     }
+    onDragEnd?.(dx, dy, didDrag.current);
     dragState.current = null;
     didDrag.current = false;
     setLocalDragPos(null);
     setIsDragging(false);
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-  }, [zoom, dispatch, session.id, expanded]);
+  }, [zoom, dispatch, session.id, onDragEnd]);
 
   // ---- Unified edge / corner resize ----
   const resizeRef = useRef<{
@@ -351,10 +366,12 @@ const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth
   const pendingReq = session.pending_approvals[0];
   const statusStyle = STATUS_COLORS[session.status] || { color: c.text.tertiary, bg: c.bg.secondary };
 
-  const noTransition = isDragging || isResizing;
+  const noTransition = isDragging || isResizing || (isSelected && !!multiDragDelta);
 
-  const activeX = localResize?.x ?? localDragPos?.x ?? cardX;
-  const activeY = localResize?.y ?? localDragPos?.y ?? cardY;
+  const mdDx = (!isDragging && isSelected && multiDragDelta) ? multiDragDelta.dx : 0;
+  const mdDy = (!isDragging && isSelected && multiDragDelta) ? multiDragDelta.dy : 0;
+  const activeX = localResize?.x ?? localDragPos?.x ?? (cardX + mdDx);
+  const activeY = localResize?.y ?? localDragPos?.y ?? (cardY + mdDy);
   const activeW = localResize?.w ?? cardWidth;
   const activeH = localResize?.h ?? cardHeight;
 
@@ -380,26 +397,38 @@ const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth
       data-select-type="agent-card"
       data-select-id={session.id}
       data-select-meta={JSON.stringify({ name: session.name || session.id, status: session.status, model: session.model, mode: session.mode })}
-      onClick={expanded ? undefined : () => dispatch(toggleExpandSession(session.id))}
+      onClick={(e: React.MouseEvent) => {
+        if (justDraggedRef.current) return;
+        onCardSelect?.(session.id, 'agent', e.shiftKey);
+      }}
+      onDoubleClick={() => dispatch(toggleExpandSession(session.id))}
       sx={{
         position: 'relative',
         width: localResize ? activeW : Math.max(cardWidth, MIN_W),
         height: localResize ? activeH : (expanded ? Math.max(EXPANDED_OVERLAY_H, cardHeight) : 'auto'),
         bgcolor: c.bg.surface,
-        border: hasPending && !expanded
-          ? `1px solid ${c.status.warning}`
-          : expanded
-            ? `1px solid ${c.border.strong}`
-            : `1px solid ${c.border.subtle}`,
+        border: isSelected
+          ? '2px solid #3b82f6'
+          : hasPending && !expanded
+            ? `1px solid ${c.status.warning}`
+            : expanded
+              ? `1px solid ${c.border.strong}`
+              : `1px solid ${c.border.subtle}`,
         borderRadius: 3,
         p: 2,
         cursor: expanded ? 'default' : 'pointer',
         transition: noTransition ? 'none' : c.transition,
-        boxShadow: isDragging ? c.shadow.lg : expanded ? c.shadow.md : c.shadow.sm,
+        boxShadow: isDragging
+          ? c.shadow.lg
+          : isSelected
+            ? `0 0 0 1px #3b82f6, ${c.shadow.md}`
+            : expanded
+              ? c.shadow.md
+              : c.shadow.sm,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        ...(!expanded && !isDragging && {
+        ...(!expanded && !isDragging && !isSelected && {
           '&:hover': {
             boxShadow: c.shadow.md,
             borderColor: hasPending ? c.status.warning : c.border.strong,
@@ -426,118 +455,129 @@ const AgentCard: React.FC<Props> = ({ session, expanded, cardX, cardY, cardWidth
         />
       ))}
 
-      {/* Header: always visible – entire bar is draggable */}
+      {/* Drag zone: header + metadata – entire region above separator is draggable */}
       <Box
         onPointerDown={handleDragPointerDown}
         onPointerMove={handleDragPointerMove}
         onPointerUp={handleDragPointerUp}
         sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          mb: 1,
-          flexShrink: 0,
+          mx: -2,
+          mt: -2,
+          px: 2,
+          pt: 2,
+          pb: 1.5,
           cursor: isDragging ? 'grabbing' : 'grab',
           touchAction: 'none',
+          userSelect: 'none',
+          flexShrink: 0,
         }}
       >
         <Box
-          className="drag-handle"
           sx={{
             display: 'flex',
             alignItems: 'center',
-            mr: 0.5,
-            color: c.text.ghost,
+            justifyContent: 'space-between',
+            mb: 1,
+            flexShrink: 0,
           }}
         >
-          <DragIndicatorIcon sx={{ fontSize: 16 }} />
-        </Box>
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            borderRadius: 1,
-          }}
-        >
-          <Typography sx={{ color: c.text.primary, fontWeight: 600, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {session.name}
-          </Typography>
-          <Chip
-            label={session.status.replace('_', ' ')}
-            size="small"
+          <Box
+            className="drag-handle"
             sx={{
-              bgcolor: statusStyle.bg,
-              color: statusStyle.color,
-              fontWeight: 600,
-              fontSize: '0.7rem',
-              height: 22,
-              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              mr: 0.5,
+              color: c.text.ghost,
             }}
-          />
+          >
+            <DragIndicatorIcon sx={{ fontSize: 16 }} />
+          </Box>
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              borderRadius: 1,
+            }}
+          >
+            <Typography sx={{ color: c.text.primary, fontWeight: 600, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {session.name}
+            </Typography>
+            <Chip
+              label={session.status.replace('_', ' ')}
+              size="small"
+              sx={{
+                bgcolor: statusStyle.bg,
+                color: statusStyle.color,
+                fontWeight: 600,
+                fontSize: '0.7rem',
+                height: 22,
+                flexShrink: 0,
+              }}
+            />
+          </Box>
+          <Box
+            onPointerDown={(e) => e.stopPropagation()}
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 0.5 }}
+          >
+            {expanded ? (
+              <Tooltip title="Collapse">
+                <IconButton
+                  size="small"
+                  onClick={handleCollapse}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    color: c.text.ghost,
+                    p: 0.5,
+                    '&:hover': { color: c.text.secondary, bgcolor: c.bg.secondary },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            ) : (
+              <Tooltip title={isDraft ? 'Remove' : 'Close chat'}>
+                <IconButton
+                  size="small"
+                  onClick={handleRemove}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    color: c.text.ghost,
+                    p: 0.5,
+                    '&:hover': { color: c.status.error, bgcolor: `${c.status.errorBg}` },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
         </Box>
-        <Box
-          onPointerDown={(e) => e.stopPropagation()}
-          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 0.5 }}
-        >
-          {expanded ? (
-            <Tooltip title="Collapse">
-              <IconButton
-                size="small"
-                onClick={handleCollapse}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{
-                  color: c.text.ghost,
-                  p: 0.5,
-                  '&:hover': { color: c.text.secondary, bgcolor: c.bg.secondary },
-                }}
-              >
-                <CloseIcon sx={{ fontSize: 16 }} />
-              </IconButton>
-            </Tooltip>
-          ) : (
-            <Tooltip title={isDraft ? 'Remove' : 'Close chat'}>
-              <IconButton
-                size="small"
-                onClick={handleRemove}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{
-                  color: c.text.ghost,
-                  p: 0.5,
-                  '&:hover': { color: c.status.error, bgcolor: `${c.status.errorBg}` },
-                }}
-              >
-                <CloseIcon sx={{ fontSize: 16 }} />
-              </IconButton>
-            </Tooltip>
+
+        {/* Metadata row */}
+        <Box sx={{
+          display: isDraft && !expanded ? 'none' : 'flex',
+          gap: 1.5,
+          flexShrink: 0,
+          ...(isDraft && { visibility: 'hidden' }),
+        }}>
+          <Typography variant="caption" sx={{ color: c.text.tertiary }}>
+            {session.model}
+          </Typography>
+          <Typography variant="caption" sx={{ color: c.text.tertiary }}>
+            {session.mode}
+          </Typography>
+          <Typography variant="caption" sx={{ color: c.text.tertiary }}>
+            {formatDuration(session.created_at)}
+          </Typography>
+          {session.cost_usd > 0 && (
+            <Typography variant="caption" sx={{ color: c.accent.primary }}>
+              ${session.cost_usd.toFixed(4)}
+            </Typography>
           )}
         </Box>
-      </Box>
-
-      {/* Metadata row */}
-      <Box sx={{
-        display: isDraft && !expanded ? 'none' : 'flex',
-        gap: 1.5,
-        mb: 1.5,
-        flexShrink: 0,
-        ...(isDraft && { visibility: 'hidden' }),
-      }}>
-        <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-          {session.model}
-        </Typography>
-        <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-          {session.mode}
-        </Typography>
-        <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-          {formatDuration(session.created_at)}
-        </Typography>
-        {session.cost_usd > 0 && (
-          <Typography variant="caption" sx={{ color: c.accent.primary }}>
-            ${session.cost_usd.toFixed(4)}
-          </Typography>
-        )}
       </Box>
 
       {/* Expanded: inline chat fills remaining space */}

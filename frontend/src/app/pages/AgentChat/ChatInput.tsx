@@ -26,6 +26,8 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AdsClickIcon from '@mui/icons-material/AdsClick';
 import CommandPicker, { CommandPickerItem, getToolGroupIcon } from '@/app/components/CommandPicker';
 import { useElementSelection, SelectedElement } from '@/app/components/ElementSelectionContext';
+import { getWebview } from '@/shared/browserRegistry';
+import { API_BASE } from '@/shared/config';
 import { ContextPath } from '@/app/components/DirectoryBrowser';
 import {
   SKILL_PILL_ATTR,
@@ -70,6 +72,7 @@ interface Props {
   contextEstimate?: { used: number; limit: number };
   embedded?: boolean;
   autoFocus?: boolean;
+  sessionId?: string;
 }
 
 export interface ChatInputHandle {
@@ -127,7 +130,7 @@ const ContextRing: React.FC<{ used: number; limit: number; accentColor: string; 
   );
 };
 
-const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, onModeChange, model, onModelChange, isRunning, onStop, autoRunMode, contextEstimate, embedded, autoFocus }, ref) => {
+const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, onModeChange, model, onModelChange, isRunning, onStop, autoRunMode, contextEstimate, embedded, autoFocus, sessionId }, ref) => {
   const c = useClaudeTokens();
   const editorRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -253,7 +256,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     try {
       const formData = new FormData();
       files.forEach((f) => formData.append('files', f));
-      const resp = await fetch(`http://${window.location.hostname}:8324/api/settings/upload-files`, {
+      const resp = await fetch(`${API_BASE}/settings/upload-files`, {
         method: 'POST',
         body: formData,
       });
@@ -271,7 +274,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     }
   }, []);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const editor = editorRef.current;
     if (!editor || disabled) return;
     const serialized = serializeEditorContent(editor, attachedSkillsRef.current);
@@ -285,14 +288,47 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
 
     if (selectedEls.length > 0) {
       const lines: string[] = ['\n\n---\nSelected UI Elements:\n'];
-      selectedEls.forEach((el, i) => {
-        if (el.semanticType && el.semanticData) {
+      for (let i = 0; i < selectedEls.length; i++) {
+        const el = selectedEls[i];
+
+        if (el.semanticType === 'browser-card' && el.semanticData?.selectId) {
+          const wv = getWebview(el.semanticData.selectId as string);
+          if (wv) {
+            const url = el.semanticData.url || wv.getURL();
+            const title = el.semanticData.name || wv.getTitle();
+            lines.push(`${i + 1}. [Browser Card] ${title}`);
+            lines.push(`   ID: ${el.semanticData.selectId}`);
+            lines.push(`   URL: ${url}`);
+
+            try {
+              const nativeImage = await wv.capturePage();
+              const dataUrl = nativeImage.toDataURL();
+              const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+              allImages.push({ data: base64, media_type: 'image/png' });
+              lines.push(`   [Screenshot captured and attached as image]`);
+            } catch { /* screenshot unavailable */ }
+
+            try {
+              const pageText: string = await wv.executeJavaScript(
+                'document.body.innerText.substring(0, 15000)'
+              );
+              if (pageText?.trim()) {
+                lines.push(`   Page text content:\n   ---\n${pageText.trim().split('\n').map(l => '   ' + l).join('\n')}\n   ---`);
+              }
+            } catch { /* text extraction unavailable */ }
+          } else {
+            lines.push(`${i + 1}. [Browser Card] ${el.semanticLabel || ''}`);
+            if (el.semanticData.selectId) lines.push(`   ID: ${el.semanticData.selectId}`);
+            if (el.semanticData.url) lines.push(`   URL: ${el.semanticData.url}`);
+          }
+        } else if (el.semanticType && el.semanticData) {
           const typeLabel = {
             'agent-card': 'Agent Card',
             'message': 'Message',
             'tool-call': 'Tool Call',
             'tool-group': 'Tool Group',
             'view-card': 'View Card',
+            'browser-card': 'Browser Card',
             'dom-element': 'Element',
           }[el.semanticType] || el.semanticType;
           lines.push(`${i + 1}. [${typeLabel}] ${el.semanticLabel || ''}`);
@@ -318,7 +354,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           const base64 = el.screenshot.replace(/^data:image\/\w+;base64,/, '');
           allImages.push({ data: base64, media_type: 'image/png' });
         }
-      });
+      }
       trimmed += lines.join('\n');
     }
 
@@ -963,7 +999,12 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           <Tooltip title={elementSelection.selectMode ? 'Exit select mode' : 'Select UI element'}>
             <IconButton
               size="small"
-              onClick={elementSelection.toggleSelectMode}
+              onClick={() => {
+                if (!elementSelection.selectMode && sessionId) {
+                  elementSelection.setExcludeSelectId(sessionId);
+                }
+                elementSelection.toggleSelectMode();
+              }}
               sx={{
                 p: 0.5,
                 ...(elementSelection.selectMode

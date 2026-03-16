@@ -629,6 +629,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
           isRunning={!isDraft && (session.status === 'running' || session.status === 'waiting_approval')}
           onStop={handleStop}
           contextEstimate={contextEstimate}
+          sessionId={id}
         />
       </Box>
     </Box>

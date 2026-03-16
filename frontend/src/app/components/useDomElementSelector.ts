@@ -31,12 +31,16 @@ const SEMANTIC_LABELS: Record<string, string> = {
   'tool-call': 'Tool Call',
   'tool-group': 'Tool Group',
   'view-card': 'View',
+  'browser-card': 'Browser',
 };
 
-function findSelectableAncestor(target: Element): Element | null {
+function findSelectableAncestor(target: Element, excludeId?: string | null): Element | null {
   let current: Element | null = target;
   while (current) {
-    if (current.hasAttribute(SELECT_ATTR)) return current;
+    if (current.hasAttribute(SELECT_ATTR)) {
+      if (excludeId && current.getAttribute(SELECT_ID_ATTR) === excludeId) return null;
+      return current;
+    }
     current = current.parentElement;
   }
   return null;
@@ -114,6 +118,11 @@ export function useDomElementSelector(): DomSelectorState {
   const isDraggingRef = useRef(false);
   const dragBoundsRef = useRef<{ left: number; top: number; right: number; bottom: number } | null>(null);
 
+  const excludeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    excludeIdRef.current = ctx?.excludeSelectId ?? null;
+  }, [ctx?.excludeSelectId]);
+
   const selectedIdsRef = useRef(new Map<string, string>());
   useEffect(() => {
     const map = new Map<string, string>();
@@ -161,10 +170,12 @@ export function useDomElementSelector(): DomSelectorState {
           const allSelectables = document.querySelectorAll(`[${SELECT_ATTR}]`);
           const preview: DragPreviewElement[] = [];
           const seen = new Set<string>();
+          const excId = excludeIdRef.current;
           allSelectables.forEach((el) => {
+            const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
+            if (excId && selectId === excId) return;
             const rect = el.getBoundingClientRect();
             if (rectsIntersect(b, { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })) {
-              const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
               if (seen.has(selectId)) return;
               seen.add(selectId);
               const type = el.getAttribute(SELECT_ATTR) || '';
@@ -200,7 +211,7 @@ export function useDomElementSelector(): DomSelectorState {
       return;
     }
 
-    const selectable = findSelectableAncestor(target);
+    const selectable = findSelectableAncestor(target, excludeIdRef.current);
     if (!selectable) {
       setOverlay(EMPTY_OVERLAY);
       hoveredRef.current = null;
@@ -231,7 +242,7 @@ export function useDomElementSelector(): DomSelectorState {
     if (e.button !== 0) return;
     const target = e.target as Element;
     // Only start drag on "empty" canvas areas (not on selectable elements)
-    if (target && findSelectableAncestor(target)) return;
+    if (target && findSelectableAncestor(target, excludeIdRef.current)) return;
     dragOriginRef.current = { x: e.clientX, y: e.clientY };
     isDraggingRef.current = false;
   }, []);
@@ -250,7 +261,10 @@ export function useDomElementSelector(): DomSelectorState {
       const allSelectables = document.querySelectorAll(`[${SELECT_ATTR}]`);
       const processed = new Set<string>();
 
+      const excId = excludeIdRef.current;
       allSelectables.forEach((el) => {
+        const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
+        if (excId && selectId === excId) return;
         const rect = el.getBoundingClientRect();
         const elRect = {
           left: rect.left,
@@ -260,7 +274,6 @@ export function useDomElementSelector(): DomSelectorState {
         };
 
         if (rectsIntersect(dr, elRect)) {
-          const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
           if (processed.has(selectId)) return;
           processed.add(selectId);
 
