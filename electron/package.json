@@ -1,6 +1,6 @@
 {
   "name": "openswarm",
-  "version": "1.0.11",
+  "version": "1.0.0",
   "description": "OpenSwarm — AI Agent Orchestrator",
   "main": "main.js",
   "scripts": {
@@ -95,7 +95,7 @@
     "publish": {
       "provider": "github",
       "owner": "openswarm-ai",
-      "repo": "production"
+      "repo": "openswarm"
     },
     "afterSign": "scripts/notarize.js"
   }
