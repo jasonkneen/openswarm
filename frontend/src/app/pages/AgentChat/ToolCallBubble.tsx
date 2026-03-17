@@ -19,6 +19,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AgentMessage } from '@/shared/state/agentsSlice';
 import { useClaudeTokens, useThemeMode } from '@/shared/styles/ThemeContext';
+import BrowserAgentInlineFeed from './BrowserAgentInlineFeed';
 
 const GoogleServiceIcon: React.FC<{ service: string; size?: number }> = ({ service, size = 14 }) => {
   if (service === 'gmail') {
@@ -466,6 +467,7 @@ interface ToolCallBubbleProps {
   isPending?: boolean;
   isStreaming?: boolean;
   mcpCompact?: boolean;
+  sessionId?: string;
 }
 
 interface TermColors {
@@ -1169,8 +1171,14 @@ const McpResultCard: React.FC<{ parsed: ParsedMcpResult; compact?: boolean }> = 
   return <GenericMcpCard data={data} />;
 };
 
+function isBrowserAgentTool(name: string): boolean {
+  if (name === 'BrowserAgent' || name === 'BrowserAgents') return true;
+  const mcp = parseMcpToolName(name);
+  return mcp.isMcp && mcp.serverSlug === 'openswarm-browser-agent';
+}
+
 const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
-  ({ call, result = null, isPending = false, isStreaming = false, mcpCompact = false }) => {
+  ({ call, result = null, isPending = false, isStreaming = false, mcpCompact = false, sessionId }) => {
     const c = useClaudeTokens();
     const tc = useTermColors();
     const [expanded, setExpanded] = useState(false);
@@ -1180,7 +1188,10 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
     const inputSummary = getInputSummary(toolName, input);
     const formattedInput = useMemo(() => formatInputDisplay(toolName, input), [toolName, input]);
     const showTimer = isPending && !isDenied && !isStreaming;
-    const showBody = expanded || isStreaming;
+
+    const isBrowserAgent = isBrowserAgentTool(toolName);
+    const browserAgentAutoExpand = isBrowserAgent && isPending && !isStreaming;
+    const showBody = expanded || isStreaming || browserAgentAutoExpand;
 
     const resultContent = result?.content;
     const hasStructuredResult =
@@ -1320,6 +1331,12 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
                 '&::-webkit-scrollbar-thumb': { background: tc.SCROLLBAR_THUMB, borderRadius: 3 },
               }}
             >
+              {isBrowserAgent && sessionId && (
+                <BrowserAgentInlineFeed
+                  parentSessionId={sessionId}
+                  browserId={input?.browser_id}
+                />
+              )}
               {parsedResult && parsedResult.type === 'mcp' ? (
                 <McpResultCard parsed={parsedResult} compact />
               ) : parsedResult ? (
@@ -1330,7 +1347,7 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
                   {parsedResult.type === 'text' ? parsedResult.content : ''}
                 </pre>
               ) : null}
-              {!parsedResult && isPending && !isStreaming && (
+              {!parsedResult && isPending && !isStreaming && !isBrowserAgent && (
                 <Box sx={{ px: 1.5, py: 1 }}>
                   <Box sx={{ width: 8, height: 2, bgcolor: tc.PROMPT_COLOR, animation: 'tool-pulse 1s ease-in-out infinite', borderRadius: 1 }} />
                 </Box>
@@ -1525,6 +1542,14 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
                 )}
               </pre>
 
+              {/* Browser agent inline feed */}
+              {isBrowserAgent && sessionId && (
+                <BrowserAgentInlineFeed
+                  parentSessionId={sessionId}
+                  browserId={input?.browser_id}
+                />
+              )}
+
               {/* Output */}
               {parsedResult && parsedResult.type === 'mcp' ? (
                 <McpResultCard parsed={parsedResult} />
@@ -1566,8 +1591,8 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
                 </pre>
               ) : null}
 
-              {/* Pending indicator when waiting for result */}
-              {!parsedResult && isPending && !isStreaming && (
+              {/* Pending indicator when waiting for result (skip for browser agent — feed replaces it) */}
+              {!parsedResult && isPending && !isStreaming && !isBrowserAgent && (
                 <Box sx={{ px: 1.5, pb: 1, pt: 0.5 }}>
                   <Box
                     sx={{

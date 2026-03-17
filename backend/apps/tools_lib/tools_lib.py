@@ -18,9 +18,11 @@ from backend.apps.tools_lib.models import ToolDefinition, ToolCreate, ToolUpdate
 
 logger = logging.getLogger(__name__)
 
-from backend.config.paths import BACKEND_DIR, TOOLS_DIR as DATA_DIR, BUILTIN_PERMISSIONS_PATH as BUILTIN_PERMS_PATH
+from backend.config.paths import BACKEND_DIR, DATA_ROOT, TOOLS_DIR as DATA_DIR, BUILTIN_PERMISSIONS_PATH as BUILTIN_PERMS_PATH
 
 load_dotenv(os.path.join(BACKEND_DIR, ".env"))
+if os.environ.get("OPENSWARM_PACKAGED") == "1":
+    load_dotenv(os.path.join(os.path.dirname(DATA_ROOT), ".env"), override=True)
 
 
 @asynccontextmanager

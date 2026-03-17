@@ -488,7 +488,8 @@ const Tools: React.FC = () => {
       if (discoverTools.fulfilled.match(result)) {
         setSnackbar({ open: true, message: 'Actions discovered successfully' });
       } else {
-        setSnackbar({ open: true, message: 'Discovery failed — is the MCP server running?', severity: 'error' });
+        const detail = (result as any).error?.message || 'Discovery failed — is the MCP server running?';
+        setSnackbar({ open: true, message: detail, severity: 'error' });
       }
     } finally {
       setDiscovering(false);

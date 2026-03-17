@@ -69,6 +69,7 @@ export interface AgentSession {
   tool_group_meta: Record<string, ToolGroupMeta>;
   dashboard_id?: string;
   browser_id?: string | null;
+  parent_session_id?: string | null;
 }
 
 export interface AgentConfig {
@@ -380,6 +381,15 @@ export const resumeSession = createAsyncThunk(
   }
 );
 
+export const fetchBrowserAgentChildren = createAsyncThunk(
+  'agents/fetchBrowserAgentChildren',
+  async (parentSessionId: string) => {
+    const res = await fetch(`${AGENTS_API}/sessions/${parentSessionId}/browser-agents`);
+    const data = await res.json();
+    return data.sessions as AgentSession[];
+  }
+);
+
 const agentsSlice = createSlice({
   name: 'agents',
   initialState,
@@ -629,7 +639,19 @@ const agentsSlice = createSlice({
     closeSessionFromWs(state, action: PayloadAction<HistorySession>) {
       const entry = action.payload;
       state.history[entry.id] = entry;
-      delete state.sessions[entry.id];
+
+      const session = state.sessions[entry.id];
+      if (session?.mode === 'browser-agent' && session.parent_session_id) {
+        session.status = (entry.status as AgentSession['status']) || 'completed';
+      } else {
+        delete state.sessions[entry.id];
+        for (const [id, s] of Object.entries(state.sessions)) {
+          if (s.mode === 'browser-agent' && s.parent_session_id === entry.id) {
+            delete state.sessions[id];
+          }
+        }
+      }
+
       if (state.activeSessionId === entry.id) {
         state.activeSessionId = null;
       }
@@ -814,6 +836,17 @@ const agentsSlice = createSlice({
             streamingMessage: existing.streamingMessage ?? null,
             tool_group_meta: session.tool_group_meta ?? existing.tool_group_meta ?? {},
           };
+        }
+      })
+      .addCase(fetchBrowserAgentChildren.fulfilled, (state, action) => {
+        for (const session of action.payload) {
+          if (!state.sessions[session.id]) {
+            state.sessions[session.id] = {
+              ...session,
+              streamingMessage: null,
+              tool_group_meta: session.tool_group_meta ?? {},
+            };
+          }
         }
       })
       .addCase(searchHistory.pending, (state) => {

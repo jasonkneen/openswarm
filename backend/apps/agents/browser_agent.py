@@ -188,6 +188,7 @@ async def run_browser_agent(
     tab_id: str = "",
     pre_selected: bool = False,
     initial_url: str | None = None,
+    parent_session_id: str | None = None,
 ) -> dict:
     """Run a browser sub-agent loop for a single browser card.
 
@@ -206,6 +207,7 @@ async def run_browser_agent(
         dashboard_id=dashboard_id,
         browser_id=browser_id,
         system_prompt=SYSTEM_PROMPT,
+        parent_session_id=parent_session_id,
     )
     agent_manager.sessions[session_id] = session
 
@@ -425,6 +427,7 @@ async def run_browser_agents(
     api_key: str,
     dashboard_id: str | None = None,
     pre_selected_browser_ids: list[str] | None = None,
+    parent_session_id: str | None = None,
 ) -> list[dict]:
     """Run multiple browser sub-agents in parallel.
 
@@ -451,6 +454,7 @@ async def run_browser_agents(
             dashboard_id=dashboard_id,
             pre_selected=is_pre_selected,
             initial_url=url if url and browser_id not in pre_selected else None,
+            parent_session_id=parent_session_id,
         )
 
     results = await asyncio.gather(*[_run_one(t) for t in tasks], return_exceptions=True)

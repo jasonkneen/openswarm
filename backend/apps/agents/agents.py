@@ -151,6 +151,11 @@ async def get_history(q: str = "", limit: int = 20, offset: int = 0, dashboard_i
         dashboard_id=dashboard_id or None,
     )
 
+@agents.router.get("/sessions/{session_id}/browser-agents")
+async def get_browser_agent_children(session_id: str):
+    children = agent_manager.get_browser_agent_children(session_id)
+    return {"sessions": children}
+
 @agents.router.post("/sessions/{session_id}/resume")
 async def resume_session(session_id: str):
     try:

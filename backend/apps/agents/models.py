@@ -72,3 +72,4 @@ class AgentSession(BaseModel):
     tool_group_meta: dict[str, "ToolGroupMeta"] = Field(default_factory=dict)
     dashboard_id: Optional[str] = None
     browser_id: Optional[str] = None
+    parent_session_id: Optional[str] = None

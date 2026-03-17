@@ -204,13 +204,17 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
 
     const isExpanded = inputOpen || viewPickerOpen || historyOpen;
 
+    const autoSelectOnNew = useAppSelector((s) => s.settings.data.auto_select_mode_on_new_agent);
     const prevInputOpenRef = useRef(inputOpen);
     useEffect(() => {
       if (prevInputOpenRef.current && !inputOpen && elementSelection?.selectMode) {
         elementSelection.setSelectMode(false);
       }
+      if (!prevInputOpenRef.current && inputOpen && autoSelectOnNew) {
+        elementSelection?.setSelectMode(true);
+      }
       prevInputOpenRef.current = inputOpen;
-    }, [inputOpen, elementSelection]);
+    }, [inputOpen, elementSelection, autoSelectOnNew]);
 
     useEffect(() => {
       if (!isExpanded) return;

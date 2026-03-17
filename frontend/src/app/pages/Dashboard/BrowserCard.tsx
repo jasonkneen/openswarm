@@ -67,6 +67,14 @@ const HANDLE_DEFS: { dir: ResizeDir; sx: Record<string, any> }[] = [
 
 const isElectron = navigator.userAgent.includes('Electron');
 
+const chromeUserAgent = navigator.userAgent
+  .replace(/\s*Electron\/\S+/, '')
+  .replace(/\s*OpenSwarm\/\S+/, '');
+
+const webviewPreloadPath: string | undefined = isElectron
+  ? (window as any).openswarm?.getWebviewPreloadPath?.()
+  : undefined;
+
 type WebviewElement = BrowserWebview;
 
 interface TabLocalState {
@@ -192,10 +200,6 @@ const BrowserCard: React.FC<Props> = ({
         onTitleUpdate();
       };
 
-      const onNewWindow = (e: any) => {
-        if (e.url) dispatch(addBrowserTab({ browserId, url: e.url, makeActive: true }));
-      };
-
       const onFaviconUpdate = (e: any) => {
         const favicons = e.favicons || (e.detail && e.detail.favicons);
         if (favicons?.[0]) {
@@ -208,7 +212,6 @@ const BrowserCard: React.FC<Props> = ({
       wv.addEventListener('page-title-updated', onTitleUpdate);
       wv.addEventListener('did-start-loading', onLoadStart);
       wv.addEventListener('did-stop-loading', onLoadStop);
-      wv.addEventListener('new-window', onNewWindow);
       wv.addEventListener('page-favicon-updated', onFaviconUpdate);
 
       cleanups.push(() => {
@@ -218,7 +221,6 @@ const BrowserCard: React.FC<Props> = ({
         wv.removeEventListener('page-title-updated', onTitleUpdate);
         wv.removeEventListener('did-start-loading', onLoadStart);
         wv.removeEventListener('did-stop-loading', onLoadStop);
-        wv.removeEventListener('new-window', onNewWindow);
         wv.removeEventListener('page-favicon-updated', onFaviconUpdate);
       });
     }
@@ -988,6 +990,9 @@ const BrowserCard: React.FC<Props> = ({
               data-tab-id={tab.id}
               src="about:blank"
               allowpopups="true"
+              useragent={chromeUserAgent}
+              {...(webviewPreloadPath ? { preload: webviewPreloadPath } : {})}
+              webpreferences="plugins=yes, autoplayPolicy=no-user-gesture-required"
               style={{
                 position: 'absolute',
                 top: 0,

@@ -22,6 +22,7 @@ import {
   tidyLayout,
   addViewCard,
   addBrowserCard,
+  addBrowserTab,
   moveCards,
   resetLayout,
   setGlowingBrowserCards,
@@ -31,6 +32,7 @@ import { fetchOutputs } from '@/shared/state/outputsSlice';
 import { generateDashboardName, updateDashboardThumbnail } from '@/shared/state/dashboardsSlice';
 import { dashboardWs } from '@/shared/ws/WebSocketManager';
 import { initBrowserCommandHandler } from '@/shared/browserCommandHandler';
+import { findBrowserByWebContentsId } from '@/shared/browserRegistry';
 import AgentCard from './AgentCard';
 import DashboardViewCard from './DashboardViewCard';
 import BrowserCard from './BrowserCard';
@@ -199,6 +201,26 @@ const DashboardInner: React.FC = () => {
     const cleanupBrowserHandler = initBrowserCommandHandler();
     return () => { cleanupBrowserHandler(); dashboardWs.disconnect(); };
   }, [dispatch, dashboardId]);
+
+  useEffect(() => {
+    const w = window as any;
+    if (!w.openswarm?.onWebviewNewWindow) return;
+    let lastUrl = '';
+    let lastTime = 0;
+    return w.openswarm.onWebviewNewWindow((url: string, webContentsId: number) => {
+      const now = Date.now();
+      if (url === lastUrl && now - lastTime < 1000) return;
+      lastUrl = url;
+      lastTime = now;
+
+      const browserId = findBrowserByWebContentsId(webContentsId);
+      if (browserId) {
+        dispatch(addBrowserTab({ browserId, url, makeActive: true }));
+      } else {
+        dispatch(addBrowserCard({ url, expandedSessionIds }));
+      }
+    });
+  }, [dispatch, expandedSessionIds]);
 
   // Capture a thumbnail screenshot of the dashboard.
   // Uses Electron's native capturePage for pixel-perfect results.

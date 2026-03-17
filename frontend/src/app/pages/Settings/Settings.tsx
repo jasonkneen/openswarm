@@ -11,6 +11,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Slider from '@mui/material/Slider';
+import Switch from '@mui/material/Switch';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import Tab from '@mui/material/Tab';
@@ -495,7 +496,7 @@ const Settings: React.FC = () => {
           </Box>
         </Box>
 
-        <Box sx={inlineRowLastSx}>
+        <Box sx={inlineRowSx}>
           <Box sx={{ mr: 3 }}>
             <Typography sx={labelSx}>New agent shortcut</Typography>
             <Typography sx={descSx}>Keyboard shortcut to create an agent.</Typography>
@@ -551,6 +552,21 @@ const Settings: React.FC = () => {
               </Typography>
             )}
           </Box>
+        </Box>
+
+        <Box sx={inlineRowLastSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Auto-enable element selection</Typography>
+            <Typography sx={descSx}>Automatically enter element selection mode when creating a new agent.</Typography>
+          </Box>
+          <Switch
+            checked={form.auto_select_mode_on_new_agent}
+            onChange={(e) => setForm({ ...form, auto_select_mode_on_new_agent: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
+            }}
+          />
         </Box>
 
         {/* ── Browser ── */}

@@ -25,6 +25,7 @@ BACKEND_URL = f"http://127.0.0.1:{BACKEND_PORT}/api/browser-agent/run"
 MODEL = os.environ.get("OPENSWARM_AGENT_MODEL", "sonnet")
 DASHBOARD_ID = os.environ.get("OPENSWARM_DASHBOARD_ID", "")
 PRE_SELECTED_BROWSER_IDS = os.environ.get("OPENSWARM_PRE_SELECTED_BROWSER_IDS", "")
+PARENT_SESSION_ID = os.environ.get("OPENSWARM_PARENT_SESSION_ID", "")
 
 TOOLS = [
     {
@@ -119,6 +120,7 @@ def call_backend(tasks: list[dict]) -> dict:
         "model": MODEL,
         "dashboard_id": DASHBOARD_ID,
         "pre_selected_browser_ids": pre_selected,
+        "parent_session_id": PARENT_SESSION_ID,
     }).encode()
     req = urllib.request.Request(
         BACKEND_URL,

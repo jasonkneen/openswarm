@@ -22,6 +22,7 @@ export interface AppSettings {
   new_agent_shortcut: string;
   anthropic_api_key: string | null;
   browser_homepage: string;
+  auto_select_mode_on_new_agent: boolean;
 }
 
 export interface BrowseResult {
@@ -50,6 +51,7 @@ const initialState: SettingsState = {
     new_agent_shortcut: 'Meta+l',
     anthropic_api_key: null,
     browser_homepage: 'https://www.google.com',
+    auto_select_mode_on_new_agent: false,
   },
   loading: false,
   loaded: false,

@@ -10,6 +10,8 @@ declare global {
           partition?: string;
           allowpopups?: string;
           nodeintegration?: string;
+          webpreferences?: string;
+          useragent?: string;
         },
         HTMLElement
       >;
@@ -31,6 +33,7 @@ declare global {
 
   interface OpenSwarmAPI {
     getBackendPort: () => number;
+    getWebviewPreloadPath: () => string;
     getAppVersion: () => Promise<string>;
     checkForUpdates: () => Promise<{ success: boolean; version?: string; error?: string }>;
     downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
@@ -40,6 +43,7 @@ declare global {
     onDownloadProgress: (cb: (progress: OpenSwarmDownloadProgress) => void) => () => void;
     onUpdateDownloaded: (cb: (info: OpenSwarmUpdateInfo) => void) => () => void;
     onUpdateError: (cb: (message: string) => void) => () => void;
+    onWebviewNewWindow: (cb: (url: string, webContentsId: number) => void) => () => void;
   }
 
   interface Window {

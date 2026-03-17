@@ -621,6 +621,7 @@ class AgentManager:
                     "OPENSWARM_AGENT_MODEL": session.model,
                     "OPENSWARM_DASHBOARD_ID": session.dashboard_id or "",
                     "OPENSWARM_PRE_SELECTED_BROWSER_IDS": ",".join(pre_selected_bids),
+                    "OPENSWARM_PARENT_SESSION_ID": session.id,
                 },
                 "type": "stdio",
             }
@@ -1400,5 +1401,23 @@ class AgentManager:
 
     def get_session(self, session_id: str) -> Optional[AgentSession]:
         return self.sessions.get(session_id)
+
+    def get_browser_agent_children(self, parent_session_id: str) -> list[dict]:
+        """Return browser-agent sessions for a parent, from memory or disk."""
+        results: list[dict] = []
+        seen: set[str] = set()
+
+        for s in self.sessions.values():
+            if s.mode == "browser-agent" and s.parent_session_id == parent_session_id:
+                results.append(s.model_dump(mode="json"))
+                seen.add(s.id)
+
+        for sid, data in _load_all_session_data():
+            if sid in seen:
+                continue
+            if data.get("mode") == "browser-agent" and data.get("parent_session_id") == parent_session_id:
+                results.append(data)
+
+        return results
 
 agent_manager = AgentManager()

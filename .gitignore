@@ -9,6 +9,7 @@ backend/data/**
 electron/dist/
 electron/python-env/
 electron/node_modules/
+electron/package-lock.json
 
 # Frontend build output
 frontend/dist/

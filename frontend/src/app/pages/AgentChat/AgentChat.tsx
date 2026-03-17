@@ -527,11 +527,11 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
             {renderItems.map((item) => {
               if (isToolGroup(item)) {
                 const groupMeta = session.tool_group_meta?.[item.id];
-                return <ToolGroupBubble key={item.id} group={item} isSessionRunning={sessionRunning} meta={groupMeta} />;
+                return <ToolGroupBubble key={item.id} group={item} isSessionRunning={sessionRunning} meta={groupMeta} sessionId={session.id} />;
               }
               if (isToolPair(item)) {
                 const isPending = item.result === null && sessionRunning;
-                return <ToolCallBubble key={item.id} call={item.call} result={item.result} isPending={isPending} />;
+                return <ToolCallBubble key={item.id} call={item.call} result={item.result} isPending={isPending} sessionId={session.id} />;
               }
               const msg = item;
               const siblings = getSiblingBranches(msg.id);
@@ -566,6 +566,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                   key={`streaming-${session.streamingMessage.id}`}
                   isStreaming
                   isPending
+                  sessionId={session.id}
                   call={{
                     id: session.streamingMessage.id,
                     role: 'tool_call',

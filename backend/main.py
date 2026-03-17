@@ -126,6 +126,7 @@ async def browser_agent_run(request: Request):
     model = body.get("model", "sonnet")
     dashboard_id = body.get("dashboard_id", "")
     pre_selected_browser_ids = body.get("pre_selected_browser_ids", [])
+    parent_session_id = body.get("parent_session_id", "")
 
     if not tasks:
         return JSONResponse({"error": "tasks array is required"}, status_code=400)
@@ -140,6 +141,7 @@ async def browser_agent_run(request: Request):
         api_key=settings.anthropic_api_key,
         dashboard_id=dashboard_id or None,
         pre_selected_browser_ids=pre_selected_browser_ids,
+        parent_session_id=parent_session_id or None,
     )
     return JSONResponse({"results": results})
 

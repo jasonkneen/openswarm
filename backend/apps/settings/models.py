@@ -21,3 +21,4 @@ class AppSettings(BaseModel):
     new_agent_shortcut: str = "Meta+l"
     anthropic_api_key: Optional[str] = None
     browser_homepage: str = "https://www.google.com"
+    auto_select_mode_on_new_agent: bool = False
