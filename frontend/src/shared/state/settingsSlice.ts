@@ -23,6 +23,7 @@ export interface AppSettings {
   anthropic_api_key: string | null;
   browser_homepage: string;
   auto_select_mode_on_new_agent: boolean;
+  expand_new_chats_in_dashboard: boolean;
 }
 
 export interface BrowseResult {
@@ -52,6 +53,7 @@ const initialState: SettingsState = {
     anthropic_api_key: null,
     browser_homepage: 'https://www.google.com',
     auto_select_mode_on_new_agent: false,
+    expand_new_chats_in_dashboard: false,
   },
   loading: false,
   loaded: false,

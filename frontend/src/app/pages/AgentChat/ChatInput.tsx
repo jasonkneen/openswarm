@@ -981,6 +981,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           <Tooltip title={elementSelection.selectMode ? 'Exit select mode' : 'Select UI element'}>
             <IconButton
               size="small"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (!elementSelection.selectMode && sessionId) {
                   elementSelection.setExcludeSelectId(sessionId);

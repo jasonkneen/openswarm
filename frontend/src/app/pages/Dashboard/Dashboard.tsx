@@ -84,6 +84,7 @@ const DashboardInner: React.FC = () => {
   const zoomSensitivity = useAppSelector((state) => state.settings.data.zoom_sensitivity);
   const newAgentShortcut = useAppSelector((state) => state.settings.data.new_agent_shortcut);
   const browserHomepage = useAppSelector((state) => state.settings.data.browser_homepage);
+  const expandNewChats = useAppSelector((state) => state.settings.data.expand_new_chats_in_dashboard);
   const outputs = useAppSelector((state) => state.outputs.items);
   const sessionList = Object.values(sessions);
 
@@ -420,7 +421,7 @@ const DashboardInner: React.FC = () => {
           contextPaths: contextPaths?.map((cp) => ({ path: cp.path, type: cp.type })),
           forcedTools,
           attachedSkills,
-          expand: false,
+          expand: expandNewChats,
         }),
       ).then((action) => {
         if (launchAndSendFirstMessage.fulfilled.match(action)) {
@@ -452,7 +453,7 @@ const DashboardInner: React.FC = () => {
         }
       });
     },
-    [canvas.viewportRef, dispatch, dashboardId],
+    [canvas.viewportRef, dispatch, dashboardId, expandNewChats],
   );
 
   const handleAddView = useCallback((outputId: string) => {

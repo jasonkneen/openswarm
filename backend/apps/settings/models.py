@@ -22,3 +22,4 @@ class AppSettings(BaseModel):
     anthropic_api_key: Optional[str] = None
     browser_homepage: str = "https://www.google.com"
     auto_select_mode_on_new_agent: bool = False
+    expand_new_chats_in_dashboard: bool = False

@@ -382,6 +382,7 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                 config["command"] = resolved
         env = config.setdefault("env", {})
         env.setdefault("PATH", _augmented_path())
+        env.setdefault("PYTHONPATH", "")
 
     return config
 
@@ -548,6 +549,7 @@ async def _discover_mcp_tools_stdio(command: str, args: list[str] | None = None,
         raise HTTPException(status_code=400, detail=f"Command '{command}' not found on PATH or common install locations")
 
     proc_env = {**os.environ, **(env or {}), "PATH": _augmented_path()}
+    proc_env.pop("PYTHONPATH", None)
 
     proc = await asyncio.create_subprocess_exec(
         cmd_path, *(args or []),

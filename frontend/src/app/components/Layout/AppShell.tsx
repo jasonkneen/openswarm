@@ -27,6 +27,9 @@ import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined';
 import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
 import ArrowForwardOutlinedIcon from '@mui/icons-material/ArrowForwardOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt';
+import CloseIcon from '@mui/icons-material/Close';
+import LinearProgress from '@mui/material/LinearProgress';
 import Settings from '@/app/pages/Settings/Settings';
 import GlobalApprovalOverlay from '@/app/components/GlobalApprovalOverlay';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
@@ -38,6 +41,7 @@ const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 220;
 const SIDEBAR_WIDTH_KEY = 'openswarm-sidebar-width';
+const UPDATE_DISMISS_KEY = 'openswarm-update-dismissed';
 
 const CUSTOMIZATION_ITEMS = [
   { label: 'Prompts', path: '/templates', icon: <DescriptionIcon /> },
@@ -75,10 +79,34 @@ const AppShell: React.FC = () => {
 
   const updateStatus = useAppSelector((state) => state.update.status);
   const availableVersion = useAppSelector((state) => state.update.availableVersion);
-  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
+  const downloadPercent = useAppSelector((state) => state.update.downloadPercent);
 
-  const showUpdateDot = updateStatus === 'available' || updateStatus === 'downloaded';
-  const showUpdateBanner = updateStatus === 'downloaded' && !updateBannerDismissed;
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
+    try { return localStorage.getItem(UPDATE_DISMISS_KEY); } catch { return null; }
+  });
+  const [snackbarDismissed, setSnackbarDismissed] = useState(false);
+
+  const bannerDismissedForVersion = availableVersion != null && dismissedVersion === availableVersion;
+  const isUpdateActionable = updateStatus === 'available' || updateStatus === 'downloaded' || updateStatus === 'downloading';
+
+  const showUpdateDot = (updateStatus === 'available' || updateStatus === 'downloaded') && !bannerDismissedForVersion;
+  const showUpdateBanner = isUpdateActionable && !bannerDismissedForVersion;
+  const showUpdateSnackbar = (updateStatus === 'available' || updateStatus === 'downloaded') && !bannerDismissedForVersion && !snackbarDismissed;
+
+  const handleDismissBanner = useCallback(() => {
+    if (availableVersion) {
+      try { localStorage.setItem(UPDATE_DISMISS_KEY, availableVersion); } catch {}
+      setDismissedVersion(availableVersion);
+    }
+  }, [availableVersion]);
+
+  const handleDownloadUpdate = useCallback(async () => {
+    try { await (window as any).openswarm?.downloadUpdate(); } catch {}
+  }, []);
+
+  const handleInstallUpdate = useCallback(() => {
+    (window as any).openswarm?.installUpdate();
+  }, []);
 
   const dashboardItems = useAppSelector((state) => state.dashboards.items);
   const dashboardList = Object.values(dashboardItems).sort(
@@ -278,6 +306,98 @@ const AppShell: React.FC = () => {
           </Typography>
         </Box>
       </Box>
+
+      {showUpdateBanner && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            px: 2,
+            py: 0.5,
+            bgcolor: `${c.accent.primary}14`,
+            borderBottom: `1px solid ${c.accent.primary}30`,
+            flexShrink: 0,
+          }}
+        >
+          <SystemUpdateAltIcon sx={{ fontSize: 16, color: c.accent.primary, flexShrink: 0 }} />
+          <Typography sx={{ fontSize: '0.8rem', color: c.text.secondary, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {updateStatus === 'available' && `OpenSwarm ${availableVersion} is available`}
+            {updateStatus === 'downloading' && `Downloading OpenSwarm ${availableVersion}…`}
+            {updateStatus === 'downloaded' && `OpenSwarm ${availableVersion} is ready to install`}
+          </Typography>
+          {updateStatus === 'downloading' && (
+            <LinearProgress
+              variant="determinate"
+              value={downloadPercent}
+              sx={{
+                width: 120,
+                height: 3,
+                flexShrink: 0,
+                borderRadius: 2,
+                bgcolor: `${c.accent.primary}20`,
+                '& .MuiLinearProgress-bar': { bgcolor: c.accent.primary, borderRadius: 2 },
+              }}
+            />
+          )}
+          {updateStatus === 'downloading' && (
+            <Typography sx={{ fontSize: '0.72rem', color: c.text.tertiary, flexShrink: 0 }}>
+              {Math.round(downloadPercent)}%
+            </Typography>
+          )}
+          {updateStatus === 'available' && (
+            <Button
+              size="small"
+              variant="contained"
+              onClick={handleDownloadUpdate}
+              sx={{
+                bgcolor: c.accent.primary,
+                '&:hover': { bgcolor: c.accent.pressed },
+                textTransform: 'none',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                borderRadius: 1.5,
+                minWidth: 'auto',
+                py: 0.25,
+                px: 1.5,
+                lineHeight: 1.5,
+                flexShrink: 0,
+              }}
+            >
+              Download
+            </Button>
+          )}
+          {updateStatus === 'downloaded' && (
+            <Button
+              size="small"
+              variant="contained"
+              onClick={handleInstallUpdate}
+              sx={{
+                bgcolor: c.accent.primary,
+                '&:hover': { bgcolor: c.accent.pressed },
+                textTransform: 'none',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                borderRadius: 1.5,
+                minWidth: 'auto',
+                py: 0.25,
+                px: 1.5,
+                lineHeight: 1.5,
+                flexShrink: 0,
+              }}
+            >
+              Restart & Update
+            </Button>
+          )}
+          <IconButton
+            size="small"
+            onClick={handleDismissBanner}
+            sx={{ color: c.text.tertiary, p: 0.25, flexShrink: 0, '&:hover': { color: c.text.secondary } }}
+          >
+            <CloseIcon sx={{ fontSize: 14 }} />
+          </IconButton>
+        </Box>
+      )}
 
       <Box sx={{ display: 'flex', flex: 1, minHeight: 0 }}>
       {!sidebarCollapsed && (
@@ -735,36 +855,60 @@ const AppShell: React.FC = () => {
       <GlobalApprovalOverlay />
 
       <Snackbar
-        open={showUpdateBanner}
+        open={showUpdateSnackbar}
+        autoHideDuration={10000}
+        onClose={() => setSnackbarDismissed(true)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert
           severity="info"
-          icon={<RestartAltIcon sx={{ fontSize: 18 }} />}
+          icon={updateStatus === 'downloaded'
+            ? <RestartAltIcon sx={{ fontSize: 18 }} />
+            : <SystemUpdateAltIcon sx={{ fontSize: 18 }} />
+          }
           action={
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <Button
                 size="small"
-                onClick={() => setUpdateBannerDismissed(true)}
+                onClick={() => setSnackbarDismissed(true)}
                 sx={{ color: c.text.muted, textTransform: 'none', fontSize: '0.8rem', minWidth: 'auto' }}
               >
-                Later
+                Dismiss
               </Button>
-              <Button
-                size="small"
-                variant="contained"
-                onClick={() => (window as any).openswarm?.installUpdate()}
-                sx={{
-                  bgcolor: c.accent.primary,
-                  '&:hover': { bgcolor: c.accent.pressed },
-                  textTransform: 'none',
-                  fontSize: '0.8rem',
-                  borderRadius: 1.5,
-                  minWidth: 'auto',
-                }}
-              >
-                Restart
-              </Button>
+              {updateStatus === 'available' && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={handleDownloadUpdate}
+                  sx={{
+                    bgcolor: c.accent.primary,
+                    '&:hover': { bgcolor: c.accent.pressed },
+                    textTransform: 'none',
+                    fontSize: '0.8rem',
+                    borderRadius: 1.5,
+                    minWidth: 'auto',
+                  }}
+                >
+                  Download
+                </Button>
+              )}
+              {updateStatus === 'downloaded' && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={handleInstallUpdate}
+                  sx={{
+                    bgcolor: c.accent.primary,
+                    '&:hover': { bgcolor: c.accent.pressed },
+                    textTransform: 'none',
+                    fontSize: '0.8rem',
+                    borderRadius: 1.5,
+                    minWidth: 'auto',
+                  }}
+                >
+                  Restart & Update
+                </Button>
+              )}
             </Box>
           }
           sx={{
@@ -775,7 +919,8 @@ const AppShell: React.FC = () => {
             '& .MuiAlert-icon': { color: c.accent.primary },
           }}
         >
-          OpenSwarm {availableVersion} downloaded — restart to update
+          {updateStatus === 'available' && `OpenSwarm ${availableVersion} is available`}
+          {updateStatus === 'downloaded' && `OpenSwarm ${availableVersion} downloaded — restart to update`}
         </Alert>
       </Snackbar>
     </Box>

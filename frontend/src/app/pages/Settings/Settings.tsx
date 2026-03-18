@@ -554,7 +554,7 @@ const Settings: React.FC = () => {
           </Box>
         </Box>
 
-        <Box sx={inlineRowLastSx}>
+        <Box sx={inlineRowSx}>
           <Box sx={{ mr: 3 }}>
             <Typography sx={labelSx}>Auto-enable element selection</Typography>
             <Typography sx={descSx}>Automatically enter element selection mode when creating a new agent.</Typography>
@@ -562,6 +562,21 @@ const Settings: React.FC = () => {
           <Switch
             checked={form.auto_select_mode_on_new_agent}
             onChange={(e) => setForm({ ...form, auto_select_mode_on_new_agent: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
+            }}
+          />
+        </Box>
+
+        <Box sx={inlineRowLastSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Default agent spawn state in dashboard</Typography>
+            <Typography sx={descSx}>When enabled, new agents spawn expanded instead of collapsed.</Typography>
+          </Box>
+          <Switch
+            checked={form.expand_new_chats_in_dashboard}
+            onChange={(e) => setForm({ ...form, expand_new_chats_in_dashboard: e.target.checked })}
             sx={{
               '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
               '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
