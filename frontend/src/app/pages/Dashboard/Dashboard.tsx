@@ -308,7 +308,7 @@ const DashboardInner: React.FC = () => {
   useEffect(() => {
     if (!layoutInitialized) return;
     const dashboardSessionIds = Object.values(sessions)
-      .filter((s) => s.dashboard_id === dashboardId && s.mode !== 'browser-agent')
+      .filter((s) => s.dashboard_id === dashboardId && s.mode !== 'browser-agent' && s.mode !== 'invoked-agent')
       .map((s) => s.id);
     const liveIds = dashboardSessionIds.sort().join(',');
     if (liveIds === prevSessionIdsRef.current) return;

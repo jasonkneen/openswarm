@@ -736,6 +736,24 @@ const Settings: React.FC = () => {
           />
         </Box>
 
+        {/* ── Advanced ── */}
+        <Typography sx={{ ...sectionSx, mt: 3 }}>Advanced</Typography>
+
+        <Box sx={inlineRowLastSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Developer mode</Typography>
+            <Typography sx={descSx}>Show transport details, environment variables, raw configs, and other technical metadata throughout the app.</Typography>
+          </Box>
+          <Switch
+            checked={form.dev_mode}
+            onChange={(e) => setForm({ ...form, dev_mode: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
+            }}
+          />
+        </Box>
+
         {/* ── About ── */}
         <Typography sx={{ ...sectionSx, mt: 3 }}>About</Typography>
 

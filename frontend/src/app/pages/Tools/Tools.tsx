@@ -56,6 +56,7 @@ import BlockIcon from '@mui/icons-material/Block';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import SecurityIcon from '@mui/icons-material/Security';
 import PanToolIcon from '@mui/icons-material/PanTool';
+import CallSplitIcon from '@mui/icons-material/CallSplit';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import {
   fetchTools,
@@ -74,6 +75,8 @@ import {
 import {
   searchRegistry,
   fetchRegistryStats,
+  fetchServerDetail,
+  clearDetail,
   McpServer,
 } from '@/shared/state/mcpRegistrySlice';
 import {
@@ -156,7 +159,7 @@ const INTEGRATIONS: Integration[] = [
   },
 ];
 
-const CATEGORY_ORDER = ['filesystem', 'system', 'search', 'interaction', 'planning', 'scheduling'];
+const CATEGORY_ORDER = ['filesystem', 'system', 'search', 'interaction', 'agents', 'planning', 'scheduling'];
 
 interface ToolForm {
   name: string;
@@ -235,6 +238,7 @@ const ToolSection: React.FC<ToolSectionProps> = ({
     interaction: { label: 'Interaction', color: '#a855f7', icon: <QuestionAnswerIcon sx={{ fontSize: 16 }} /> },
     planning: { label: 'Planning', color: '#ec4899', icon: <MapIcon sx={{ fontSize: 16 }} /> },
     scheduling: { label: 'Scheduling', color: '#14b8a6', icon: <ScheduleIcon sx={{ fontSize: 16 }} /> },
+    agents: { label: 'Agents', color: '#f97316', icon: <CallSplitIcon sx={{ fontSize: 16 }} /> },
   };
 
   const PermToggle = ({ value, onChange, size = 16 }: { value: string; onChange: (v: string) => void; size?: number }) => (
@@ -343,7 +347,7 @@ const ToolSection: React.FC<ToolSectionProps> = ({
                       return (
                         <Box key={bt.name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, '&:hover': { bgcolor: c.bg.secondary } }}>
                           <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
-                            <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{bt.name}</Typography>
+                            <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{bt.display_name || bt.name}</Typography>
                             {bt.description && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{firstSentence(bt.description)}</Typography>}
                           </Box>
                           <PermToggle value={toolPolicy} onChange={(v) => onPermissionChange(bt.name, v)} size={14} />
@@ -370,7 +374,8 @@ const Tools: React.FC = () => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
   const { items, builtinTools, builtinPermissions, loading } = useAppSelector((s) => s.tools);
-  const { servers: regServers, total: regTotal, loading: regLoading, stats: regStats } = useAppSelector((s) => s.mcpRegistry);
+  const { servers: regServers, total: regTotal, loading: regLoading, stats: regStats, detail: regDetail, detailLoading: regDetailLoading } = useAppSelector((s) => s.mcpRegistry);
+  const devMode = useAppSelector((s) => s.settings.data.dev_mode);
   const outputItems = useAppSelector((s) => s.outputs.items);
   const outputs = useMemo(() => Object.values(outputItems), [outputItems]);
   const allTools = Object.values(items);
@@ -531,6 +536,7 @@ const Tools: React.FC = () => {
   };
 
   const [expandedServices, setExpandedServices] = useState<Record<string, boolean>>({});
+  const [expandedSchema, setExpandedSchema] = useState<string | null>(null);
 
   const [viewsSectionOpen, setViewsSectionOpen] = useState(false);
   const [browserSectionOpen, setBrowserSectionOpen] = useState(false);
@@ -1083,7 +1089,7 @@ const Tools: React.FC = () => {
                             return (
                               <Box key={bt.name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, '&:hover': { bgcolor: c.bg.secondary } }}>
                                 <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
-                                  <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{bt.name}</Typography>
+                                  <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{bt.display_name || bt.name}</Typography>
                                   {bt.description && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bt.description}</Typography>}
                                 </Box>
                                 <Box sx={{ display: 'flex', gap: 0.25 }} onClick={(e) => e.stopPropagation()}>
@@ -1131,7 +1137,7 @@ const Tools: React.FC = () => {
                             return (
                               <Box key={bt.name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, '&:hover': { bgcolor: c.bg.secondary } }}>
                                 <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
-                                  <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{bt.name}</Typography>
+                                  <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{bt.display_name || bt.name}</Typography>
                                   {bt.description && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bt.description}</Typography>}
                                 </Box>
                                 <Box sx={{ display: 'flex', gap: 0.25 }} onClick={(e) => e.stopPropagation()}>
@@ -1220,6 +1226,7 @@ const Tools: React.FC = () => {
                 const perms = tool.tool_permissions || {};
                 const services = perms._services as Record<string, { read?: string[]; write?: string[] }> | undefined;
                 const descriptions = (perms._tool_descriptions || {}) as Record<string, string>;
+                const schemas = (perms._tool_schemas || {}) as Record<string, any>;
                 const serviceNames = services ? Object.keys(services) : [];
                 const hasPerms = serviceNames.length > 0;
                 const totalToolCount = serviceNames.reduce((acc, s) => acc + (services![s].read?.length || 0) + (services![s].write?.length || 0), 0);
@@ -1292,15 +1299,36 @@ const Tools: React.FC = () => {
                                 </Box>
                                 <PermToggle value={getGroupPolicy(data.read!) === 'mixed' ? 'ask' : getGroupPolicy(data.read!)} onChange={(v) => handleGroupPermissionChange(tool.id, data.read!, v)} size={14} />
                               </Box>
-                              {data.read!.map((name) => (
-                                <Box key={name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, '&:hover': { bgcolor: c.bg.secondary } }}>
-                                  <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
-                                    <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{toDisplayName(name, serviceName)}</Typography>
-                                    {descriptions[name] && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{firstSentence(descriptions[name])}</Typography>}
+                              {data.read!.map((name) => {
+                                const schemaKey = `${tool.id}:${name}`;
+                                const schema = schemas[name];
+                                const schemaProps = schema?.properties as Record<string, any> | undefined;
+                                const schemaRequired = (schema?.required || []) as string[];
+                                return (
+                                  <Box key={name}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, cursor: devMode && schema ? 'pointer' : undefined, '&:hover': { bgcolor: c.bg.secondary } }} onClick={() => devMode && schema && setExpandedSchema((p) => p === schemaKey ? null : schemaKey)}>
+                                      <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
+                                        <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{toDisplayName(name, serviceName)}</Typography>
+                                        {descriptions[name] && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{firstSentence(descriptions[name])}</Typography>}
+                                      </Box>
+                                      <PermToggle value={perms[name] || 'ask'} onChange={(v) => handlePermissionChange(tool.id, name, v)} size={14} />
+                                    </Box>
+                                    {devMode && expandedSchema === schemaKey && schemaProps && (
+                                      <Box sx={{ mx: 1.5, mb: 0.75, px: 1.5, py: 1, bgcolor: c.bg.page, borderRadius: 1, border: `1px solid ${c.border.subtle}` }}>
+                                        <Typography sx={{ color: c.text.ghost, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', mb: 0.5 }}>Input Parameters</Typography>
+                                        {Object.entries(schemaProps).map(([pName, pDef]: [string, any]) => (
+                                          <Box key={pName} sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, py: 0.2 }}>
+                                            <Typography sx={{ color: c.accent.primary, fontSize: '0.72rem', fontFamily: c.font.mono, fontWeight: 600, flexShrink: 0 }}>{pName}</Typography>
+                                            <Typography sx={{ color: c.text.muted, fontSize: '0.68rem', fontFamily: c.font.mono }}>{pDef?.type || 'any'}</Typography>
+                                            {schemaRequired.includes(pName) && <Chip label="required" size="small" sx={{ bgcolor: `${c.status.error}12`, color: c.status.error, fontSize: '0.55rem', height: 14, '& .MuiChip-label': { px: 0.4 } }} />}
+                                            {pDef?.description && <Typography sx={{ color: c.text.ghost, fontSize: '0.68rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pDef.description}</Typography>}
+                                          </Box>
+                                        ))}
+                                      </Box>
+                                    )}
                                   </Box>
-                                  <PermToggle value={perms[name] || 'ask'} onChange={(v) => handlePermissionChange(tool.id, name, v)} size={14} />
-                                </Box>
-                              ))}
+                                );
+                              })}
                             </Box>
                           )}
                           {(data.write?.length || 0) > 0 && (
@@ -1313,15 +1341,36 @@ const Tools: React.FC = () => {
                                 </Box>
                                 <PermToggle value={getGroupPolicy(data.write!) === 'mixed' ? 'ask' : getGroupPolicy(data.write!)} onChange={(v) => handleGroupPermissionChange(tool.id, data.write!, v)} size={14} />
                               </Box>
-                              {data.write!.map((name) => (
-                                <Box key={name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, '&:hover': { bgcolor: c.bg.secondary } }}>
-                                  <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
-                                    <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{toDisplayName(name, serviceName)}</Typography>
-                                    {descriptions[name] && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{firstSentence(descriptions[name])}</Typography>}
+                              {data.write!.map((name) => {
+                                const schemaKey = `${tool.id}:${name}`;
+                                const schema = schemas[name];
+                                const schemaProps = schema?.properties as Record<string, any> | undefined;
+                                const schemaRequired = (schema?.required || []) as string[];
+                                return (
+                                  <Box key={name}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.4, px: 1.5, borderRadius: 1, cursor: devMode && schema ? 'pointer' : undefined, '&:hover': { bgcolor: c.bg.secondary } }} onClick={() => devMode && schema && setExpandedSchema((p) => p === schemaKey ? null : schemaKey)}>
+                                      <Box sx={{ minWidth: 0, flex: 1, mr: 1 }}>
+                                        <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{toDisplayName(name, serviceName)}</Typography>
+                                        {descriptions[name] && <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{firstSentence(descriptions[name])}</Typography>}
+                                      </Box>
+                                      <PermToggle value={perms[name] || 'ask'} onChange={(v) => handlePermissionChange(tool.id, name, v)} size={14} />
+                                    </Box>
+                                    {devMode && expandedSchema === schemaKey && schemaProps && (
+                                      <Box sx={{ mx: 1.5, mb: 0.75, px: 1.5, py: 1, bgcolor: c.bg.page, borderRadius: 1, border: `1px solid ${c.border.subtle}` }}>
+                                        <Typography sx={{ color: c.text.ghost, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', mb: 0.5 }}>Input Parameters</Typography>
+                                        {Object.entries(schemaProps).map(([pName, pDef]: [string, any]) => (
+                                          <Box key={pName} sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, py: 0.2 }}>
+                                            <Typography sx={{ color: c.accent.primary, fontSize: '0.72rem', fontFamily: c.font.mono, fontWeight: 600, flexShrink: 0 }}>{pName}</Typography>
+                                            <Typography sx={{ color: c.text.muted, fontSize: '0.68rem', fontFamily: c.font.mono }}>{pDef?.type || 'any'}</Typography>
+                                            {schemaRequired.includes(pName) && <Chip label="required" size="small" sx={{ bgcolor: `${c.status.error}12`, color: c.status.error, fontSize: '0.55rem', height: 14, '& .MuiChip-label': { px: 0.4 } }} />}
+                                            {pDef?.description && <Typography sx={{ color: c.text.ghost, fontSize: '0.68rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pDef.description}</Typography>}
+                                          </Box>
+                                        ))}
+                                      </Box>
+                                    )}
                                   </Box>
-                                  <PermToggle value={perms[name] || 'ask'} onChange={(v) => handlePermissionChange(tool.id, name, v)} size={14} />
-                                </Box>
-                              ))}
+                                );
+                              })}
                             </Box>
                           )}
                         </Box>
@@ -1491,6 +1540,46 @@ const Tools: React.FC = () => {
                               ))}
                             </Box>
                           )}
+
+                          {devMode && isMcp && (
+                            <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px solid ${c.border.subtle}`, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                              <Typography sx={{ color: c.text.muted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                Developer Info
+                              </Typography>
+                              <Box sx={{ bgcolor: c.bg.page, borderRadius: 1.5, border: `1px solid ${c.border.subtle}`, px: 1.5, py: 1 }}>
+                                <Typography sx={{ color: c.text.ghost, fontSize: '0.68rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', mb: 0.5 }}>
+                                  MCP Config
+                                </Typography>
+                                <Typography component="pre" sx={{ color: c.text.muted, fontSize: '0.75rem', fontFamily: c.font.mono, whiteSpace: 'pre-wrap', wordBreak: 'break-all', m: 0, lineHeight: 1.5 }}>
+                                  {JSON.stringify(tool.mcp_config, null, 2)}
+                                </Typography>
+                              </Box>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>Auth type:</Typography>
+                                  <Typography sx={{ color: c.text.muted, fontSize: '0.72rem', fontFamily: c.font.mono }}>{tool.auth_type || 'none'}</Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>Status:</Typography>
+                                  <Typography sx={{ color: c.text.muted, fontSize: '0.72rem', fontFamily: c.font.mono }}>{tool.auth_status || 'none'}</Typography>
+                                </Box>
+                                {tool.connected_account_email && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>Account:</Typography>
+                                    <Typography sx={{ color: c.text.muted, fontSize: '0.72rem', fontFamily: c.font.mono }}>{tool.connected_account_email}</Typography>
+                                  </Box>
+                                )}
+                              </Box>
+                              {tool.credentials && Object.keys(tool.credentials).length > 0 && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                                  <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>Credentials:</Typography>
+                                  {Object.keys(tool.credentials).map((key) => (
+                                    <Chip key={key} label={`${key}: configured`} size="small" sx={{ bgcolor: `${c.status.success}12`, color: c.status.success, fontSize: '0.65rem', height: 18, fontFamily: c.font.mono, '& .MuiChip-label': { px: 0.6 } }} />
+                                  ))}
+                                </Box>
+                              )}
+                            </Box>
+                          )}
                         </Box>
                       </Collapse>
                   </Card>
@@ -1527,17 +1616,24 @@ const Tools: React.FC = () => {
           <StorefrontIcon sx={{ color: c.accent.primary }} />
           MCP Registry
           {regStats && (
-            <Chip
-              label={
-                regSource === 'google'
-                  ? `${regStats.google.toLocaleString()} Google servers`
-                  : regSource === 'community'
-                    ? `${regStats.community.toLocaleString()} Community servers`
-                    : `${regStats.total.toLocaleString()} servers`
-              }
-              size="small"
-              sx={{ bgcolor: c.bg.secondary, color: c.text.muted, fontSize: '0.7rem', height: 20, ml: 'auto' }}
-            />
+            <>
+              <Chip
+                label={
+                  regSource === 'google'
+                    ? `${regStats.google.toLocaleString()} Google servers`
+                    : regSource === 'community'
+                      ? `${regStats.community.toLocaleString()} Community servers`
+                      : `${regStats.total.toLocaleString()} servers`
+                }
+                size="small"
+                sx={{ bgcolor: c.bg.secondary, color: c.text.muted, fontSize: '0.7rem', height: 20, ml: 'auto' }}
+              />
+              {devMode && regStats.lastUpdated > 0 && (
+                <Typography sx={{ color: c.text.ghost, fontSize: '0.68rem', flexShrink: 0 }}>
+                  Synced {Math.round((Date.now() / 1000 - regStats.lastUpdated) / 60)}m ago
+                </Typography>
+              )}
+            </>
           )}
         </DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 0, px: 3, pb: 0, overflow: 'hidden',
@@ -1624,10 +1720,18 @@ const Tools: React.FC = () => {
               </Typography>
               {regServers.map((srv) => {
                 const isExpanded = expandedServer === srv.name;
+                const isInstalled = allTools.some((t) => t.name === (srv.title || cleanServerName(srv.name)));
                 return (
                   <Box key={srv.name}>
                     <Box
-                      onClick={() => setExpandedServer(isExpanded ? null : srv.name)}
+                      onClick={() => {
+                        const next = isExpanded ? null : srv.name;
+                        setExpandedServer(next);
+                        if (next && devMode) {
+                          dispatch(clearDetail());
+                          dispatch(fetchServerDetail(srv.name));
+                        }
+                      }}
                       sx={{
                         display: 'flex', alignItems: 'center', gap: 1.5,
                         px: 1.5, py: 1, borderRadius: 1.5, cursor: 'pointer',
@@ -1664,6 +1768,12 @@ const Tools: React.FC = () => {
                                 {srv.stars >= 1000 ? `${(srv.stars / 1000).toFixed(1)}k` : srv.stars.toLocaleString()}
                               </Typography>
                             </Box>
+                          )}
+                          {devMode && !srv.remoteType && (
+                            <Chip label="stdio" size="small" sx={{ bgcolor: '#8b5cf615', color: '#8b5cf6', fontSize: '0.65rem', height: 18, '& .MuiChip-label': { px: 0.6 } }} />
+                          )}
+                          {isInstalled && (
+                            <Chip icon={<CheckCircleIcon sx={{ fontSize: 12 }} />} label="Installed" size="small" sx={{ bgcolor: `${c.status.success}15`, color: c.status.success, fontSize: '0.65rem', height: 18, '& .MuiChip-label': { px: 0.4 }, '& .MuiChip-icon': { ml: 0.4, color: c.status.success } }} />
                           )}
                         </Box>
                         <Typography sx={{ color: c.text.tertiary, fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1718,6 +1828,46 @@ const Tools: React.FC = () => {
                             )}
                           </Box>
                         </Box>
+
+                        {devMode && (
+                          <Box sx={{ mb: 2 }}>
+                            {regDetailLoading && expandedServer === srv.name ? (
+                              <CircularProgress size={14} sx={{ color: c.text.ghost }} />
+                            ) : regDetail && regDetail.name === srv.name ? (
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                                {(regDetail.keywords?.length > 0 || regDetail.license) && (
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+                                    {regDetail.license && (
+                                      <Chip label={regDetail.license} size="small" sx={{ bgcolor: `${c.status.info}15`, color: c.status.info, fontSize: '0.65rem', height: 18, '& .MuiChip-label': { px: 0.6 } }} />
+                                    )}
+                                    {regDetail.keywords?.map((kw) => (
+                                      <Chip key={kw} label={kw} size="small" sx={{ bgcolor: c.bg.secondary, color: c.text.muted, fontSize: '0.65rem', height: 18, '& .MuiChip-label': { px: 0.6 } }} />
+                                    ))}
+                                  </Box>
+                                )}
+                                {regDetail.environmentVariables?.length > 0 && (
+                                  <Box sx={{ bgcolor: c.bg.page, borderRadius: 1.5, border: `1px solid ${c.border.subtle}`, px: 1.5, py: 1 }}>
+                                    <Typography sx={{ color: c.text.muted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', mb: 0.75 }}>
+                                      Required Environment Variables
+                                    </Typography>
+                                    {regDetail.environmentVariables.map((ev) => (
+                                      <Box key={ev.name} sx={{ display: 'flex', alignItems: 'baseline', gap: 1, py: 0.25 }}>
+                                        <Typography sx={{ color: c.accent.primary, fontSize: '0.75rem', fontFamily: c.font.mono, fontWeight: 600, flexShrink: 0 }}>
+                                          {ev.name}
+                                        </Typography>
+                                        {ev.description && (
+                                          <Typography sx={{ color: c.text.ghost, fontSize: '0.72rem' }}>
+                                            {ev.description}
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    ))}
+                                  </Box>
+                                )}
+                              </Box>
+                            ) : null}
+                          </Box>
+                        )}
 
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           <Button

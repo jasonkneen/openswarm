@@ -37,6 +37,7 @@ class Message(BaseModel):
     attached_skills: Optional[list[dict]] = None
     forced_tools: Optional[list[str]] = None
     images: Optional[list[dict]] = None
+    hidden: bool = False
 
 class MessageBranch(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)

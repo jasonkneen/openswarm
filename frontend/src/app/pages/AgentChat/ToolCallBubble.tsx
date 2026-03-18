@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -15,9 +16,12 @@ import FolderIcon from '@mui/icons-material/Folder';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SearchIcon from '@mui/icons-material/Search';
 import SendIcon from '@mui/icons-material/Send';
+import CallSplitIcon from '@mui/icons-material/CallSplit';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AgentMessage } from '@/shared/state/agentsSlice';
+import { AgentMessage, expandSession } from '@/shared/state/agentsSlice';
+import { useAppDispatch, useAppSelector } from '@/shared/hooks';
+import { placeCard, setGlowingAgentCard, DEFAULT_CARD_W, DEFAULT_CARD_H, GRID_GAP } from '@/shared/state/dashboardLayoutSlice';
 import { useClaudeTokens, useThemeMode } from '@/shared/styles/ThemeContext';
 import BrowserAgentInlineFeed from './BrowserAgentInlineFeed';
 
@@ -1172,15 +1176,57 @@ const McpResultCard: React.FC<{ parsed: ParsedMcpResult; compact?: boolean }> = 
 };
 
 function isBrowserAgentTool(name: string): boolean {
-  if (name === 'BrowserAgent' || name === 'BrowserAgents') return true;
+  if (name === 'CreateBrowserAgent' || name === 'BrowserAgent' || name === 'BrowserAgents') return true;
   const mcp = parseMcpToolName(name);
   return mcp.isMcp && mcp.serverSlug === 'openswarm-browser-agent';
+}
+
+function isInvokeAgentTool(name: string): boolean {
+  if (name === 'InvokeAgent') return true;
+  const mcp = parseMcpToolName(name);
+  return mcp.isMcp && mcp.serverSlug === 'openswarm-invoke-agent';
+}
+
+function parseInvokedSessionId(rawText: string): string | null {
+  const match = rawText.match(/\(forked session:\s*([a-f0-9]+)\)/);
+  return match ? match[1] : null;
+}
+
+interface InvokeAgentParsed {
+  agentName: string;
+  sessionId: string | null;
+  cost: string | null;
+  response: string;
+}
+
+function parseInvokeAgentResult(rawText: string): InvokeAgentParsed | null {
+  const headerMatch = rawText.match(
+    /\*\*Invoked Agent Result\*\*(?:\s*—\s*(.+?))?\s*\(forked session:\s*([a-f0-9]+)\)/,
+  );
+  if (!headerMatch) return null;
+
+  const agentName = headerMatch[1]?.trim() || 'Agent';
+  const sessionId = headerMatch[2];
+
+  const costMatch = rawText.match(/\*Cost:\s*\$([0-9.]+)\*/);
+  const cost = costMatch ? costMatch[1] : null;
+
+  const bodyStart = rawText.indexOf('\n\n');
+  let response = bodyStart >= 0 ? rawText.slice(bodyStart + 2).trim() : '';
+  if (response.startsWith('*Cost:')) {
+    const afterCost = response.indexOf('\n');
+    response = afterCost >= 0 ? response.slice(afterCost + 1).trim() : '';
+  }
+
+  return { agentName, sessionId, cost, response };
 }
 
 const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
   ({ call, result = null, isPending = false, isStreaming = false, mcpCompact = false, sessionId }) => {
     const c = useClaudeTokens();
     const tc = useTermColors();
+    const dispatch = useAppDispatch();
+    const cards = useAppSelector((s) => s.dashboardLayout.cards);
     const [expanded, setExpanded] = useState(false);
 
     const { toolName, input, isDenied } = getToolData(call);
@@ -1190,6 +1236,7 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
     const showTimer = isPending && !isDenied && !isStreaming;
 
     const isBrowserAgent = isBrowserAgentTool(toolName);
+    const isInvokeAgent = isInvokeAgentTool(toolName);
     const browserAgentAutoExpand = isBrowserAgent && isPending && !isStreaming;
     const showBody = expanded || isStreaming || browserAgentAutoExpand;
 
@@ -1217,6 +1264,38 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
       (parsedResult?.type === 'bash' && parsedResult.exitCode !== null && parsedResult.exitCode !== 0) ||
       (parsedResult?.type === 'text' && parsedResult.isError);
 
+    const invokedSessionId = useMemo(
+      () => (isInvokeAgent && result ? parseInvokedSessionId(resultRawText) : null),
+      [isInvokeAgent, result, resultRawText],
+    );
+
+    const invokeAgentParsed = useMemo(
+      () => (isInvokeAgent && result ? parseInvokeAgentResult(resultRawText) : null),
+      [isInvokeAgent, result, resultRawText],
+    );
+
+    const handleRevealInvokedAgent = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!invokedSessionId || !sessionId) return;
+        const parentCard = cards[sessionId];
+        const targetX = parentCard
+          ? parentCard.x + parentCard.width + GRID_GAP * 3
+          : 40;
+        const targetY = parentCard ? parentCard.y : 100;
+        dispatch(placeCard({
+          sessionId: invokedSessionId,
+          x: targetX,
+          y: targetY,
+          width: DEFAULT_CARD_W,
+          height: DEFAULT_CARD_H,
+        }));
+        dispatch(expandSession(invokedSessionId));
+        dispatch(setGlowingAgentCard({ sessionId: invokedSessionId, sourceId: sessionId }));
+      },
+      [invokedSessionId, sessionId, cards, dispatch],
+    );
+
     const toggle = useCallback(() => {
       if (!isStreaming) setExpanded((v) => !v);
     }, [isStreaming]);
@@ -1243,6 +1322,213 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
       'data-select-id': call.id,
       'data-select-meta': JSON.stringify({ tool: toolName, inputSummary }),
     };
+
+    if (isInvokeAgent) {
+      const agentName = invokeAgentParsed?.agentName || input?.session_id || 'Agent';
+      const responsePreview = invokeAgentParsed?.response || '';
+      const costLabel = invokeAgentParsed?.cost ? `$${invokeAgentParsed.cost}` : null;
+      const hasResponse = !!invokeAgentParsed;
+
+      return (
+        <Box {...selectAttrs} sx={{ maxWidth: '85%', my: 0.5 }}>
+          <style>{pulsingKeyframes}</style>
+          <Box
+            sx={{
+              '--glow-rgb': accentRgb,
+              bgcolor: c.bg.elevated,
+              border: `1px solid ${
+                isPending ? c.accent.primary : isDenied ? c.status.error + '60' : c.border.subtle
+              }`,
+              borderRadius: 2,
+              overflow: 'hidden',
+              animation: isPending ? 'border-glow 2s ease-in-out infinite' : 'none',
+              transition: 'border-color 0.3s, box-shadow 0.3s',
+            } as any}
+          >
+            {/* Header */}
+            <Box
+              onClick={toggle}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.75,
+                px: 1.5,
+                py: 0.75,
+                cursor: hasResponse ? 'pointer' : 'default',
+                '&:hover': hasResponse ? { bgcolor: 'rgba(0,0,0,0.02)' } : {},
+              }}
+            >
+              <CallSplitIcon sx={{ fontSize: 15, color: c.accent.primary, flexShrink: 0 }} />
+              <Typography
+                sx={{
+                  color: c.accent.primary,
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  flexShrink: 0,
+                }}
+              >
+                InvokeAgent
+              </Typography>
+              <Box
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  bgcolor: `${c.accent.primary}14`,
+                  borderRadius: 1,
+                  px: 0.75,
+                  py: 0.15,
+                  maxWidth: 180,
+                  overflow: 'hidden',
+                }}
+              >
+                <Typography
+                  noWrap
+                  sx={{
+                    fontSize: '0.72rem',
+                    fontWeight: 500,
+                    color: c.text.secondary,
+                    fontFamily: c.font.sans,
+                  }}
+                >
+                  {agentName}
+                </Typography>
+              </Box>
+
+              {!hasResponse && !showTimer && <Box sx={{ flex: 1 }} />}
+
+              {hasResponse && responsePreview && !expanded && (
+                <Typography
+                  noWrap
+                  sx={{
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: '0.73rem',
+                    color: c.text.tertiary,
+                    fontFamily: c.font.sans,
+                  }}
+                >
+                  {responsePreview.slice(0, 100)}{responsePreview.length > 100 ? '…' : ''}
+                </Typography>
+              )}
+              {expanded && <Box sx={{ flex: 1 }} />}
+
+              {isDenied && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+                  <BlockIcon sx={{ fontSize: 13, color: c.status.error }} />
+                  <Typography sx={{ color: c.status.error, fontSize: '0.7rem', fontWeight: 500 }}>denied</Typography>
+                </Box>
+              )}
+
+              {hasResponse && !isDenied && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {isError ? (
+                    <ErrorOutlineIcon sx={{ fontSize: 13, color: c.status.error }} />
+                  ) : (
+                    <CheckCircleOutlineIcon sx={{ fontSize: 13, color: c.status.success }} />
+                  )}
+                  {resultElapsedMs != null && (
+                    <Typography sx={{ fontSize: '0.65rem', fontFamily: c.font.mono, color: c.text.tertiary }}>
+                      {formatElapsed(resultElapsedMs)}
+                    </Typography>
+                  )}
+                  {costLabel && (
+                    <Typography sx={{ fontSize: '0.63rem', fontFamily: c.font.mono, color: c.text.tertiary }}>
+                      {costLabel}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
+              {showTimer && <ElapsedTimer startTime={call.timestamp} />}
+
+              {invokedSessionId && (
+                <Tooltip title="Reveal on dashboard" arrow>
+                  <IconButton
+                    size="small"
+                    onClick={handleRevealInvokedAgent}
+                    sx={{
+                      color: c.accent.primary,
+                      p: 0.25,
+                      flexShrink: 0,
+                      '&:hover': { bgcolor: `${c.accent.primary}18` },
+                    }}
+                  >
+                    <CallSplitIcon sx={{ fontSize: 15, transform: 'rotate(180deg)' }} />
+                  </IconButton>
+                </Tooltip>
+              )}
+
+              {hasResponse && (
+                <IconButton size="small" sx={{ color: c.text.tertiary, p: 0.25, flexShrink: 0 }}>
+                  {expanded ? <ExpandLessIcon sx={{ fontSize: 18 }} /> : <ExpandMoreIcon sx={{ fontSize: 18 }} />}
+                </IconButton>
+              )}
+            </Box>
+
+            {/* Expanded body — markdown rendered, not terminal */}
+            <Collapse in={expanded && hasResponse}>
+              <Box
+                sx={{
+                  borderTop: `1px solid ${c.border.subtle}`,
+                  px: 1.5,
+                  py: 1.25,
+                  maxHeight: 400,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  color: c.text.secondary,
+                  fontFamily: c.font.sans,
+                  fontSize: '0.78rem',
+                  lineHeight: 1.65,
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word',
+                  '& p': { m: 0, mb: 0.75, '&:last-child': { mb: 0 } },
+                  '& h1, & h2, & h3, & h4': {
+                    color: c.text.primary, fontFamily: c.font.sans,
+                    mt: 1, mb: 0.5, '&:first-of-type': { mt: 0 },
+                  },
+                  '& h1': { fontSize: '0.88rem' }, '& h2': { fontSize: '0.84rem' },
+                  '& h3': { fontSize: '0.8rem' }, '& h4': { fontSize: '0.78rem' },
+                  '& strong': { color: c.text.primary, fontWeight: 600 },
+                  '& a': { color: c.accent.primary, textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
+                  '& ul, & ol': { pl: 2, mb: 0.75, mt: 0 },
+                  '& li': { mb: 0.2 },
+                  '& blockquote': {
+                    m: 0, mb: 0.75, pl: 1, ml: 0,
+                    borderLeft: `2px solid ${c.border.subtle}`,
+                    color: c.text.tertiary, fontStyle: 'italic',
+                  },
+                  '& code': {
+                    bgcolor: c.bg.secondary, px: 0.4, py: 0.15,
+                    borderRadius: 0.5, fontSize: '0.72rem', fontFamily: c.font.mono,
+                  },
+                  '& pre': {
+                    bgcolor: c.bg.secondary, borderRadius: 1, p: 1,
+                    overflow: 'auto', fontSize: '0.72rem', fontFamily: c.font.mono,
+                    m: 0, mb: 0.75,
+                  },
+                  '& pre code': { bgcolor: 'transparent', p: 0 },
+                  '& hr': { border: 'none', borderTop: `1px solid ${c.border.subtle}`, my: 0.75 },
+                  '&::-webkit-scrollbar': { width: 5 },
+                  '&::-webkit-scrollbar-track': { background: 'transparent' },
+                  '&::-webkit-scrollbar-thumb': { background: c.border.medium, borderRadius: 3 },
+                }}
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ children, ...props }) => (
+                      <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>
+                    ),
+                  }}
+                >
+                  {responsePreview}
+                </ReactMarkdown>
+              </Box>
+            </Collapse>
+          </Box>
+        </Box>
+      );
+    }
 
     if (mcpCompact && mcpInfo.isMcp) {
       return (

@@ -14,6 +14,7 @@ export interface AgentMessage {
   attached_skills?: Array<{ id: string; name: string }>;
   forced_tools?: string[];
   images?: Array<{ data: string; media_type: string }>;
+  hidden?: boolean;
 }
 
 export interface ApprovalRequest {
@@ -154,15 +155,17 @@ export interface SendMessagePayload {
   contextPaths?: Array<{ path: string; type: 'file' | 'directory' }>;
   forcedTools?: string[];
   attachedSkills?: Array<{ id: string; name: string; content: string }>;
+  hidden?: boolean;
+  selectedBrowserIds?: string[];
 }
 
 export const sendMessage = createAsyncThunk(
   'agents/sendMessage',
-  async ({ sessionId, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills }: SendMessagePayload) => {
+  async ({ sessionId, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills, hidden, selectedBrowserIds }: SendMessagePayload) => {
     await fetch(`${AGENTS_API}/sessions/${sessionId}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, mode, model, images, context_paths: contextPaths, forced_tools: forcedTools, attached_skills: attachedSkills }),
+      body: JSON.stringify({ prompt, mode, model, images, context_paths: contextPaths, forced_tools: forcedTools, attached_skills: attachedSkills, hidden, selected_browser_ids: selectedBrowserIds }),
     });
     return { sessionId, prompt };
   }
@@ -215,6 +218,7 @@ export interface LaunchAndSendPayload {
   forcedTools?: string[];
   attachedSkills?: Array<{ id: string; name: string; content: string }>;
   expand?: boolean;
+  selectedBrowserIds?: string[];
 }
 
 export const fetchSession = createAsyncThunk(
@@ -228,7 +232,7 @@ export const fetchSession = createAsyncThunk(
 
 export const launchAndSendFirstMessage = createAsyncThunk(
   'agents/launchAndSendFirstMessage',
-  async ({ draftId, config, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills }: LaunchAndSendPayload) => {
+  async ({ draftId, config, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills, selectedBrowserIds }: LaunchAndSendPayload) => {
     const launchRes = await fetch(`${AGENTS_API}/launch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -240,7 +244,7 @@ export const launchAndSendFirstMessage = createAsyncThunk(
     await fetch(`${AGENTS_API}/sessions/${session.id}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, mode, model, images, context_paths: contextPaths, forced_tools: forcedTools, attached_skills: attachedSkills }),
+      body: JSON.stringify({ prompt, mode, model, images, context_paths: contextPaths, forced_tools: forcedTools, attached_skills: attachedSkills, selected_browser_ids: selectedBrowserIds }),
     });
 
     const refreshRes = await fetch(`${AGENTS_API}/sessions/${session.id}`);
@@ -783,6 +787,8 @@ const agentsSlice = createSlice({
         const session = state.sessions[action.payload];
         if (session) {
           session.status = 'stopped';
+          session.streamingMessage = null;
+          session.pending_approvals = [];
         }
       })
       .addCase(handleApproval.fulfilled, (state, action) => {

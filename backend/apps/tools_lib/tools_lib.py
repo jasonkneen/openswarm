@@ -513,7 +513,7 @@ async def _discover_mcp_tools_http(url: str, headers: dict | None = None) -> lis
             raise HTTPException(status_code=502, detail="Empty response from MCP server")
 
         tools_list = data.get("result", {}).get("tools", [])
-        return [{"name": t.get("name", ""), "description": t.get("description", "")} for t in tools_list]
+        return [{"name": t.get("name", ""), "description": t.get("description", ""), "inputSchema": t.get("inputSchema")} for t in tools_list]
 
 
 async def _discover_mcp_tools_sse(url: str, headers: dict | None = None) -> list[dict]:
@@ -536,7 +536,7 @@ async def _discover_mcp_tools_sse(url: str, headers: dict | None = None) -> list
             ) as session:
                 await session.initialize()
                 result = await session.list_tools()
-                return [{"name": t.name, "description": t.description or ""} for t in result.tools]
+                return [{"name": t.name, "description": t.description or "", "inputSchema": t.inputSchema if t.inputSchema else None} for t in result.tools]
     except BaseExceptionGroup as eg:
         first = eg.exceptions[0] if eg.exceptions else eg
         raise HTTPException(status_code=502, detail=f"SSE discovery failed: {first}") from first
@@ -605,7 +605,7 @@ async def _discover_mcp_tools_stdio(command: str, args: list[str] | None = None,
         data = await _recv()
 
         tools_list = data.get("result", {}).get("tools", [])
-        return [{"name": t.get("name", ""), "description": t.get("description", "")} for t in tools_list]
+        return [{"name": t.get("name", ""), "description": t.get("description", ""), "inputSchema": t.get("inputSchema")} for t in tools_list]
 
     except HTTPException:
         raise
@@ -710,6 +710,7 @@ async def discover_tools(tool_id: str):
     permissions["_services"] = services
     permissions["_service_groups"] = service_groups
     permissions["_tool_descriptions"] = {t["name"]: t["description"] for t in raw_tools}
+    permissions["_tool_schemas"] = {t["name"]: t.get("inputSchema") for t in raw_tools if t.get("inputSchema")}
 
     tool.tool_permissions = permissions
     _save(tool)

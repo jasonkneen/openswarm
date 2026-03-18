@@ -302,7 +302,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           lines.push(`${i + 1}. [Browser Card] ${title}`);
           lines.push(`   browser_id: ${el.semanticData.selectId}`);
           if (url) lines.push(`   URL: ${url}`);
-          lines.push(`   (Use BrowserAgent with this browser_id to interact with it)`);
+          lines.push(`   (Use BrowserAgent with this browser_id to interact with it, or CreateBrowserAgent for a new browser)`);
         } else if (el.semanticType && el.semanticData) {
           const typeLabel = {
             'agent-card': 'Agent Card',
@@ -321,6 +321,9 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
             .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
             .join(', ');
           if (metaStr) lines.push(`   ${metaStr}`);
+          if (el.semanticType === 'agent-card' && selectId) {
+            lines.push(`   (Use InvokeAgent with session_id "${selectId}" to query this agent with full conversation context)`);
+          }
         } else {
           const styleStr = Object.entries(el.computedStyles)
             .map(([k, v]) => `${k}: ${v}`)

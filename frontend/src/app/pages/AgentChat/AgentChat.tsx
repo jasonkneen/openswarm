@@ -7,6 +7,7 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import {
   sendMessage as sendMessageThunk,
@@ -119,6 +120,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
   const chatInputRef = useRef<ChatInputHandle>(null);
   const isAtBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showResumeBubble, setShowResumeBubble] = useState(false);
   const [mode, setMode] = useState('agent');
   const [model, setModel] = useState('sonnet');
 
@@ -167,6 +169,9 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
     prevStatusRef.current = curr;
     if (prev === 'running' && (curr === 'completed' || curr === 'stopped' || curr === 'error')) {
       if (id) dispatch(clearGlowingBrowserCards(id));
+      if (curr === 'stopped') {
+        setShowResumeBubble(true);
+      }
       const currentMode = modesMap[mode];
       if (currentMode?.default_next_mode && modesMap[currentMode.default_next_mode]) {
         setMode(currentMode.default_next_mode);
@@ -174,6 +179,9 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
           dispatch(updateSessionMode({ sessionId: id, mode: currentMode.default_next_mode as any }));
         }
       }
+    }
+    if (curr === 'running') {
+      setShowResumeBubble(false);
     }
   }, [session?.status, mode, modesMap, id, isDraft, dispatch]);
 
@@ -204,12 +212,13 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
 
   const handleSend = (prompt: string, images?: Array<{ data: string; media_type: string }>, contextPaths?: Array<{ path: string; type: 'file' | 'directory' }>, forcedTools?: string[], attachedSkills?: Array<{ id: string; name: string; content: string }>, selectedBrowserIds?: string[]) => {
     if (!id) return;
+    setShowResumeBubble(false);
     if (isDraft) {
       const config: Record<string, any> = { model, mode };
       if (session?.system_prompt) config.system_prompt = session.system_prompt;
       if (session?.target_directory) config.target_directory = session.target_directory;
       dispatch(
-        launchAndSendFirstMessage({ draftId: id, config, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills })
+        launchAndSendFirstMessage({ draftId: id, config, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills, selectedBrowserIds })
       ).then((action) => {
         if (launchAndSendFirstMessage.fulfilled.match(action)) {
           const realId = action.payload.session.id;
@@ -223,7 +232,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
       if (selectedBrowserIds?.length) {
         dispatch(setGlowingBrowserCards({ browserIds: selectedBrowserIds, sessionId: id }));
       }
-      dispatch(sendMessageThunk({ sessionId: id, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills }));
+      dispatch(sendMessageThunk({ sessionId: id, prompt, mode, model, images, contextPaths, forcedTools, attachedSkills, selectedBrowserIds }));
     }
   };
 
@@ -249,6 +258,18 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
     if (!id) return;
     dispatch(stopAgent({ sessionId: id }));
   };
+
+  const handleResume = useCallback(() => {
+    if (!id) return;
+    setShowResumeBubble(false);
+    dispatch(sendMessageThunk({
+      sessionId: id,
+      prompt: "Continue where you left off. Start you're response EXACTLY with 'Sorry, let me pick up where I left off",
+      mode,
+      model,
+      hidden: true,
+    }));
+  }, [id, mode, model, dispatch]);
 
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
 
@@ -443,12 +464,32 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
 
         items.push(...outputItems);
       } else {
-        items.push(msg);
+        if (!msg.hidden) {
+          items.push(msg);
+        }
         i++;
       }
     }
     return items;
   }, [activeBranchMessages]);
+
+  const lastAssistantIdsInTurn = useMemo(() => {
+    const ids = new Set<string>();
+    let lastAssistantId: string | null = null;
+    for (const item of renderItems) {
+      if (!isToolGroup(item) && !isToolPair(item)) {
+        const msg = item as AgentMessage;
+        if (msg.role === 'assistant') {
+          lastAssistantId = msg.id;
+        } else if (msg.role === 'user') {
+          if (lastAssistantId) ids.add(lastAssistantId);
+          lastAssistantId = null;
+        }
+      }
+    }
+    if (lastAssistantId) ids.add(lastAssistantId);
+    return ids;
+  }, [renderItems]);
 
   const groupMetaRequestedRef = useRef<Set<string>>(new Set());
   const groupMetaRefinedRef = useRef<Set<string>>(new Set());
@@ -642,7 +683,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                     onSaveEdit={handleSaveEdit}
                     onCancelEdit={handleCancelEdit}
                   />
-                  {!isEditing && (msg.role === 'user' || msg.role === 'assistant') && (
+                  {!isEditing && (msg.role === 'user' || (msg.role === 'assistant' && lastAssistantIdsInTurn.has(msg.id))) && (
                     <MessageActionBar
                       role={msg.role as 'user' | 'assistant'}
                       onCopy={() => navigator.clipboard.writeText(rawText)}
@@ -703,6 +744,34 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
             )}
             {session.status === 'running' && !session.streamingMessage && (
               <ThinkingBubble />
+            )}
+            {showResumeBubble && session.status === 'stopped' && (
+              <Box sx={{ display: 'flex', justifyContent: 'flex-start', my: 0.75 }}>
+                <Box
+                  onClick={handleResume}
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    px: 1.5,
+                    py: 0.75,
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    bgcolor: `${c.accent.primary}10`,
+                    border: `1px solid ${c.accent.primary}30`,
+                    transition: 'all 0.15s',
+                    '&:hover': {
+                      bgcolor: `${c.accent.primary}1a`,
+                      border: `1px solid ${c.accent.primary}50`,
+                    },
+                  }}
+                >
+                  <PlayArrowIcon sx={{ fontSize: 14, color: c.accent.primary }} />
+                  <Typography sx={{ fontSize: '0.78rem', fontWeight: 500, color: c.accent.primary }}>
+                    Resume Agent Response
+                  </Typography>
+                </Box>
+              </Box>
             )}
           </Box>
           {showScrollButton && (

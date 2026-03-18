@@ -23,3 +23,4 @@ class AppSettings(BaseModel):
     browser_homepage: str = "https://www.google.com"
     auto_select_mode_on_new_agent: bool = False
     expand_new_chats_in_dashboard: bool = False
+    dev_mode: bool = False

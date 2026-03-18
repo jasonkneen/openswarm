@@ -56,6 +56,8 @@ async def send_message(session_id: str, body: dict):
         context_paths=body.get("context_paths"),
         forced_tools=body.get("forced_tools"),
         attached_skills=body.get("attached_skills"),
+        hidden=body.get("hidden", False),
+        selected_browser_ids=body.get("selected_browser_ids"),
     )
     return {"ok": True}
 

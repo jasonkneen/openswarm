@@ -1,6 +1,6 @@
 {
   "name": "openswarm",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "OpenSwarm — AI Agent Orchestrator",
   "main": "main.js",
   "scripts": {
@@ -60,34 +60,24 @@
     },
     "extraResources": [
       {
-        "from": "../frontend/dist",
+        "from": "build-staging/frontend",
         "to": "frontend",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": "../backend",
+        "from": "build-staging/backend",
         "to": "backend",
         "filter": [
-          "**/*",
-          "!__pycache__/**",
-          "!**/__pycache__/**",
-          "!.venv/**",
-          "!*.pyc"
+          "**/*"
         ]
       },
       {
-        "from": "../debugger",
+        "from": "build-staging/debugger",
         "to": "debugger",
         "filter": [
-          "**/*",
-          "!__pycache__/**",
-          "!**/__pycache__/**",
-          "!*.pyc",
-          "!.venv/**",
-          "!**/.venv/**",
-          "!**/node_modules/**"
+          "**/*"
         ]
       },
       {

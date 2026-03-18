@@ -1,5 +1,8 @@
+import logging
 import os
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from fastapi.responses import JSONResponse
 from fastapi import Request
@@ -144,6 +147,37 @@ async def browser_agent_run(request: Request):
         parent_session_id=parent_session_id or None,
     )
     return JSONResponse({"results": results})
+
+
+@app.post("/api/invoke-agent/run")
+async def invoke_agent_run(request: Request):
+    """Fork an existing agent session and send it a new message.
+    Called by the invoke_agent_mcp_server stdio subprocess."""
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    message = body.get("message", "")
+    parent_session_id = body.get("parent_session_id", "")
+    dashboard_id = body.get("dashboard_id", "")
+
+    if not session_id:
+        return JSONResponse({"error": "session_id is required"}, status_code=400)
+    if not message:
+        return JSONResponse({"error": "message is required"}, status_code=400)
+
+    try:
+        from backend.apps.agents.agent_manager import agent_manager
+        result = await agent_manager.invoke_agent(
+            source_session_id=session_id,
+            message=message,
+            parent_session_id=parent_session_id or None,
+            dashboard_id=dashboard_id or None,
+        )
+        return JSONResponse(result)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+    except Exception as e:
+        logger.exception("invoke_agent_run failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ export interface AppSettings {
   browser_homepage: string;
   auto_select_mode_on_new_agent: boolean;
   expand_new_chats_in_dashboard: boolean;
+  dev_mode: boolean;
 }
 
 export interface BrowseResult {
@@ -54,6 +55,7 @@ const initialState: SettingsState = {
     browser_homepage: 'https://www.google.com',
     auto_select_mode_on_new_agent: false,
     expand_new_chats_in_dashboard: false,
+    dev_mode: false,
   },
   loading: false,
   loaded: false,
