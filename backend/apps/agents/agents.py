@@ -131,6 +131,17 @@ async def get_branches(session_id: str):
         "active_branch_id": session.active_branch_id,
     }
 
+@agents.router.post("/sessions/{session_id}/duplicate")
+async def duplicate_session(session_id: str, body: dict = {}):
+    try:
+        session = await agent_manager.duplicate_session(
+            session_id,
+            dashboard_id=body.get("dashboard_id"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"session": session.model_dump(mode="json")}
+
 @agents.router.post("/sessions/{session_id}/close")
 async def close_session(session_id: str):
     try:

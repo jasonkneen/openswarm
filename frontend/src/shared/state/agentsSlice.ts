@@ -331,6 +331,20 @@ export const closeSession = createAsyncThunk(
   }
 );
 
+export const duplicateSession = createAsyncThunk(
+  'agents/duplicateSession',
+  async ({ sessionId, dashboardId }: { sessionId: string; dashboardId?: string }) => {
+    const res = await fetch(`${AGENTS_API}/sessions/${sessionId}/duplicate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dashboard_id: dashboardId }),
+    });
+    if (!res.ok) throw new Error('Failed to duplicate session');
+    const data = await res.json();
+    return data.session as AgentSession;
+  }
+);
+
 export const deleteSession = createAsyncThunk(
   'agents/deleteSession',
   async ({ sessionId }: { sessionId: string }) => {
@@ -783,6 +797,10 @@ const agentsSlice = createSlice({
         if (session) {
           session.active_branch_id = action.payload.branchId;
         }
+      })
+      .addCase(duplicateSession.fulfilled, (state, action) => {
+        const session = action.payload;
+        state.sessions[session.id] = session;
       })
       .addCase(closeSession.fulfilled, (state, action) => {
         const sessionId = action.payload;

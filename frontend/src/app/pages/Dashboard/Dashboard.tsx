@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react';
+import React, { useEffect, useCallback, useRef, useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -9,6 +9,9 @@ import {
   fetchSessions,
   fetchHistory,
   collapseSession,
+  closeSession,
+  duplicateSession,
+  expandSession,
   launchAndSendFirstMessage,
   generateTitle,
   resumeSession,
@@ -27,7 +30,13 @@ import {
   moveCards,
   resetLayout,
   setGlowingBrowserCards,
+  removeViewCard,
+  removeBrowserCard,
+  pasteBrowserCard,
+  placeCard,
+  setGlowingAgentCard,
   EXPANDED_CARD_MIN_H,
+  GRID_GAP,
 } from '@/shared/state/dashboardLayoutSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
 import { generateDashboardName, updateDashboardThumbnail } from '@/shared/state/dashboardsSlice';
@@ -48,6 +57,7 @@ import type { ContextPath } from '@/app/components/DirectoryBrowser';
 import { ElementSelectionProvider, useElementSelection } from '@/app/components/ElementSelectionContext';
 import { useDomElementSelector } from '@/app/components/useDomElementSelector';
 import SelectionOverlay from '@/app/components/SelectionOverlay';
+import { setClipboardCards, getClipboardCards, type ClipboardCard } from '@/shared/dashboardClipboard';
 
 const SELECT_ATTR = 'data-select-type';
 
@@ -86,6 +96,7 @@ const DashboardInner: React.FC = () => {
   const browserHomepage = useAppSelector((state) => state.settings.data.browser_homepage);
   const expandNewChats = useAppSelector((state) => state.settings.data.expand_new_chats_in_dashboard);
   const outputs = useAppSelector((state) => state.outputs.items);
+  const glowingAgentCards = useAppSelector((state) => state.dashboardLayout.glowingAgentCards);
   const sessionList = Object.values(sessions);
 
   const canvas = useCanvasControls(zoomSensitivity);
@@ -110,7 +121,7 @@ const DashboardInner: React.FC = () => {
     }, 2000);
   }, []);
 
-  const spawnOriginsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const spawnOriginsRef = useRef<Record<string, { x: number; y: number; type?: 'branch' }>>({});
   const hasFittedRef = useRef(false);
   const restoredExpandedRef = useRef(false);
   const canvasStateRef = useRef({ panX: canvas.panX, panY: canvas.panY, zoom: canvas.zoom });
@@ -118,16 +129,16 @@ const DashboardInner: React.FC = () => {
 
   // ---- Multi-drag coordination ----
   const [multiDragDelta, setMultiDragDelta] = useState<{ dx: number; dy: number } | null>(null);
+  const [liveDragInfo, setLiveDragInfo] = useState<{ cardId: string; dx: number; dy: number } | null>(null);
   const activeDragCardRef = useRef<string | null>(null);
   const isMultiDragRef = useRef(false);
 
   const handleCardDragStart = useCallback((id: string, _type: CardType) => {
+    activeDragCardRef.current = id;
     if (selection.isSelected(id)) {
-      activeDragCardRef.current = id;
       isMultiDragRef.current = true;
     } else {
       selection.deselectAll();
-      activeDragCardRef.current = null;
       isMultiDragRef.current = false;
     }
   }, [selection]);
@@ -135,6 +146,9 @@ const DashboardInner: React.FC = () => {
   const handleCardDragMove = useCallback((dx: number, dy: number) => {
     if (isMultiDragRef.current) {
       setMultiDragDelta({ dx, dy });
+    }
+    if (activeDragCardRef.current) {
+      setLiveDragInfo({ cardId: activeDragCardRef.current, dx, dy });
     }
   }, []);
 
@@ -149,6 +163,7 @@ const DashboardInner: React.FC = () => {
     activeDragCardRef.current = null;
     isMultiDragRef.current = false;
     setMultiDragDelta(null);
+    setLiveDragInfo(null);
   }, [selection, dispatch]);
 
   const handleCardSelect = useCallback((id: string, type: CardType, shiftKey: boolean) => {
@@ -164,7 +179,7 @@ const DashboardInner: React.FC = () => {
 
     if (e.button === 2) {
       e.preventDefault();
-      selection.handleCanvasMouseDown(e.nativeEvent);
+      canvas.handlers.onMouseDown(e);
       return;
     }
 
@@ -179,10 +194,10 @@ const DashboardInner: React.FC = () => {
     }
 
     if (e.metaKey || e.ctrlKey || canvas.spaceHeld) {
-      selection.handleCanvasMouseDown(e.nativeEvent);
-    } else {
       selection.deselectAll();
       canvas.handlers.onMouseDown(e);
+    } else {
+      selection.handleCanvasMouseDown(e.nativeEvent);
     }
   }, [canvas.handlers, canvas.spaceHeld, selection, isElementSelectMode]);
 
@@ -371,6 +386,162 @@ const DashboardInner: React.FC = () => {
     return () => window.removeEventListener('keydown', handleEnter);
   }, [selection.selectedIds, dispatch]);
 
+  useEffect(() => {
+    const handleDelete = (e: KeyboardEvent) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      if (selection.selectedIds.size === 0) return;
+      e.preventDefault();
+      for (const [id, type] of selection.selectedIds) {
+        if (type === 'agent') {
+          dispatch(closeSession({ sessionId: id }));
+        } else if (type === 'view') {
+          dispatch(removeViewCard(id));
+        } else if (type === 'browser') {
+          dispatch(removeBrowserCard(id));
+        }
+      }
+      selection.deselectAll();
+    };
+    window.addEventListener('keydown', handleDelete);
+    return () => window.removeEventListener('keydown', handleDelete);
+  }, [selection, dispatch]);
+
+  useEffect(() => {
+    const handleCopy = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'c') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      if (selection.selectedIds.size === 0) return;
+
+      e.preventDefault();
+      const copied: ClipboardCard[] = [];
+      const names: string[] = [];
+      for (const [id, type] of selection.selectedIds) {
+        if (type === 'agent') {
+          const session = sessions[id];
+          const card = cards[id];
+          if (!session || !card) continue;
+          copied.push({
+            type, id, name: session.name || id,
+            meta: { name: session.name, status: session.status, model: session.model, mode: session.mode },
+            x: card.x, y: card.y, width: card.width, height: card.height,
+            expanded: expandedSessionIds.includes(id),
+          });
+          names.push(session.name || id);
+        } else if (type === 'view') {
+          const output = outputs[id];
+          const vc = viewCards[id];
+          if (!output || !vc) continue;
+          copied.push({
+            type, id, name: output.name,
+            meta: { name: output.name, description: output.description },
+            x: vc.x, y: vc.y, width: vc.width, height: vc.height,
+          });
+          names.push(output.name);
+        } else if (type === 'browser') {
+          const bc = browserCards[id];
+          if (!bc) continue;
+          const activeTab = bc.tabs.find((t) => t.id === bc.activeTabId);
+          const title = activeTab?.title || 'Browser';
+          copied.push({
+            type, id, name: title,
+            meta: { name: title, url: activeTab?.url || bc.url, tabs: bc.tabs },
+            x: bc.x, y: bc.y, width: bc.width, height: bc.height,
+          });
+          names.push(title);
+        }
+      }
+      setClipboardCards(copied);
+      navigator.clipboard.writeText(names.join(', ')).catch(() => {});
+    };
+    window.addEventListener('keydown', handleCopy);
+    return () => window.removeEventListener('keydown', handleCopy);
+  }, [selection.selectedIds, sessions, cards, viewCards, browserCards, outputs, expandedSessionIds]);
+
+  useEffect(() => {
+    const PASTE_OFFSET = 40;
+    const handlePaste = async (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'v') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+
+      const copied = getClipboardCards();
+      if (copied.length === 0) return;
+      e.preventDefault();
+
+      selection.deselectAll();
+      const newSelection = new Map<string, CardType>();
+
+      for (const card of copied) {
+        const px = card.x + PASTE_OFFSET;
+        const py = card.y - PASTE_OFFSET;
+
+        if (card.type === 'agent') {
+          const action = await dispatch(duplicateSession({ sessionId: card.id, dashboardId }));
+          if (duplicateSession.fulfilled.match(action)) {
+            const newId = action.payload.id;
+            dispatch(placeCard({ sessionId: newId, x: px, y: py, width: card.width, height: card.height }));
+            if (card.expanded) {
+              dispatch(expandSession(newId));
+            }
+            newSelection.set(newId, 'agent');
+          }
+        } else if (card.type === 'view') {
+          dispatch(addViewCard({ outputId: card.id, expandedSessionIds, x: px, y: py, width: card.width, height: card.height }));
+          newSelection.set(card.id, 'view');
+        } else if (card.type === 'browser') {
+          const browserId = `browser-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+          dispatch(pasteBrowserCard({
+            id: browserId, tabs: card.meta.tabs || [], url: card.meta.url || '',
+            x: px, y: py, width: card.width, height: card.height,
+          }));
+          newSelection.set(browserId, 'browser');
+        }
+      }
+
+      if (newSelection.size > 0) {
+        for (const [id, type] of newSelection) {
+          selection.selectCard(id, type, true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handlePaste);
+    return () => window.removeEventListener('keydown', handlePaste);
+  }, [dispatch, dashboardId, expandedSessionIds, selection]);
+
+  const handleBranchFromCard = useCallback(
+    (sourceSessionId: string, newSessionId: string) => {
+      const sourceCard = cards[sourceSessionId];
+      if (!sourceCard) return;
+
+      const targetX = sourceCard.x + sourceCard.width + GRID_GAP * 3;
+      const targetY = sourceCard.y;
+
+      spawnOriginsRef.current[newSessionId] = {
+        x: sourceCard.x,
+        y: sourceCard.y,
+        type: 'branch' as const,
+      };
+
+      dispatch(placeCard({
+        sessionId: newSessionId,
+        x: targetX,
+        y: targetY,
+        width: sourceCard.width,
+        height: sourceCard.height,
+      }));
+
+      if (expandedSessionIds.includes(sourceSessionId)) {
+        dispatch(expandSession(newSessionId));
+      }
+
+      dispatch(setGlowingAgentCard({ sessionId: newSessionId, sourceId: sourceSessionId }));
+    },
+    [cards, dispatch, expandedSessionIds],
+  );
+
   const handleNewAgent = useCallback(() => {
     setToolbarOpen(true);
   }, []);
@@ -489,6 +660,37 @@ const DashboardInner: React.FC = () => {
     canvas.actions.fitToCards(allRects);
   }, [dispatch, canvas.actions]);
 
+  const TETHER_FADE_MS = 2500;
+  const tethers = useMemo(() => {
+    return Object.entries(glowingAgentCards).map(([copyId, { sourceId, fading }]) => {
+      const src = cards[sourceId];
+      const dst = cards[copyId];
+      if (!src || !dst) return null;
+
+      let srcX = src.x, srcY = src.y;
+      let dstX = dst.x, dstY = dst.y;
+      if (liveDragInfo) {
+        if (liveDragInfo.cardId === sourceId) { srcX += liveDragInfo.dx; srcY += liveDragInfo.dy; }
+        if (liveDragInfo.cardId === copyId) { dstX += liveDragInfo.dx; dstY += liveDragInfo.dy; }
+      }
+
+      const srcH = expandedSessionIds.includes(sourceId)
+        ? Math.max(EXPANDED_CARD_MIN_H, src.height)
+        : src.height;
+      const dstH = expandedSessionIds.includes(copyId)
+        ? Math.max(EXPANDED_CARD_MIN_H, dst.height)
+        : dst.height;
+      return {
+        key: copyId,
+        x1: srcX + src.width,
+        y1: srcY + srcH / 2,
+        x2: dstX,
+        y2: dstY + dstH / 2,
+        fading,
+      };
+    }).filter(Boolean) as Array<{ key: string; x1: number; y1: number; x2: number; y2: number; fading: boolean }>;
+  }, [glowingAgentCards, cards, expandedSessionIds, liveDragInfo]);
+
   const dotSize = Math.max(1, 1.5 * canvas.zoom);
   const dotSpacing = 24 * canvas.zoom;
 
@@ -539,7 +741,7 @@ const DashboardInner: React.FC = () => {
           cursor: canvas.isPanning
             ? 'grabbing'
             : (canvas.spaceHeld || canvas.cmdHeld)
-              ? 'crosshair'
+              ? 'grab'
               : selection.marquee
                 ? 'crosshair'
                 : 'default',
@@ -586,6 +788,82 @@ const DashboardInner: React.FC = () => {
               position: 'relative',
             }}
           >
+            {/* Tether lines between branched cards */}
+            {tethers.length > 0 && (
+              <svg
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  width: 1,
+                  height: 1,
+                  overflow: 'visible',
+                  pointerEvents: 'none',
+                  zIndex: 10,
+                }}
+              >
+                <defs>
+                  <filter id="tether-glow-f" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                  <marker
+                    id="tether-arrow"
+                    viewBox="0 0 10 10"
+                    refX="10"
+                    refY="5"
+                    markerWidth="10"
+                    markerHeight="10"
+                    orient="auto"
+                  >
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill={c.accent.primary} opacity={0.8} />
+                  </marker>
+                </defs>
+                <style>{`
+                  @keyframes tether-flow { to { stroke-dashoffset: -16; } }
+                  @keyframes tether-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+                `}</style>
+                {tethers.map((t) => (
+                  <g
+                    key={t.key}
+                    style={{
+                      opacity: t.fading ? 0 : 1,
+                      transition: `opacity ${TETHER_FADE_MS}ms ease-out`,
+                    }}
+                  >
+                    <line
+                      x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
+                      stroke={c.accent.primary}
+                      strokeWidth={8}
+                      strokeLinecap="round"
+                      opacity={0.2}
+                      filter="url(#tether-glow-f)"
+                    />
+                    <line
+                      x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
+                      stroke={c.accent.primary}
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      opacity={0.65}
+                      markerEnd="url(#tether-arrow)"
+                      style={{ animation: 'tether-pulse 2s ease-in-out infinite' }}
+                    />
+                    <line
+                      x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
+                      stroke={c.accent.primary}
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      strokeDasharray="8 8"
+                      opacity={0.9}
+                      style={{ animation: 'tether-flow 0.6s linear infinite' }}
+                    />
+                  </g>
+                ))}
+              </svg>
+            )}
             {Object.values(cards).map((card) => {
               const session = sessions[card.session_id];
               if (!session) return null;
@@ -609,6 +887,7 @@ const DashboardInner: React.FC = () => {
                   onDragStart={handleCardDragStart}
                   onDragMove={handleCardDragMove}
                   onDragEnd={handleCardDragEnd}
+                  onBranch={handleBranchFromCard}
                 />
               );
             })}

@@ -26,6 +26,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AdsClickIcon from '@mui/icons-material/AdsClick';
 import CommandPicker, { CommandPickerItem, getToolGroupIcon } from '@/app/components/CommandPicker';
 import { useElementSelection, SelectedElement } from '@/app/components/ElementSelectionContext';
+import { getClipboardCards, clearClipboard } from '@/shared/dashboardClipboard';
 import { getWebview } from '@/shared/browserRegistry';
 import { API_BASE } from '@/shared/config';
 import { ContextPath } from '@/app/components/DirectoryBrowser';
@@ -137,6 +138,9 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   const generalFileInputRef = useRef<HTMLInputElement>(null);
   const dispatch = useAppDispatch();
   const elementSelection = useElementSelection();
+
+  const fallbackOwnerIdRef = useRef(`input-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+  const ownerId = sessionId || fallbackOwnerIdRef.current;
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus();
@@ -281,7 +285,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     let trimmed = serialized.trim();
     if (!trimmed) return;
 
-    const selectedEls = elementSelection?.selectedElements ?? [];
+    const selectedEls = elementSelection?.elementsByOwner?.[ownerId] ?? [];
     let allImages = images.length > 0
       ? images.map(({ data, media_type }) => ({ data, media_type }))
       : [];
@@ -359,8 +363,8 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     setForcedTools([]);
     setAttachedSkills({});
     setHasContent(false);
-    elementSelection?.clearSelectedElements();
-  }, [disabled, images, contextPaths, forcedTools, onSend, elementSelection]);
+    elementSelection?.clearOwnerElements(ownerId);
+  }, [disabled, images, contextPaths, forcedTools, onSend, elementSelection, ownerId]);
 
   const detectTrigger = useCallback(() => {
     const result = detectEditorTrigger();
@@ -469,6 +473,41 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   };
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const copied = getClipboardCards();
+    if (copied.length > 0 && elementSelection) {
+      e.preventDefault();
+      for (const card of copied) {
+        const semanticTypeMap: Record<string, SelectedElement['semanticType']> = {
+          agent: 'agent-card',
+          view: 'view-card',
+          browser: 'browser-card',
+        };
+        const semanticType = semanticTypeMap[card.type];
+        if (!semanticType) continue;
+        const labelMap: Record<string, string> = {
+          'agent-card': 'Agent',
+          'view-card': 'View',
+          'browser-card': 'Browser',
+        };
+        const semanticLabel = (labelMap[semanticType] || semanticType) + ': ' + card.name;
+        const el: SelectedElement = {
+          id: `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          selectorPath: `[data-select-type="${semanticType}"][data-select-id="${card.id}"]`,
+          tagName: 'DIV',
+          className: '',
+          outerHTML: '',
+          computedStyles: {},
+          boundingRect: { x: 0, y: 0, width: 0, height: 0 },
+          semanticType,
+          semanticLabel,
+          semanticData: { ...card.meta, selectId: card.id },
+        };
+        elementSelection.addElementForOwner(ownerId, el);
+      }
+      clearClipboard();
+      return;
+    }
+
     const items = e.clipboardData?.items;
     if (!items) return;
     const imageFiles: File[] = [];
@@ -486,7 +525,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     e.preventDefault();
     const plain = e.clipboardData.getData('text/plain');
     if (plain) document.execCommand('insertText', false, plain);
-  }, [addImageFiles]);
+  }, [addImageFiles, elementSelection, ownerId]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -535,7 +574,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     },
   };
 
-  const selectedElements = elementSelection?.selectedElements ?? [];
+  const selectedElements = elementSelection?.elementsByOwner?.[ownerId] ?? [];
   const hasAttachments = images.length > 0 || contextPaths.length > 0 || forcedTools.length > 0 || selectedElements.length > 0;
 
   return (
@@ -783,7 +822,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
                   icon={<AdsClickIcon sx={{ fontSize: 14 }} />}
                   label={chipLabel}
                   size="small"
-                  onDelete={() => elementSelection?.removeSelectedElement(el.id)}
+                  onDelete={() => elementSelection?.removeOwnerElement(ownerId, el.id)}
                   sx={{
                     bgcolor: 'rgba(59, 130, 246, 0.1)',
                     color: '#3b82f6',
@@ -977,41 +1016,54 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           />
         )}
 
-        {elementSelection && !autoRunMode && (
-          <Tooltip title={elementSelection.selectMode ? 'Exit select mode' : 'Select UI element'}>
-            <IconButton
-              size="small"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                if (!elementSelection.selectMode && sessionId) {
-                  elementSelection.setExcludeSelectId(sessionId);
-                }
-                elementSelection.toggleSelectMode();
-              }}
-              sx={{
-                p: 0.5,
-                ...(elementSelection.selectMode
-                  ? {
-                      bgcolor: '#3b82f6',
-                      color: '#fff',
-                      '&:hover': { bgcolor: '#2563eb' },
-                      animation: 'selectBtnPulse 2s ease-in-out infinite',
-                      '@keyframes selectBtnPulse': {
-                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(59,130,246,0.4)' },
-                        '50%': { boxShadow: '0 0 0 4px rgba(59,130,246,0.1)' },
-                      },
+        {elementSelection && !autoRunMode && (() => {
+          const isMySelectMode = elementSelection.selectMode && elementSelection.activeOwnerId === ownerId;
+          return (
+            <Tooltip title={isMySelectMode ? 'Exit select mode' : 'Select UI element'}>
+              <IconButton
+                size="small"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (isMySelectMode) {
+                    elementSelection.setSelectMode(false);
+                  } else {
+                    if (elementSelection.activeOwnerId !== ownerId) {
+                      elementSelection.clearOwnerElements(ownerId);
                     }
-                  : {
-                      color: c.text.tertiary,
-                      '&:hover': { color: c.text.secondary, bgcolor: 'rgba(0,0,0,0.04)' },
-                    }),
-                transition: 'background-color 0.15s, color 0.15s',
-              }}
-            >
-              <AdsClickIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        )}
+                    elementSelection.setActiveOwnerId(ownerId);
+                    if (sessionId) {
+                      elementSelection.setExcludeSelectId(sessionId);
+                    } else {
+                      elementSelection.setExcludeSelectId(null);
+                    }
+                    elementSelection.setSelectMode(true);
+                  }
+                }}
+                sx={{
+                  p: 0.5,
+                  ...(isMySelectMode
+                    ? {
+                        bgcolor: '#3b82f6',
+                        color: '#fff',
+                        '&:hover': { bgcolor: '#2563eb' },
+                        animation: 'selectBtnPulse 2s ease-in-out infinite',
+                        '@keyframes selectBtnPulse': {
+                          '0%, 100%': { boxShadow: '0 0 0 0 rgba(59,130,246,0.4)' },
+                          '50%': { boxShadow: '0 0 0 4px rgba(59,130,246,0.1)' },
+                        },
+                      }
+                    : {
+                        color: c.text.tertiary,
+                        '&:hover': { color: c.text.secondary, bgcolor: 'rgba(0,0,0,0.04)' },
+                      }),
+                  transition: 'background-color 0.15s, color 0.15s',
+                }}
+              >
+                <AdsClickIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          );
+        })()}
 
         <input
           ref={generalFileInputRef}

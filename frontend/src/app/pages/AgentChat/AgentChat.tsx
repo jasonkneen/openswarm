@@ -17,6 +17,8 @@ import {
   handleApproval,
   editMessage,
   switchBranch,
+  duplicateSession,
+  setActiveSession,
   updateSessionModel,
   updateSessionMode,
   fetchSession,
@@ -25,12 +27,12 @@ import {
 import { fetchModes } from '@/shared/state/modesSlice';
 import { createSessionWs } from '@/shared/ws/WebSocketManager';
 import MessageBubble from './MessageBubble';
+import MessageActionBar from './MessageActionBar';
 import ToolCallBubble, { ToolPair } from './ToolCallBubble';
 import ToolGroupBubble, { RenderItem, ToolGroup, isToolGroup, isToolPair } from './ToolGroupBubble';
 import ApprovalBar, { BatchApprovalBar } from './ApprovalBar';
 import ChatInput, { ChatInputHandle } from './ChatInput';
 import { ContextPath } from '@/app/components/DirectoryBrowser';
-import BranchNavigator from './BranchNavigator';
 import DiffViewer from './DiffViewer';
 import { setGlowingBrowserCards, clearGlowingBrowserCards } from '@/shared/state/dashboardLayoutSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
@@ -96,9 +98,10 @@ interface AgentChatProps {
   onClose?: () => void;
   embedded?: boolean;
   initialContextPaths?: ContextPath[];
+  onBranch?: (newSessionId: string) => void;
 }
 
-const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose, embedded, initialContextPaths }) => {
+const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose, embedded, initialContextPaths, onBranch }) => {
   const c = useClaudeTokens();
   const STATUS_STYLES: Record<string, { color: string; bg: string }> = {
     running: { color: c.status.success, bg: c.status.successBg },
@@ -247,13 +250,20 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
     dispatch(stopAgent({ sessionId: id }));
   };
 
-  const handleEdit = useCallback(
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+
+  const handleSaveEdit = useCallback(
     (messageId: string, newContent: string) => {
       if (!id) return;
       dispatch(editMessage({ sessionId: id, messageId, content: newContent }));
+      setEditingMessageId(null);
     },
     [id, dispatch]
   );
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+  }, []);
 
   const activeBranchMessages = useMemo(() => {
     if (!session) return [];
@@ -264,13 +274,73 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
       return session.messages.filter((m) => m.branch_id === 'main' || m.branch_id === branchId);
     }
 
-    const forkIdx = session.messages.findIndex((m) => m.id === branch.fork_point_message_id);
-    const preMessages = session.messages
-      .slice(0, forkIdx)
-      .filter((m) => m.branch_id === (branch.parent_branch_id || 'main'));
-    const branchMessages = session.messages.filter((m) => m.branch_id === branchId);
-    return [...preMessages, ...branchMessages];
+    const segments: Array<{ branchId: string; upToMessageId?: string }> = [];
+    let cur = branch;
+    let curId = branchId;
+    while (cur && cur.fork_point_message_id) {
+      segments.unshift({ branchId: curId, upToMessageId: cur.fork_point_message_id });
+      curId = cur.parent_branch_id || 'main';
+      cur = session.branches?.[curId];
+    }
+    segments.unshift({ branchId: curId });
+
+    const result: typeof session.messages = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const nextForkMsgId = seg.upToMessageId;
+      if (nextForkMsgId) {
+        const forkIdx = session.messages.findIndex((m) => m.id === nextForkMsgId);
+        const pre = session.messages
+          .slice(0, forkIdx)
+          .filter((m) => m.branch_id === seg.branchId);
+        result.push(...pre);
+      } else if (i < segments.length - 1) {
+        const nextFork = segments[i + 1].upToMessageId;
+        const forkIdx = nextFork
+          ? session.messages.findIndex((m) => m.id === nextFork)
+          : session.messages.length;
+        result.push(
+          ...session.messages.slice(0, forkIdx).filter((m) => m.branch_id === seg.branchId)
+        );
+      } else {
+        result.push(...session.messages.filter((m) => m.branch_id === seg.branchId));
+      }
+    }
+    const leafMsgs = session.messages.filter((m) => m.branch_id === branchId);
+    if (!result.some((m) => m.branch_id === branchId)) {
+      result.push(...leafMsgs);
+    }
+    return result;
   }, [session?.messages, session?.active_branch_id, session?.branches]);
+
+  const handleRegenerate = useCallback(
+    (assistantMsg: AgentMessage) => {
+      if (!id) return;
+      const idx = activeBranchMessages.findIndex((m) => m.id === assistantMsg.id);
+      for (let i = idx - 1; i >= 0; i--) {
+        if (activeBranchMessages[i].role === 'user') {
+          const userMsg = activeBranchMessages[i];
+          const content = typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content);
+          dispatch(editMessage({ sessionId: id, messageId: userMsg.id, content }));
+          break;
+        }
+      }
+    },
+    [id, activeBranchMessages, dispatch]
+  );
+
+  const handleBranchChat = useCallback(async () => {
+    if (!id) return;
+    const dashId = session?.dashboard_id;
+    const action = await dispatch(duplicateSession({ sessionId: id, dashboardId: dashId }));
+    if (duplicateSession.fulfilled.match(action)) {
+      if (onBranch) {
+        onBranch(action.payload.id);
+      } else {
+        dispatch(setActiveSession(action.payload.id));
+      }
+    }
+  }, [id, dispatch, onBranch, session?.dashboard_id]);
 
   const contextEstimate = useMemo(() => {
     const limit = CONTEXT_WINDOWS[model] || 200_000;
@@ -427,11 +497,33 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
   const getSiblingBranches = useCallback(
     (messageId: string): string[] => {
       if (!session?.branches) return [];
-      return Object.values(session.branches)
+
+      const directForks = Object.values(session.branches)
         .filter((b) => b.fork_point_message_id === messageId)
         .map((b) => b.id);
+      if (directForks.length > 0) {
+        const originalMsg = session.messages.find((m) => m.id === messageId);
+        const parentBranchId = originalMsg?.branch_id || 'main';
+        return [parentBranchId, ...directForks];
+      }
+
+      const msg = session.messages.find((m) => m.id === messageId);
+      if (!msg || msg.role !== 'user') return [];
+      const msgBranch = session.branches[msg.branch_id];
+      if (!msgBranch?.fork_point_message_id) return [];
+      const branchUserMsgs = session.messages.filter(
+        (m) => m.branch_id === msg.branch_id && m.role === 'user'
+      );
+      if (branchUserMsgs.length === 0 || branchUserMsgs[0].id !== messageId) return [];
+
+      const forkPointId = msgBranch.fork_point_message_id;
+      const siblingBranches = Object.values(session.branches)
+        .filter((b) => b.fork_point_message_id === forkPointId)
+        .map((b) => b.id);
+      const parentBranchId = msgBranch.parent_branch_id || 'main';
+      return [parentBranchId, ...siblingBranches];
     },
-    [session?.branches]
+    [session?.branches, session?.messages]
   );
 
   if (!session) {
@@ -534,30 +626,48 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                 return <ToolCallBubble key={item.id} call={item.call} result={item.result} isPending={isPending} sessionId={session.id} />;
               }
               const msg = item;
+              const isEditing = editingMessageId === msg.id;
               const siblings = getSiblingBranches(msg.id);
               const hasBranches = siblings.length > 0;
               const currentBranchIdx = hasBranches
                 ? siblings.indexOf(session.active_branch_id || 'main')
                 : 0;
+              const rawText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
 
               return (
-                <React.Fragment key={msg.id}>
-                  <MessageBubble message={msg} onEdit={msg.role === 'user' ? handleEdit : undefined} />
-                  {hasBranches && (
-                    <BranchNavigator
-                      currentIndex={Math.max(0, currentBranchIdx)}
-                      totalBranches={siblings.length}
-                      onPrevious={() => {
-                        const prevBranch = siblings[Math.max(0, currentBranchIdx - 1)];
-                        if (prevBranch && id) dispatch(switchBranch({ sessionId: id, branchId: prevBranch }));
-                      }}
-                      onNext={() => {
-                        const nextBranch = siblings[Math.min(siblings.length - 1, currentBranchIdx + 1)];
-                        if (nextBranch && id) dispatch(switchBranch({ sessionId: id, branchId: nextBranch }));
-                      }}
+                <Box key={msg.id} sx={{ '&:hover .msg-actions': { opacity: 1 } }}>
+                  <MessageBubble
+                    message={msg}
+                    editing={isEditing}
+                    onSaveEdit={handleSaveEdit}
+                    onCancelEdit={handleCancelEdit}
+                  />
+                  {!isEditing && (msg.role === 'user' || msg.role === 'assistant') && (
+                    <MessageActionBar
+                      role={msg.role as 'user' | 'assistant'}
+                      onCopy={() => navigator.clipboard.writeText(rawText)}
+                      onEdit={msg.role === 'user' ? () => setEditingMessageId(msg.id) : undefined}
+                      onRegenerate={msg.role === 'assistant' ? () => handleRegenerate(msg) : undefined}
+                      onBranch={msg.role === 'assistant' ? handleBranchChat : undefined}
+                      branchNav={
+                        hasBranches
+                          ? {
+                              currentIndex: Math.max(0, currentBranchIdx),
+                              totalBranches: siblings.length,
+                              onPrevious: () => {
+                                const prevBranch = siblings[Math.max(0, currentBranchIdx - 1)];
+                                if (prevBranch && id) dispatch(switchBranch({ sessionId: id, branchId: prevBranch }));
+                              },
+                              onNext: () => {
+                                const nextBranch = siblings[Math.min(siblings.length - 1, currentBranchIdx + 1)];
+                                if (nextBranch && id) dispatch(switchBranch({ sessionId: id, branchId: nextBranch }));
+                              },
+                            }
+                          : undefined
+                      }
                     />
                   )}
-                </React.Fragment>
+                </Box>
               );
             })}
             {session.streamingMessage && (

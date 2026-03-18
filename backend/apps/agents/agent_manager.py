@@ -626,7 +626,7 @@ class AgentManager:
             if elapsed_ms is not None:
                 result_payload["elapsed_ms"] = elapsed_ms
 
-            result_msg = Message(role="tool_result", content=result_payload)
+            result_msg = Message(role="tool_result", content=result_payload, branch_id=session.active_branch_id)
             session.messages.append(result_msg)
             await ws_manager.send_to_session(session_id, "agent:message", {
                 "session_id": session_id,
@@ -836,6 +836,7 @@ class AgentManager:
                             id=stream_text_msg_id or uuid4().hex,
                             role="assistant",
                             content="\n".join(content_parts),
+                            branch_id=session.active_branch_id,
                         )
                         session.messages.append(asst_msg)
                         await ws_manager.send_to_session(session_id, "agent:message", {
@@ -845,7 +846,7 @@ class AgentManager:
 
                     for i, tu in enumerate(tool_uses):
                         msg_id = stream_tool_msg_ids_ordered[i] if i < len(stream_tool_msg_ids_ordered) else uuid4().hex
-                        tool_msg = Message(id=msg_id, role="tool_call", content=tu)
+                        tool_msg = Message(id=msg_id, role="tool_call", content=tu, branch_id=session.active_branch_id)
                         session.messages.append(tool_msg)
                         await ws_manager.send_to_session(session_id, "agent:message", {
                             "session_id": session_id,
@@ -872,7 +873,7 @@ class AgentManager:
         except Exception as e:
             logger.exception(f"Agent {session_id} error: {e}")
             session.status = "error"
-            error_msg = Message(role="system", content=f"Error: {str(e)}")
+            error_msg = Message(role="system", content=f"Error: {str(e)}", branch_id=session.active_branch_id)
             session.messages.append(error_msg)
             await ws_manager.send_to_session(session_id, "agent:message", {
                 "session_id": session_id,
@@ -973,7 +974,7 @@ class AgentManager:
             session_id, tool_msg_id, "Bash",
             _json.dumps(tool_input_content["input"], indent=2),
         )
-        tool_msg = Message(id=tool_msg_id, role="tool_call", content=tool_input_content)
+        tool_msg = Message(id=tool_msg_id, role="tool_call", content=tool_input_content, branch_id=session.active_branch_id)
         session.messages.append(tool_msg)
         await ws_manager.send_to_session(session_id, "agent:message", {
             "session_id": session_id,
@@ -983,7 +984,7 @@ class AgentManager:
         await asyncio.sleep(1)
         
         if decision.get("behavior") == "allow":
-            tool_result = Message(role="tool_result", content=f"Processing: {prompt}")
+            tool_result = Message(role="tool_result", content=f"Processing: {prompt}", branch_id=session.active_branch_id)
             session.messages.append(tool_result)
             await ws_manager.send_to_session(session_id, "agent:message", {
                 "session_id": session_id,
@@ -1001,7 +1002,7 @@ class AgentManager:
         asst_msg_id = uuid4().hex
         await self._stream_text(session_id, asst_msg_id, asst_text)
 
-        asst_msg = Message(id=asst_msg_id, role="assistant", content=asst_text)
+        asst_msg = Message(id=asst_msg_id, role="assistant", content=asst_text, branch_id=session.active_branch_id)
         session.messages.append(asst_msg)
         await ws_manager.send_to_session(session_id, "agent:message", {
             "session_id": session_id,
@@ -1061,6 +1062,7 @@ class AgentManager:
         user_msg = Message(
             role="user",
             content=prompt,
+            branch_id=session.active_branch_id,
             context_paths=context_paths if context_paths else None,
             attached_skills=skill_meta,
             forced_tools=forced_tools if forced_tools else None,
@@ -1104,6 +1106,14 @@ class AgentManager:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
+        existing = self.tasks.get(session_id)
+        if existing and not existing.done():
+            existing.cancel()
+            try:
+                await existing
+            except asyncio.CancelledError:
+                pass
+
         target_msg = None
         for i, msg in enumerate(session.messages):
             if msg.id == message_id:
@@ -1113,11 +1123,24 @@ class AgentManager:
         if not target_msg or target_msg.role != "user":
             raise ValueError("Can only edit user messages")
 
-        new_branch_id = uuid4().hex[:8]
+        fork_point_id = message_id
+        fork_parent_branch = target_msg.branch_id
+
+        msg_branch = session.branches.get(target_msg.branch_id)
+        if msg_branch and msg_branch.fork_point_message_id:
+            branch_user_msgs = [
+                m for m in session.messages
+                if m.branch_id == target_msg.branch_id and m.role == "user"
+            ]
+            if branch_user_msgs and branch_user_msgs[0].id == message_id:
+                fork_point_id = msg_branch.fork_point_message_id
+                fork_parent_branch = msg_branch.parent_branch_id or "main"
+
+        new_branch_id = uuid4().hex
         new_branch = MessageBranch(
             id=new_branch_id,
-            parent_branch_id=target_msg.branch_id,
-            fork_point_message_id=message_id,
+            parent_branch_id=fork_parent_branch,
+            fork_point_message_id=fork_point_id,
         )
         session.branches[new_branch_id] = new_branch
         session.active_branch_id = new_branch_id
@@ -1127,6 +1150,10 @@ class AgentManager:
             content=new_content,
             branch_id=new_branch_id,
             parent_id=target_msg.parent_id,
+            images=target_msg.images,
+            context_paths=target_msg.context_paths,
+            forced_tools=target_msg.forced_tools,
+            attached_skills=target_msg.attached_skills,
         )
         session.messages.append(edited_msg)
 
@@ -1140,7 +1167,14 @@ class AgentManager:
             "active_branch_id": new_branch_id,
         })
 
-        task = asyncio.create_task(self._run_agent_loop(session_id, new_content))
+        session.sdk_session_id = None
+        task = asyncio.create_task(self._run_agent_loop(
+            session_id, new_content,
+            images=target_msg.images,
+            context_paths=target_msg.context_paths,
+            forced_tools=target_msg.forced_tools,
+            attached_skills=target_msg.attached_skills,
+        ))
         self.tasks[session_id] = task
 
     async def switch_branch(self, session_id: str, branch_id: str):
@@ -1453,6 +1487,70 @@ class AgentManager:
             self.sessions[session.id] = session
             _delete_session_file(sid)
             logger.info(f"Restored session {session.id}")
+
+    async def duplicate_session(self, session_id: str, dashboard_id: str | None = None) -> AgentSession:
+        """Create an independent copy of a session with the same chat history."""
+        source = self.sessions.get(session_id)
+        if not source:
+            data = _load_session_data(session_id)
+            if data is None:
+                raise ValueError(f"Session {session_id} not found")
+            source = AgentSession(**data)
+
+        old_to_new_msg: dict[str, str] = {}
+        new_messages: list[Message] = []
+        for msg in source.messages:
+            new_id = uuid4().hex
+            old_to_new_msg[msg.id] = new_id
+            new_messages.append(Message(
+                id=new_id,
+                role=msg.role,
+                content=msg.content,
+                timestamp=msg.timestamp,
+                branch_id=msg.branch_id,
+                parent_id=old_to_new_msg.get(msg.parent_id) if msg.parent_id else None,
+                context_paths=msg.context_paths,
+                attached_skills=msg.attached_skills,
+                forced_tools=msg.forced_tools,
+                images=msg.images,
+            ))
+
+        new_branches: dict[str, MessageBranch] = {}
+        for bid, branch in source.branches.items():
+            new_branches[bid] = MessageBranch(
+                id=bid,
+                parent_branch_id=branch.parent_branch_id,
+                fork_point_message_id=old_to_new_msg.get(branch.fork_point_message_id) if branch.fork_point_message_id else None,
+                created_at=branch.created_at,
+            )
+
+        new_session = AgentSession(
+            id=uuid4().hex,
+            name=f"{source.name} (copy)",
+            status="stopped",
+            model=source.model,
+            mode=source.mode,
+            system_prompt=source.system_prompt,
+            allowed_tools=list(source.allowed_tools),
+            max_turns=source.max_turns,
+            cwd=source.cwd,
+            created_at=datetime.now(),
+            messages=new_messages,
+            branches=new_branches,
+            active_branch_id=source.active_branch_id,
+            tool_group_meta=dict(source.tool_group_meta),
+            dashboard_id=dashboard_id or source.dashboard_id,
+        )
+
+        self.sessions[new_session.id] = new_session
+
+        await ws_manager.send_to_session(new_session.id, "agent:status", {
+            "session_id": new_session.id,
+            "status": new_session.status,
+            "session": new_session.model_dump(mode="json"),
+        })
+
+        return new_session
 
     def get_all_sessions(self, dashboard_id: str | None = None) -> list[AgentSession]:
         if dashboard_id:

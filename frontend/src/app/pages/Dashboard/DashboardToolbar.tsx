@@ -42,6 +42,7 @@ interface Props {
   dashboardId?: string;
 }
 
+const TOOLBAR_OWNER_ID = '__toolbar__';
 const BTN = 40;
 
 const WarmTooltip = styled(
@@ -217,11 +218,17 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
     const autoSelectOnNew = useAppSelector((s) => s.settings.data.auto_select_mode_on_new_agent);
     const prevInputOpenRef = useRef(inputOpen);
     useEffect(() => {
-      if (prevInputOpenRef.current && !inputOpen && elementSelection?.selectMode) {
-        elementSelection.setSelectMode(false);
+      if (prevInputOpenRef.current && !inputOpen && elementSelection) {
+        elementSelection.clearOwnerElements(TOOLBAR_OWNER_ID);
+        if (elementSelection.selectMode && elementSelection.activeOwnerId === TOOLBAR_OWNER_ID) {
+          elementSelection.setSelectMode(false);
+        }
       }
-      if (!prevInputOpenRef.current && inputOpen && autoSelectOnNew) {
-        elementSelection?.setSelectMode(true);
+      if (!prevInputOpenRef.current && inputOpen && autoSelectOnNew && elementSelection) {
+        elementSelection.clearOwnerElements(TOOLBAR_OWNER_ID);
+        elementSelection.setActiveOwnerId(TOOLBAR_OWNER_ID);
+        elementSelection.setExcludeSelectId(null);
+        elementSelection.setSelectMode(true);
       }
       prevInputOpenRef.current = inputOpen;
     }, [inputOpen, elementSelection, autoSelectOnNew]);
@@ -240,21 +247,44 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
 
     useEffect(() => {
       if (!isExpanded) return;
-      const handleClick = (e: MouseEvent) => {
-        if (elementSelection?.selectMode) return;
+      let downPos: { x: number; y: number; target: Node } | null = null;
+      const DRAG_THRESHOLD = 5;
+
+      const handleDown = (e: MouseEvent) => {
         const target = e.target as Node;
         if (containerRef.current && !containerRef.current.contains(target)) {
-          const el = target instanceof Element ? target : target.parentElement;
-          if (el?.closest('[role="dialog"], [role="presentation"], .MuiModal-root, .MuiPopover-root')) {
-            return;
-          }
-          handleDismiss();
+          downPos = { x: e.clientX, y: e.clientY, target };
+        } else {
+          downPos = null;
         }
       };
-      const t = setTimeout(() => document.addEventListener('mousedown', handleClick), 50);
+
+      const handleUp = (e: MouseEvent) => {
+        if (!downPos) return;
+        const dx = e.clientX - downPos.x;
+        const dy = e.clientY - downPos.y;
+        const target = downPos.target;
+        downPos = null;
+        if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) return;
+
+        const el = target instanceof Element ? target : (target as Node).parentElement;
+        if (el?.closest('[role="dialog"], [role="presentation"], .MuiModal-root, .MuiPopover-root')) {
+          return;
+        }
+        if (elementSelection?.selectMode && el?.closest('[data-select-type]')) {
+          return;
+        }
+        handleDismiss();
+      };
+
+      const t = setTimeout(() => {
+        document.addEventListener('mousedown', handleDown, true);
+        document.addEventListener('mouseup', handleUp, true);
+      }, 50);
       return () => {
         clearTimeout(t);
-        document.removeEventListener('mousedown', handleClick);
+        document.removeEventListener('mousedown', handleDown, true);
+        document.removeEventListener('mouseup', handleUp, true);
       };
     }, [isExpanded, handleDismiss, elementSelection?.selectMode]);
 
@@ -333,6 +363,7 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               onModelChange={setModel}
               embedded
               autoFocus
+              sessionId={TOOLBAR_OWNER_ID}
             />
           </div>
         ) : historyOpen ? (

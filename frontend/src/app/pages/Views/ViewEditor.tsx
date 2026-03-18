@@ -9,7 +9,6 @@ import Tab from '@mui/material/Tab';
 import Tooltip from '@mui/material/Tooltip';
 import Switch from '@mui/material/Switch';
 import CircularProgress from '@mui/material/CircularProgress';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HtmlIcon from '@mui/icons-material/Code';
@@ -795,27 +794,6 @@ const ViewEditor: React.FC<Props> = ({ output, onClose }) => {
     await performSaveRef.current?.(close);
   };
 
-  const handleClose = async () => {
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    if (savedStatusTimerRef.current) clearTimeout(savedStatusTimerRef.current);
-    const eid = output?.id ?? createdIdRef.current;
-    if (!savedRef.current && (files['index.html'] ?? '').trim()) {
-      try {
-        const body = buildBody();
-        let savedId: string;
-        if (eid) {
-          await dispatch(updateOutput({ id: eid, ...body })).unwrap();
-          savedId = eid;
-        } else {
-          const created = await dispatch(createOutput(body)).unwrap();
-          savedId = created.id;
-        }
-        captureThumbnailAsync(savedId);
-      } catch {}
-    }
-    onClose();
-  };
-
   const handleRunPreview = async () => {
     const eid = output?.id ?? createdIdRef.current;
     if (!eid) {
@@ -1136,10 +1114,6 @@ const ViewEditor: React.FC<Props> = ({ output, onClose }) => {
             minHeight: 44,
           }}
         >
-          <IconButton onClick={handleClose} size="small" sx={{ color: c.text.muted }}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-
           <TextField
             value={name}
             onChange={(e) => setName(e.target.value)}
