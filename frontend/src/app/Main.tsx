@@ -22,6 +22,7 @@ import Tools from './pages/Tools/Tools';
 import Modes from './pages/Modes/Modes';
 import Views from './pages/Views/Views';
 import Customization from './pages/Customization/Customization';
+import Channels from './pages/Channels/Channels';
 import { useKeyboardShortcuts } from '@/shared/hooks/useKeyboardShortcuts';
 import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp';
 import { ThemeProvider, useThemeMode, useClaudeTokens } from '@/shared/styles/ThemeContext';
@@ -207,6 +208,7 @@ const ThemedApp: React.FC = () => {
                   <Route path="/modes" element={<Modes />} />
                   <Route path="/apps" element={<Views />} />
                   <Route path="/apps/:id" element={<Views />} />
+                  <Route path="/channels" element={<Channels />} />
                 </Route>
               </Routes>
             </UpdateListener>

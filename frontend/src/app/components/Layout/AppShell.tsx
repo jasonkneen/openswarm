@@ -23,6 +23,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExtensionIcon from '@mui/icons-material/Extension';
+import PhoneIcon from '@mui/icons-material/Phone';
 import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined';
 import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
 import ArrowForwardOutlinedIcon from '@mui/icons-material/ArrowForwardOutlined';
@@ -129,6 +130,7 @@ const AppShell: React.FC = () => {
   const isDashboardRoute = location.pathname === '/' || location.pathname.startsWith('/dashboard/');
   const isAppsRoute = location.pathname === '/apps' || location.pathname.startsWith('/apps/');
   const isCustomizationRoute = location.pathname === '/customization' || CUSTOMIZATION_PATHS.has(location.pathname);
+  const isChannelsRoute = location.pathname === '/channels';
   const activeDashboardId = location.pathname.startsWith('/dashboard/')
     ? location.pathname.split('/dashboard/')[1]
     : null;
@@ -646,6 +648,38 @@ const AppShell: React.FC = () => {
           </Box>
 
         </Box>
+
+          {/* Divider */}
+          <Box sx={{ mx: 1.5, my: 0.5, borderTop: `0.5px solid ${c.border.subtle}` }} />
+
+          {/* Channels section */}
+          <Box sx={{ px: 1, mb: 0.25 }}>
+            <ListItemButton
+              onClick={() => navigate('/channels')}
+              sx={{
+                borderRadius: 1.5,
+                py: 0.6,
+                px: 1.25,
+                bgcolor: isChannelsRoute ? `${c.accent.primary}12` : 'transparent',
+                '&:hover': { bgcolor: isChannelsRoute ? `${c.accent.primary}18` : `${c.text.tertiary}0A` },
+                transition: 'background-color 0.15s',
+              }}
+            >
+              <ListItemIcon sx={{ color: isChannelsRoute ? c.accent.primary : c.text.tertiary, minWidth: 32 }}>
+                <PhoneIcon sx={{ fontSize: 20 }} />
+              </ListItemIcon>
+              <ListItemText
+                primary="Channels"
+                sx={{
+                  '& .MuiListItemText-primary': {
+                    color: isChannelsRoute ? c.text.primary : c.text.muted,
+                    fontSize: '0.82rem',
+                    fontWeight: isChannelsRoute ? 600 : 400,
+                  },
+                }}
+              />
+            </ListItemButton>
+          </Box>
 
         {/* Settings */}
         <Box

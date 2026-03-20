@@ -21,3 +21,11 @@ class AppSettings(BaseModel):
     new_agent_shortcut: str = "Meta+l"
     anthropic_api_key: Optional[str] = None
     browser_homepage: str = "https://www.google.com"
+    # Telephony / Channel credentials
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    telnyx_api_key: Optional[str] = None
+    elevenlabs_api_key: Optional[str] = None
+    deepgram_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    webhook_base_url: Optional[str] = None
