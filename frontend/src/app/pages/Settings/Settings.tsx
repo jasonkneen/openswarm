@@ -11,6 +11,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Slider from '@mui/material/Slider';
+import Switch from '@mui/material/Switch';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import Tab from '@mui/material/Tab';
@@ -495,7 +496,7 @@ const Settings: React.FC = () => {
           </Box>
         </Box>
 
-        <Box sx={inlineRowLastSx}>
+        <Box sx={inlineRowSx}>
           <Box sx={{ mr: 3 }}>
             <Typography sx={labelSx}>New agent shortcut</Typography>
             <Typography sx={descSx}>Keyboard shortcut to create an agent.</Typography>
@@ -551,6 +552,51 @@ const Settings: React.FC = () => {
               </Typography>
             )}
           </Box>
+        </Box>
+
+        <Box sx={inlineRowSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Auto-enable element selection</Typography>
+            <Typography sx={descSx}>Automatically enter element selection mode when creating a new agent.</Typography>
+          </Box>
+          <Switch
+            checked={form.auto_select_mode_on_new_agent}
+            onChange={(e) => setForm({ ...form, auto_select_mode_on_new_agent: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
+            }}
+          />
+        </Box>
+
+        <Box sx={inlineRowSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Default agent spawn state in dashboard</Typography>
+            <Typography sx={descSx}>When enabled, new agents spawn expanded instead of collapsed.</Typography>
+          </Box>
+          <Switch
+            checked={form.expand_new_chats_in_dashboard}
+            onChange={(e) => setForm({ ...form, expand_new_chats_in_dashboard: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
+            }}
+          />
+        </Box>
+
+        <Box sx={inlineRowLastSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Auto-reveal sub-agents on dashboard</Typography>
+            <Typography sx={descSx}>Automatically show sub-agent cards (from CreateAgent / InvokeAgent) tethered to their parent on the dashboard.</Typography>
+          </Box>
+          <Switch
+            checked={form.auto_reveal_sub_agents}
+            onChange={(e) => setForm({ ...form, auto_reveal_sub_agents: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
+            }}
+          />
         </Box>
 
         {/* ── Browser ── */}
@@ -639,15 +685,8 @@ const Settings: React.FC = () => {
                       {step.title}
                       {step.link && (
                         <Typography
-                          component="span"
-                          onClick={() => {
-                            const w = window as any;
-                            if (w.openswarm?.openExternal) {
-                              w.openswarm.openExternal(step.link);
-                            } else {
-                              window.open(step.link, '_blank', 'noopener');
-                            }
-                          }}
+                          component="a"
+                          href={step.link}
                           sx={{
                             color: c.accent.primary,
                             fontSize: '0.75rem',
@@ -657,6 +696,7 @@ const Settings: React.FC = () => {
                             alignItems: 'center',
                             gap: 0.3,
                             verticalAlign: 'middle',
+                            textDecoration: 'none',
                             '&:hover': { textDecoration: 'underline' },
                           }}
                         >
@@ -701,6 +741,24 @@ const Settings: React.FC = () => {
                   </IconButton>
                 </InputAdornment>
               ),
+            }}
+          />
+        </Box>
+
+        {/* ── Advanced ── */}
+        <Typography sx={{ ...sectionSx, mt: 3 }}>Advanced</Typography>
+
+        <Box sx={inlineRowLastSx}>
+          <Box sx={{ mr: 3 }}>
+            <Typography sx={labelSx}>Developer mode</Typography>
+            <Typography sx={descSx}>Show transport details, environment variables, raw configs, and other technical metadata throughout the app.</Typography>
+          </Box>
+          <Switch
+            checked={form.dev_mode}
+            onChange={(e) => setForm({ ...form, dev_mode: e.target.checked })}
+            sx={{
+              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
             }}
           />
         </Box>

@@ -14,6 +14,7 @@ import { useAppDispatch } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import ViewPreview, { ViewPreviewHandle } from '@/app/pages/Views/ViewPreview';
 import { getDefault } from '@/app/pages/Views/InputSchemaForm';
+import { useOverlayScrollPassthrough } from './useOverlayScrollPassthrough';
 
 type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
@@ -45,6 +46,7 @@ interface Props {
   cardWidth: number;
   cardHeight: number;
   zoom?: number;
+  cmdHeld?: boolean;
   isSelected?: boolean;
   isHighlighted?: boolean;
   multiDragDelta?: { dx: number; dy: number } | null;
@@ -55,11 +57,12 @@ interface Props {
 }
 
 const DashboardViewCard: React.FC<Props> = ({
-  output, cardX, cardY, cardWidth, cardHeight, zoom = 1,
+  output, cardX, cardY, cardWidth, cardHeight, zoom = 1, cmdHeld = false,
   isSelected = false, isHighlighted = false, multiDragDelta, onCardSelect, onDragStart, onDragMove, onDragEnd,
 }) => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
+  const scrollOverlayRef = useOverlayScrollPassthrough(isSelected);
   const previewRef = useRef<ViewPreviewHandle>(null);
 
   const [inputData, setInputData] = useState<Record<string, any>>(() => getDefault(output.input_schema));
@@ -77,6 +80,7 @@ const DashboardViewCard: React.FC<Props> = ({
   const justDraggedRef = useRef(false);
 
   const handleDragPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     dragState.current = { startX: e.clientX, startY: e.clientY, origX: cardX, origY: cardY };
@@ -132,6 +136,7 @@ const DashboardViewCard: React.FC<Props> = ({
 
   const handleResizeDown = useCallback(
     (dir: ResizeDir) => (e: React.PointerEvent) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       resizeRef.current = {
@@ -304,9 +309,10 @@ const DashboardViewCard: React.FC<Props> = ({
         }),
       }}
     >
-      {/* Selection overlay – blocks content interaction while selected, enabling drag from anywhere */}
+      {/* Selection overlay – blocks click interaction while selected, enabling drag from anywhere */}
       {isSelected && (
         <Box
+          ref={scrollOverlayRef}
           onPointerDown={handleDragPointerDown}
           onPointerMove={handleDragPointerMove}
           onPointerUp={handleDragPointerUp}
@@ -401,6 +407,9 @@ const DashboardViewCard: React.FC<Props> = ({
 
       {/* Preview body */}
       <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {cmdHeld && !isSelected && (
+          <Box sx={{ position: 'absolute', inset: 0, zIndex: 12 }} />
+        )}
         <ViewPreview
           ref={previewRef}
           serveUrl={`${SERVE_BASE}/${output.id}/serve/index.html`}

@@ -29,3 +29,8 @@ class AppSettings(BaseModel):
     deepgram_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     webhook_base_url: Optional[str] = None
+    # Dashboard / UI preferences
+    auto_select_mode_on_new_agent: bool = False
+    expand_new_chats_in_dashboard: bool = False
+    auto_reveal_sub_agents: bool = True
+    dev_mode: bool = False

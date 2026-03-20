@@ -26,6 +26,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AdsClickIcon from '@mui/icons-material/AdsClick';
 import CommandPicker, { CommandPickerItem, getToolGroupIcon } from '@/app/components/CommandPicker';
 import { useElementSelection, SelectedElement } from '@/app/components/ElementSelectionContext';
+import { getClipboardCards, clearClipboard } from '@/shared/dashboardClipboard';
 import { getWebview } from '@/shared/browserRegistry';
 import { API_BASE } from '@/shared/config';
 import { ContextPath } from '@/app/components/DirectoryBrowser';
@@ -73,6 +74,7 @@ interface Props {
   embedded?: boolean;
   autoFocus?: boolean;
   sessionId?: string;
+  queueLength?: number;
 }
 
 export interface ChatInputHandle {
@@ -130,13 +132,16 @@ const ContextRing: React.FC<{ used: number; limit: number; accentColor: string; 
   );
 };
 
-const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, onModeChange, model, onModelChange, isRunning, onStop, autoRunMode, contextEstimate, embedded, autoFocus, sessionId }, ref) => {
+const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, onModeChange, model, onModelChange, isRunning, onStop, autoRunMode, contextEstimate, embedded, autoFocus, sessionId, queueLength = 0 }, ref) => {
   const c = useClaudeTokens();
   const editorRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const generalFileInputRef = useRef<HTMLInputElement>(null);
   const dispatch = useAppDispatch();
   const elementSelection = useElementSelection();
+
+  const fallbackOwnerIdRef = useRef(`input-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+  const ownerId = sessionId || fallbackOwnerIdRef.current;
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus();
@@ -281,7 +286,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     let trimmed = serialized.trim();
     if (!trimmed) return;
 
-    const selectedEls = elementSelection?.selectedElements ?? [];
+    const selectedEls = elementSelection?.elementsByOwner?.[ownerId] ?? [];
     let allImages = images.length > 0
       ? images.map(({ data, media_type }) => ({ data, media_type }))
       : [];
@@ -298,7 +303,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           lines.push(`${i + 1}. [Browser Card] ${title}`);
           lines.push(`   browser_id: ${el.semanticData.selectId}`);
           if (url) lines.push(`   URL: ${url}`);
-          lines.push(`   (Use BrowserAgent with this browser_id to interact with it)`);
+          lines.push(`   (Use BrowserAgent with this browser_id to interact with it, or CreateBrowserAgent for a new browser)`);
         } else if (el.semanticType && el.semanticData) {
           const typeLabel = {
             'agent-card': 'Agent Card',
@@ -317,6 +322,9 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
             .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
             .join(', ');
           if (metaStr) lines.push(`   ${metaStr}`);
+          if (el.semanticType === 'agent-card' && selectId) {
+            lines.push(`   (Use InvokeAgent with session_id "${selectId}" to query this agent with full conversation context)`);
+          }
         } else {
           const styleStr = Object.entries(el.computedStyles)
             .map(([k, v]) => `${k}: ${v}`)
@@ -359,8 +367,8 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     setForcedTools([]);
     setAttachedSkills({});
     setHasContent(false);
-    elementSelection?.clearSelectedElements();
-  }, [disabled, images, contextPaths, forcedTools, onSend, elementSelection]);
+    elementSelection?.clearOwnerElements(ownerId);
+  }, [disabled, images, contextPaths, forcedTools, onSend, elementSelection, ownerId]);
 
   const detectTrigger = useCallback(() => {
     const result = detectEditorTrigger();
@@ -469,6 +477,41 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   };
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const copied = getClipboardCards();
+    if (copied.length > 0 && elementSelection) {
+      e.preventDefault();
+      for (const card of copied) {
+        const semanticTypeMap: Record<string, SelectedElement['semanticType']> = {
+          agent: 'agent-card',
+          view: 'view-card',
+          browser: 'browser-card',
+        };
+        const semanticType = semanticTypeMap[card.type];
+        if (!semanticType) continue;
+        const labelMap: Record<string, string> = {
+          'agent-card': 'Agent',
+          'view-card': 'View',
+          'browser-card': 'Browser',
+        };
+        const semanticLabel = (labelMap[semanticType] || semanticType) + ': ' + card.name;
+        const el: SelectedElement = {
+          id: `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          selectorPath: `[data-select-type="${semanticType}"][data-select-id="${card.id}"]`,
+          tagName: 'DIV',
+          className: '',
+          outerHTML: '',
+          computedStyles: {},
+          boundingRect: { x: 0, y: 0, width: 0, height: 0 },
+          semanticType,
+          semanticLabel,
+          semanticData: { ...card.meta, selectId: card.id },
+        };
+        elementSelection.addElementForOwner(ownerId, el);
+      }
+      clearClipboard();
+      return;
+    }
+
     const items = e.clipboardData?.items;
     if (!items) return;
     const imageFiles: File[] = [];
@@ -486,7 +529,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     e.preventDefault();
     const plain = e.clipboardData.getData('text/plain');
     if (plain) document.execCommand('insertText', false, plain);
-  }, [addImageFiles]);
+  }, [addImageFiles, elementSelection, ownerId]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -535,7 +578,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     },
   };
 
-  const selectedElements = elementSelection?.selectedElements ?? [];
+  const selectedElements = elementSelection?.elementsByOwner?.[ownerId] ?? [];
   const hasAttachments = images.length > 0 || contextPaths.length > 0 || forcedTools.length > 0 || selectedElements.length > 0;
 
   return (
@@ -783,7 +826,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
                   icon={<AdsClickIcon sx={{ fontSize: 14 }} />}
                   label={chipLabel}
                   size="small"
-                  onDelete={() => elementSelection?.removeSelectedElement(el.id)}
+                  onDelete={() => elementSelection?.removeOwnerElement(ownerId, el.id)}
                   sx={{
                     bgcolor: 'rgba(59, 130, 246, 0.1)',
                     color: '#3b82f6',
@@ -849,7 +892,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
               userSelect: 'none',
             }}
           >
-            {disabled ? 'Agent is working...' : autoRunMode ? 'Describe what data to generate…' : `${modeConf.label}, @ for context, / for commands`}
+            {disabled ? 'Agent is working...' : autoRunMode ? 'Describe what data to generate…' : isRunning ? (queueLength > 0 ? `${queueLength} queued — type another or wait…` : 'Agent is working — messages will queue…') : `${modeConf.label}, @ for context, / for commands`}
           </div>
         )}
       </Box>
@@ -977,40 +1020,54 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           />
         )}
 
-        {elementSelection && !autoRunMode && (
-          <Tooltip title={elementSelection.selectMode ? 'Exit select mode' : 'Select UI element'}>
-            <IconButton
-              size="small"
-              onClick={() => {
-                if (!elementSelection.selectMode && sessionId) {
-                  elementSelection.setExcludeSelectId(sessionId);
-                }
-                elementSelection.toggleSelectMode();
-              }}
-              sx={{
-                p: 0.5,
-                ...(elementSelection.selectMode
-                  ? {
-                      bgcolor: '#3b82f6',
-                      color: '#fff',
-                      '&:hover': { bgcolor: '#2563eb' },
-                      animation: 'selectBtnPulse 2s ease-in-out infinite',
-                      '@keyframes selectBtnPulse': {
-                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(59,130,246,0.4)' },
-                        '50%': { boxShadow: '0 0 0 4px rgba(59,130,246,0.1)' },
-                      },
+        {elementSelection && !autoRunMode && (() => {
+          const isMySelectMode = elementSelection.selectMode && elementSelection.activeOwnerId === ownerId;
+          return (
+            <Tooltip title={isMySelectMode ? 'Exit select mode' : 'Select UI element'}>
+              <IconButton
+                size="small"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (isMySelectMode) {
+                    elementSelection.setSelectMode(false);
+                  } else {
+                    if (elementSelection.activeOwnerId !== ownerId) {
+                      elementSelection.clearOwnerElements(ownerId);
                     }
-                  : {
-                      color: c.text.tertiary,
-                      '&:hover': { color: c.text.secondary, bgcolor: 'rgba(0,0,0,0.04)' },
-                    }),
-                transition: 'background-color 0.15s, color 0.15s',
-              }}
-            >
-              <AdsClickIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        )}
+                    elementSelection.setActiveOwnerId(ownerId);
+                    if (sessionId) {
+                      elementSelection.setExcludeSelectId(sessionId);
+                    } else {
+                      elementSelection.setExcludeSelectId(null);
+                    }
+                    elementSelection.setSelectMode(true);
+                  }
+                }}
+                sx={{
+                  p: 0.5,
+                  ...(isMySelectMode
+                    ? {
+                        bgcolor: '#3b82f6',
+                        color: '#fff',
+                        '&:hover': { bgcolor: '#2563eb' },
+                        animation: 'selectBtnPulse 2s ease-in-out infinite',
+                        '@keyframes selectBtnPulse': {
+                          '0%, 100%': { boxShadow: '0 0 0 0 rgba(59,130,246,0.4)' },
+                          '50%': { boxShadow: '0 0 0 4px rgba(59,130,246,0.1)' },
+                        },
+                      }
+                    : {
+                        color: c.text.tertiary,
+                        '&:hover': { color: c.text.secondary, bgcolor: 'rgba(0,0,0,0.04)' },
+                      }),
+                  transition: 'background-color 0.15s, color 0.15s',
+                }}
+              >
+                <AdsClickIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          );
+        })()}
 
         <input
           ref={generalFileInputRef}
@@ -1040,61 +1097,66 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
             <AttachFileIcon sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
-        {!autoRunMode && (isRunning ? (
-          <Tooltip title="Stop agent">
-            <IconButton
-              size="small"
-              onClick={onStop}
-              sx={{
-                bgcolor: c.status.error,
-                color: c.text.inverse,
-                p: 0.5,
-                width: 26,
-                height: 26,
-                '&:hover': { bgcolor: c.status.error, opacity: 0.85 },
-                transition: c.transition,
-              }}
-            >
-              <StopIcon sx={{ fontSize: 16 }} />
-            </IconButton>
-          </Tooltip>
-        ) : hasContent ? (
-          <Tooltip title="Send message">
-            <IconButton
-              size="small"
-              onClick={handleSend}
-              disabled={disabled}
-              sx={{
-                bgcolor: c.accent.primary,
-                color: c.text.inverse,
-                p: 0.5,
-                width: 26,
-                height: 26,
-                '&:hover': { bgcolor: c.accent.hover },
-                '&.Mui-disabled': { bgcolor: c.bg.secondary, color: c.text.ghost },
-                transition: c.transition,
-              }}
-            >
-              <ArrowUpwardIcon sx={{ fontSize: 16 }} />
-            </IconButton>
-          </Tooltip>
-        ) : (
-          <Tooltip title="Voice input (coming soon)">
-            <span>
-              <IconButton
-                size="small"
-                disabled
-                sx={{
-                  color: c.text.tertiary,
-                  p: 0.5,
-                  '&.Mui-disabled': { color: c.text.ghost },
-                }}
-              >
-                <MicNoneOutlinedIcon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </span>
-          </Tooltip>
-        ))}
+        {!autoRunMode && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {hasContent && (
+              <Tooltip title={isRunning ? 'Queue message' : 'Send message'}>
+                <IconButton
+                  size="small"
+                  onClick={handleSend}
+                  disabled={disabled}
+                  sx={{
+                    bgcolor: c.accent.primary,
+                    color: c.text.inverse,
+                    p: 0.5,
+                    width: 26,
+                    height: 26,
+                    '&:hover': { bgcolor: c.accent.hover },
+                    '&.Mui-disabled': { bgcolor: c.bg.secondary, color: c.text.ghost },
+                    transition: c.transition,
+                  }}
+                >
+                  <ArrowUpwardIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+            {isRunning ? (
+              <Tooltip title="Stop agent">
+                <IconButton
+                  size="small"
+                  onClick={onStop}
+                  sx={{
+                    bgcolor: c.status.error,
+                    color: c.text.inverse,
+                    p: 0.5,
+                    width: 26,
+                    height: 26,
+                    '&:hover': { bgcolor: c.status.error, opacity: 0.85 },
+                    transition: c.transition,
+                  }}
+                >
+                  <StopIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            ) : !hasContent ? (
+              <Tooltip title="Voice input (coming soon)">
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled
+                    sx={{
+                      color: c.text.tertiary,
+                      p: 0.5,
+                      '&.Mui-disabled': { color: c.text.ghost },
+                    }}
+                  >
+                    <MicNoneOutlinedIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            ) : null}
+          </Box>
+        )}
       </Box>
 
       {selectedTemplate && (

@@ -3,7 +3,7 @@ import { Provider } from 'react-redux';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider as MuiThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import { store } from '../shared/state/store';
-import { useAppDispatch } from '@/shared/hooks';
+import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { fetchSettings } from '@/shared/state/settingsSlice';
 import {
   setAppVersion,
@@ -156,9 +156,15 @@ const ShortcutsProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
 const SettingsLoader: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const dispatch = useAppDispatch();
+  const { setMode: setThemeMode } = useThemeMode();
+  const theme = useAppSelector((s) => s.settings.data.theme);
+  const loaded = useAppSelector((s) => s.settings.loaded);
   useEffect(() => {
     dispatch(fetchSettings());
   }, [dispatch]);
+  useEffect(() => {
+    if (loaded) setThemeMode(theme as 'light' | 'dark');
+  }, [loaded, theme, setThemeMode]);
   return <>{children}</>;
 };
 
@@ -170,6 +176,21 @@ const UpdateListener: React.FC<{ children: React.ReactNode }> = ({ children }) =
     if (!api?.getAppVersion) return;
 
     api.getAppVersion().then((v: string) => dispatch(setAppVersion(v)));
+
+    api.getUpdateStatus?.().then((cached) => {
+      if (!cached) return;
+      if (cached.status === 'available' && cached.info?.version) {
+        dispatch(setUpdateAvailable(cached.info.version));
+      } else if (cached.status === 'not-available') {
+        dispatch(setUpdateNotAvailable());
+      } else if (cached.status === 'downloading' && cached.info?.percent != null) {
+        dispatch(setDownloading(cached.info.percent));
+      } else if (cached.status === 'downloaded') {
+        dispatch(setUpdateDownloaded());
+      } else if (cached.status === 'error' && cached.error) {
+        dispatch(setUpdateError(cached.error));
+      }
+    });
 
     const cleanups = [
       api.onUpdateAvailable?.((info: OpenSwarmUpdateInfo) => dispatch(setUpdateAvailable(info.version))),

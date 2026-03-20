@@ -56,6 +56,8 @@ async def send_message(session_id: str, body: dict):
         context_paths=body.get("context_paths"),
         forced_tools=body.get("forced_tools"),
         attached_skills=body.get("attached_skills"),
+        hidden=body.get("hidden", False),
+        selected_browser_ids=body.get("selected_browser_ids"),
     )
     return {"ok": True}
 
@@ -131,6 +133,18 @@ async def get_branches(session_id: str):
         "active_branch_id": session.active_branch_id,
     }
 
+@agents.router.post("/sessions/{session_id}/duplicate")
+async def duplicate_session(session_id: str, body: dict = {}):
+    try:
+        session = await agent_manager.duplicate_session(
+            session_id,
+            dashboard_id=body.get("dashboard_id"),
+            up_to_message_id=body.get("up_to_message_id"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"session": session.model_dump(mode="json")}
+
 @agents.router.post("/sessions/{session_id}/close")
 async def close_session(session_id: str):
     try:
@@ -150,6 +164,11 @@ async def get_history(q: str = "", limit: int = 20, offset: int = 0, dashboard_i
         q=q, limit=limit, offset=offset,
         dashboard_id=dashboard_id or None,
     )
+
+@agents.router.get("/sessions/{session_id}/browser-agents")
+async def get_browser_agent_children(session_id: str):
+    children = agent_manager.get_browser_agent_children(session_id)
+    return {"sessions": children}
 
 @agents.router.post("/sessions/{session_id}/resume")
 async def resume_session(session_id: str):

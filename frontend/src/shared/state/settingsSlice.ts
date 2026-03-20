@@ -22,6 +22,10 @@ export interface AppSettings {
   new_agent_shortcut: string;
   anthropic_api_key: string | null;
   browser_homepage: string;
+  auto_select_mode_on_new_agent: boolean;
+  expand_new_chats_in_dashboard: boolean;
+  auto_reveal_sub_agents: boolean;
+  dev_mode: boolean;
 }
 
 export interface BrowseResult {
@@ -50,6 +54,10 @@ const initialState: SettingsState = {
     new_agent_shortcut: 'Meta+l',
     anthropic_api_key: null,
     browser_homepage: 'https://www.google.com',
+    auto_select_mode_on_new_agent: false,
+    expand_new_chats_in_dashboard: false,
+    auto_reveal_sub_agents: true,
+    dev_mode: false,
   },
   loading: false,
   loaded: false,

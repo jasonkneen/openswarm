@@ -15,8 +15,9 @@ from uuid import uuid4
 
 import anthropic
 
-from backend.apps.agents.models import AgentSession, Message
+from backend.apps.agents.models import AgentSession, ApprovalRequest, Message
 from backend.apps.agents.ws_manager import ws_manager
+from backend.apps.tools_lib.tools_lib import load_builtin_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,48 @@ BROWSER_TOOLS_SCHEMA = [
             "required": [],
         },
     },
+    {
+        "name": "BrowserScroll",
+        "description": (
+            "Scroll the page up or down. Automatically finds the correct scrollable "
+            "container (works on SPAs like Notion, Gmail, etc. that use nested scroll "
+            "containers instead of window-level scrolling). Returns scroll position info "
+            "including whether top/bottom has been reached."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "enum": ["up", "down"],
+                    "description": "Scroll direction. Defaults to 'down'.",
+                },
+                "amount": {
+                    "type": "number",
+                    "description": "Pixels to scroll. Defaults to 500.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "BrowserWait",
+        "description": (
+            "Wait for a specified duration. Useful after navigation or actions that "
+            "trigger page loads, animations, or async content rendering. "
+            "Min 100ms, max 10000ms."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "milliseconds": {
+                    "type": "number",
+                    "description": "Duration to wait in milliseconds. Defaults to 1000.",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 ACTION_MAP = {
@@ -122,17 +165,29 @@ ACTION_MAP = {
     "BrowserType": "type",
     "BrowserEvaluate": "evaluate",
     "BrowserGetElements": "get_elements",
+    "BrowserScroll": "scroll",
+    "BrowserWait": "wait",
 }
 
 SYSTEM_PROMPT = (
     "You are a browser automation agent. You control a single browser tab and "
     "execute the task you are given.\n\n"
     "Strategy:\n"
-    "1. Start by taking a screenshot or calling BrowserGetElements to understand the page.\n"
-    "2. Use BrowserGetElements BEFORE clicking or typing to discover valid CSS selectors.\n"
-    "3. After performing actions, take a screenshot to verify the result.\n"
-    "4. If an action fails, try alternative selectors or approaches.\n"
-    "5. When the task is complete, provide a clear summary of what you accomplished.\n\n"
+    "1. Start by taking a screenshot to understand the page.\n"
+    "2. After navigation, use BrowserWait (1-3 seconds) to let the page finish loading.\n"
+    "3. Use BrowserScroll to scroll through pages — do NOT use BrowserEvaluate with "
+    "window.scrollBy() as many sites use nested scroll containers that BrowserScroll "
+    "handles automatically.\n"
+    "4. Use BrowserGetElements BEFORE clicking or typing to discover valid CSS selectors.\n"
+    "5. After performing actions, take a screenshot to verify the result.\n"
+    "6. If an action fails, try alternative selectors or approaches.\n"
+    "7. When the task is complete, provide a clear summary of what you accomplished.\n\n"
+    "Important notes:\n"
+    "- BrowserGetText returns up to 15000 chars of visible text — use it to read page content.\n"
+    "- BrowserScroll returns position info including atTop/atBottom — use this to know when "
+    "you've reached the end of the page.\n"
+    "- For complex SPAs (Notion, Gmail, etc.), prefer BrowserScroll over BrowserEvaluate for scrolling.\n"
+    "- Avoid looping: if scrolling shows no new content (scrolled 0px), you're at the boundary.\n\n"
     "You have access ONLY to browser tools. Do not ask the user questions — "
     "complete the task autonomously to the best of your ability."
 )
@@ -179,6 +234,40 @@ def _format_tool_result(result: dict, tool_name: str) -> list[dict]:
     return [{"type": "text", "text": str(text)}]
 
 
+async def _request_browser_approval(
+    session: AgentSession, tool_name: str, tool_input: dict,
+) -> dict:
+    """Send an approval request for a browser sub-agent tool and wait for the decision."""
+    request_id = uuid4().hex
+    approval_req = ApprovalRequest(
+        id=request_id,
+        session_id=session.id,
+        tool_name=tool_name,
+        tool_input=tool_input,
+    )
+    session.pending_approvals.append(approval_req)
+    session.status = "waiting_approval"
+
+    await ws_manager.send_to_session(session.id, "agent:status", {
+        "session_id": session.id,
+        "status": "waiting_approval",
+    })
+
+    decision = await ws_manager.send_approval_request(
+        session.id, request_id, tool_name, tool_input,
+    )
+
+    session.pending_approvals = [
+        a for a in session.pending_approvals if a.id != request_id
+    ]
+    session.status = "running"
+    await ws_manager.send_to_session(session.id, "agent:status", {
+        "session_id": session.id,
+        "status": "running",
+    })
+    return decision
+
+
 async def run_browser_agent(
     task: str,
     browser_id: str,
@@ -188,6 +277,7 @@ async def run_browser_agent(
     tab_id: str = "",
     pre_selected: bool = False,
     initial_url: str | None = None,
+    parent_session_id: str | None = None,
 ) -> dict:
     """Run a browser sub-agent loop for a single browser card.
 
@@ -195,6 +285,8 @@ async def run_browser_agent(
     and returns the full action log + summary + final screenshot.
     """
     from backend.apps.agents.agent_manager import agent_manager
+
+    _browser_perms = load_builtin_permissions()
 
     session_id = uuid4().hex
     session = AgentSession(
@@ -206,6 +298,7 @@ async def run_browser_agent(
         dashboard_id=dashboard_id,
         browser_id=browser_id,
         system_prompt=SYSTEM_PROMPT,
+        parent_session_id=parent_session_id,
     )
     agent_manager.sessions[session_id] = session
 
@@ -291,6 +384,48 @@ async def run_browser_agent(
 
             tool_results = []
             for tu in tool_uses:
+                policy = _browser_perms.get(tu.name, "always_allow")
+
+                if policy == "deny":
+                    denied_text = f"Tool {tu.name} is denied by permission policy."
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": [{"type": "text", "text": denied_text}],
+                    })
+                    result_msg = Message(
+                        role="tool_result",
+                        content={"text": denied_text, "tool_name": tu.name, "elapsed_ms": 0},
+                    )
+                    session.messages.append(result_msg)
+                    await ws_manager.send_to_session(session_id, "agent:message", {
+                        "session_id": session_id,
+                        "message": result_msg.model_dump(mode="json"),
+                    })
+                    continue
+
+                if policy == "ask":
+                    decision = await _request_browser_approval(
+                        session, tu.name, tu.input,
+                    )
+                    if decision.get("behavior") == "deny":
+                        denied_text = decision.get("message") or f"Tool {tu.name} denied by user."
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tu.id,
+                            "content": [{"type": "text", "text": denied_text}],
+                        })
+                        result_msg = Message(
+                            role="tool_result",
+                            content={"text": denied_text, "tool_name": tu.name, "elapsed_ms": 0},
+                        )
+                        session.messages.append(result_msg)
+                        await ws_manager.send_to_session(session_id, "agent:message", {
+                            "session_id": session_id,
+                            "message": result_msg.model_dump(mode="json"),
+                        })
+                        continue
+
                 start = time.time()
                 result = await execute_browser_tool(
                     tu.name, tu.input, browser_id, tab_id,
@@ -407,6 +542,8 @@ async def _create_browser_card(dashboard_id: str, url: str) -> str:
         activeTabId=tab_id,
         x=40,
         y=100,
+        width=1280,
+        height=800,
     )
     dashboard.layout.browser_cards[browser_id] = card
     dashboard.updated_at = datetime.now()
@@ -425,6 +562,7 @@ async def run_browser_agents(
     api_key: str,
     dashboard_id: str | None = None,
     pre_selected_browser_ids: list[str] | None = None,
+    parent_session_id: str | None = None,
 ) -> list[dict]:
     """Run multiple browser sub-agents in parallel.
 
@@ -451,6 +589,7 @@ async def run_browser_agents(
             dashboard_id=dashboard_id,
             pre_selected=is_pre_selected,
             initial_url=url if url and browser_id not in pre_selected else None,
+            parent_session_id=parent_session_id,
         )
 
     results = await asyncio.gather(*[_run_one(t) for t in tasks], return_exceptions=True)

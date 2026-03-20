@@ -66,6 +66,8 @@ FULL_TOOLS = [
     "TaskOutput", "TaskStop",
     "CronCreate", "CronList", "CronDelete",
     "RenderOutput",
+    "InvokeAgent",
+    "Agent",
 ]
 
 def _get_denied_tool_names(tool) -> set[str]:
@@ -232,8 +234,12 @@ class AgentManager:
             + "\n</available_views>"
         )
 
-    def _build_browser_context(self, dashboard_id: str | None) -> str | None:
-        """Build a context block listing browser cards and delegation instructions."""
+    def _build_browser_context(self, dashboard_id: str | None, selected_browser_ids: list[str] | None = None) -> str | None:
+        """Build a context block listing browser cards and delegation instructions.
+
+        Only browser cards explicitly selected by the user are included.
+        If none are selected, no browser card details are exposed.
+        """
         if not dashboard_id:
             return None
         try:
@@ -246,34 +252,39 @@ class AgentManager:
 
         lines = [
             "<browser_agent_instructions>",
-            "You have access to browser automation through the BrowserAgent and BrowserAgents tools.",
+            "You have access to browser automation through the CreateBrowserAgent, BrowserAgent, and BrowserAgents tools.",
             "",
-            "- **BrowserAgent(task, browser_id?, url?)**: Delegate a single browser task to a dedicated browser agent. "
+            "- **CreateBrowserAgent(task, url?)**: Create a new browser card and run a task on it. "
+            "Use this when you need a fresh browser. Optionally provide a starting URL.",
+            "- **BrowserAgent(browser_id, task)**: Delegate a task to an existing browser card. "
             "The browser agent will autonomously navigate, click, type, and interact with the page, then return a summary and screenshot.",
-            "- **BrowserAgents(tasks)**: Run multiple browser tasks in parallel, each on a different browser.",
+            "- **BrowserAgents(tasks)**: Run multiple browser tasks in parallel on existing browser cards. "
+            "Each task requires a browser_id.",
             "",
             "You do NOT have direct access to low-level browser tools (click, type, screenshot, etc.). "
             "Instead, describe what you want accomplished and the browser agent will handle the details.",
-            "",
-            "If you omit browser_id, a new browser card will be auto-created. "
-            "If you provide a url without a browser_id, the new browser navigates there first.",
         ]
 
-        if browser_cards:
-            lines.append("")
-            lines.append("Available browser cards on the dashboard:")
-            for card in browser_cards.values():
-                bid = card.get("browser_id", "")
-                tabs = card.get("tabs", [])
-                active_tab_id = card.get("activeTabId", "")
-                active_tab = next((t for t in tabs if t.get("id") == active_tab_id), None)
-                url = (active_tab or {}).get("url", card.get("url", ""))
-                title = (active_tab or {}).get("title", "")
-                lines.append(f"- browser_id: \"{bid}\"")
-                if title:
-                    lines.append(f"  Title: {title}")
-                if url:
-                    lines.append(f"  URL: {url}")
+        if browser_cards and selected_browser_ids:
+            visible_cards = [
+                card for card in browser_cards.values()
+                if card.get("browser_id", "") in selected_browser_ids
+            ]
+            if visible_cards:
+                lines.append("")
+                lines.append("The user selected these browser cards for you to work with:")
+                for card in visible_cards:
+                    bid = card.get("browser_id", "")
+                    tabs = card.get("tabs", [])
+                    active_tab_id = card.get("activeTabId", "")
+                    active_tab = next((t for t in tabs if t.get("id") == active_tab_id), None)
+                    url = (active_tab or {}).get("url", card.get("url", ""))
+                    title = (active_tab or {}).get("title", "")
+                    lines.append(f"- browser_id: \"{bid}\"")
+                    if title:
+                        lines.append(f"  Title: {title}")
+                    if url:
+                        lines.append(f"  URL: {url}")
 
         lines.append("</browser_agent_instructions>")
         return "\n".join(lines)
@@ -456,7 +467,7 @@ class AgentManager:
             })
         return content
 
-    async def _run_agent_loop(self, session_id: str, prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None):
+    async def _run_agent_loop(self, session_id: str, prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None, fork_session: bool = False, selected_browser_ids: list[str] | None = None):
         """Run the Claude Agent SDK query loop for a session."""
         session = self.sessions.get(session_id)
         if not session:
@@ -481,58 +492,53 @@ class AgentManager:
         
         _builtin_perms = load_builtin_permissions()
 
-        def _check_tool_permission(tool_name: str) -> str | None:
-            """Check tool permissions for both builtin and MCP tools.
-            Returns 'always_allow', 'deny', or None (ask)."""
+        def _get_effective_policy(tool_name: str) -> str:
+            """Return 'always_allow', 'deny', or 'ask' for any tool."""
             if tool_name in _builtin_perms:
-                policy = _builtin_perms[tool_name]
-                if policy in ("always_allow", "deny"):
-                    return policy
-                return None
+                return _builtin_perms[tool_name]
 
             import re as _re
+
+            bm = _re.match(r"mcp__openswarm-browser-agent__(.+)", tool_name)
+            if bm:
+                return _builtin_perms.get(bm.group(1), "always_allow")
+
+            im = _re.match(r"mcp__openswarm-invoke-agent__(.+)", tool_name)
+            if im:
+                return _builtin_perms.get(im.group(1), "always_allow")
+
             m = _re.match(r"mcp__([^_]+(?:-[^_]+)*)__(.+)", tool_name)
-            if not m:
-                return None
-            server_slug, mcp_tool_name = m.group(1), m.group(2)
-            for t in load_all_tools():
-                if not t.mcp_config or not t.enabled:
-                    continue
-                if _sanitize_server_name(t.name) == server_slug:
-                    policy = t.tool_permissions.get(mcp_tool_name, "ask")
-                    if policy in ("always_allow", "deny"):
-                        return policy
-                    return None
-            return None
+            if m:
+                server_slug, mcp_tool_name = m.group(1), m.group(2)
+                for t in load_all_tools():
+                    if not t.mcp_config or not t.enabled:
+                        continue
+                    if _sanitize_server_name(t.name) == server_slug:
+                        return t.tool_permissions.get(mcp_tool_name, "ask")
+            return "always_allow"
 
-        async def can_use_tool(tool_name, input_data, context):
-            if tool_name != "AskUserQuestion":
-                policy = _check_tool_permission(tool_name)
-                if policy == "always_allow":
-                    return PermissionResultAllow(updated_input=input_data)
-                if policy == "deny":
-                    return PermissionResultDeny(message="Tool denied by permission policy")
-
+        async def _request_user_approval(tool_name: str, tool_input) -> dict:
+            """Send an approval request via WebSocket and wait for the user's decision."""
+            safe_input = tool_input if isinstance(tool_input, dict) else {}
             request_id = uuid4().hex
             approval_req = ApprovalRequest(
                 id=request_id,
                 session_id=session_id,
                 tool_name=tool_name,
-                tool_input=input_data if isinstance(input_data, dict) else {},
+                tool_input=safe_input,
             )
             session.pending_approvals.append(approval_req)
             session.status = "waiting_approval"
-            
+
             await ws_manager.send_to_session(session_id, "agent:status", {
                 "session_id": session_id,
                 "status": "waiting_approval",
             })
-            
+
             decision = await ws_manager.send_approval_request(
-                session_id, request_id, tool_name,
-                input_data if isinstance(input_data, dict) else {}
+                session_id, request_id, tool_name, safe_input
             )
-            
+
             session.pending_approvals = [
                 a for a in session.pending_approvals if a.id != request_id
             ]
@@ -541,22 +547,67 @@ class AgentManager:
                 "session_id": session_id,
                 "status": "running",
             })
-            
+            return decision
+
+        async def can_use_tool(tool_name, input_data, context):
+            if tool_name != "AskUserQuestion":
+                policy = _get_effective_policy(tool_name)
+                if policy == "always_allow":
+                    return PermissionResultAllow(updated_input=input_data)
+                if policy == "deny":
+                    return PermissionResultDeny(message="Tool denied by permission policy")
+
+            decision = await _request_user_approval(tool_name, input_data)
             if decision.get("behavior") == "allow":
                 return PermissionResultAllow(
                     updated_input=decision.get("updated_input", input_data)
                 )
-            else:
-                return PermissionResultDeny(
-                    message=decision.get("message", "User denied this action")
-                )
+            return PermissionResultDeny(
+                message=decision.get("message", "User denied this action")
+            )
 
         tool_start_times: dict[str, float] = {}
 
         async def pre_tool_hook(input_data, tool_use_id, context):
+            tool_name = input_data.get("tool_name", "")
+            hook_event = input_data.get("hook_event_name", "PreToolUse")
+
+            if tool_name and tool_name != "AskUserQuestion":
+                policy = _get_effective_policy(tool_name)
+
+                if policy == "deny":
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": hook_event,
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": "Tool denied by permission policy",
+                        }
+                    }
+
+                if policy == "ask":
+                    tool_input = input_data.get("tool_input", {})
+                    decision = await _request_user_approval(tool_name, tool_input)
+
+                    if decision.get("behavior") == "allow":
+                        if tool_use_id:
+                            tool_start_times[tool_use_id] = time.time()
+                        return {
+                            "hookSpecificOutput": {
+                                "hookEventName": hook_event,
+                                "permissionDecision": "allow",
+                            }
+                        }
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": hook_event,
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": decision.get("message", "User denied this action"),
+                        }
+                    }
+
             if tool_use_id:
                 tool_start_times[tool_use_id] = time.time()
-            return {"continue_": True}
+            return {}
 
         async def post_tool_hook(input_data, tool_use_id, context):
             elapsed_ms = None
@@ -590,7 +641,61 @@ class AgentManager:
             if elapsed_ms is not None:
                 result_payload["elapsed_ms"] = elapsed_ms
 
-            result_msg = Message(role="tool_result", content=result_payload)
+            if hook_tool_name == "Agent":
+                tool_input = input_data.get("tool_input", {})
+                agent_prompt = tool_input.get("prompt", tool_input.get("task", ""))
+
+                sub_text = content
+                sub_cost = 0.0
+                sub_tokens = {"input": 0, "output": 0}
+                sub_model = session.model
+                if isinstance(raw_response, dict):
+                    blocks = raw_response.get("content")
+                    if isinstance(blocks, list):
+                        parts = [
+                            b.get("text", "")
+                            for b in blocks
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        ]
+                        if parts:
+                            sub_text = "\n".join(parts) if len(parts) > 1 else parts[0]
+                    elif isinstance(raw_response.get("text"), str):
+                        sub_text = raw_response["text"]
+                    usage = raw_response.get("usage", {})
+                    if isinstance(usage, dict):
+                        sub_tokens["input"] = usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+                        sub_tokens["output"] = usage.get("output_tokens", 0)
+                    if raw_response.get("model"):
+                        sub_model = raw_response["model"]
+
+                sub_session_id = uuid4().hex
+                sub_name = agent_prompt[:50] if agent_prompt else "Sub-agent"
+                sub_session = AgentSession(
+                    id=sub_session_id,
+                    name=sub_name,
+                    status="completed",
+                    model=sub_model,
+                    mode="sub-agent",
+                    cwd=session.cwd,
+                    created_at=datetime.now(),
+                    cost_usd=sub_cost,
+                    tokens=sub_tokens,
+                    messages=[
+                        Message(role="user", content=agent_prompt, branch_id="main"),
+                        Message(role="assistant", content=sub_text, branch_id="main"),
+                    ],
+                    dashboard_id=session.dashboard_id,
+                    parent_session_id=session_id,
+                )
+                self.sessions[sub_session_id] = sub_session
+                await ws_manager.broadcast_global("agent:status", {
+                    "session_id": sub_session_id,
+                    "status": sub_session.status,
+                    "session": sub_session.model_dump(mode="json"),
+                })
+                result_payload["sub_session_id"] = sub_session_id
+
+            result_msg = Message(role="tool_result", content=result_payload, branch_id=session.active_branch_id)
             session.messages.append(result_msg)
             await ws_manager.send_to_session(session_id, "agent:message", {
                 "session_id": session_id,
@@ -602,36 +707,95 @@ class AgentManager:
             _, mode_sys_prompt, _ = self._resolve_mode(session.mode)
             connected_tools_ctx = self._build_connected_tools_context(session.allowed_tools)
             outputs_ctx = self._build_outputs_context()
-            browser_ctx = self._build_browser_context(session.dashboard_id)
+            browser_ctx = self._build_browser_context(session.dashboard_id, selected_browser_ids=selected_browser_ids)
             global_settings = load_settings()
             composed_prompt = self._compose_system_prompt(global_settings.default_system_prompt, mode_sys_prompt, session.system_prompt, connected_tools_ctx, outputs_ctx, browser_ctx)
 
+            if session.mode == "view-builder":
+                from backend.apps.outputs.view_builder_templates import VIEW_BUILDER_SKILL
+                skill_block = f"<app_builder_reference>\n{VIEW_BUILDER_SKILL}\n</app_builder_reference>"
+                composed_prompt = f"{composed_prompt}\n\n{skill_block}" if composed_prompt else skill_block
+
             mcp_servers = await self._build_mcp_servers(session.allowed_tools)
 
-            browser_agent_server_path = os.path.join(
-                os.path.dirname(__file__), "browser_agent_mcp_server.py"
+            _browser_delegation_tools = ["CreateBrowserAgent", "BrowserAgent", "BrowserAgents"]
+            _browser_all_denied = all(
+                _builtin_perms.get(t, "always_allow") == "deny"
+                for t in _browser_delegation_tools
             )
-            backend_port = os.environ.get("OPENSWARM_PORT", "8324")
-            pre_selected_bids = self._get_pre_selected_browser_ids(session.dashboard_id)
-            mcp_servers["openswarm-browser-agent"] = {
-                "command": sys.executable,
-                "args": [browser_agent_server_path],
-                "env": {
-                    "OPENSWARM_PORT": backend_port,
-                    "OPENSWARM_AGENT_MODEL": session.model,
-                    "OPENSWARM_DASHBOARD_ID": session.dashboard_id or "",
-                    "OPENSWARM_PRE_SELECTED_BROWSER_IDS": ",".join(pre_selected_bids),
-                },
-                "type": "stdio",
-            }
+
+            if not _browser_all_denied:
+                browser_agent_server_path = os.path.join(
+                    os.path.dirname(__file__), "browser_agent_mcp_server.py"
+                )
+                backend_port = os.environ.get("OPENSWARM_PORT", "8324")
+                pre_selected_bids = self._get_pre_selected_browser_ids(session.dashboard_id)
+                mcp_servers["openswarm-browser-agent"] = {
+                    "command": sys.executable,
+                    "args": [browser_agent_server_path],
+                    "env": {
+                        "OPENSWARM_PORT": backend_port,
+                        "OPENSWARM_AGENT_MODEL": session.model,
+                        "OPENSWARM_DASHBOARD_ID": session.dashboard_id or "",
+                        "OPENSWARM_PRE_SELECTED_BROWSER_IDS": ",".join(pre_selected_bids),
+                        "OPENSWARM_PARENT_SESSION_ID": session.id,
+                    },
+                    "type": "stdio",
+                }
+
+            _invoke_agent_tools = ["InvokeAgent"]
+            _invoke_all_denied = all(
+                _builtin_perms.get(t, "always_allow") == "deny"
+                for t in _invoke_agent_tools
+            )
+
+            if not _invoke_all_denied:
+                invoke_agent_server_path = os.path.join(
+                    os.path.dirname(__file__), "invoke_agent_mcp_server.py"
+                )
+                backend_port = os.environ.get("OPENSWARM_PORT", "8324")
+                mcp_servers["openswarm-invoke-agent"] = {
+                    "command": sys.executable,
+                    "args": [invoke_agent_server_path],
+                    "env": {
+                        "OPENSWARM_PORT": backend_port,
+                        "OPENSWARM_PARENT_SESSION_ID": session.id,
+                        "OPENSWARM_DASHBOARD_ID": session.dashboard_id or "",
+                    },
+                    "type": "stdio",
+                }
 
             effective_allowed = [
                 t for t in session.allowed_tools
-                if _builtin_perms.get(t, "always_allow") == "always_allow"
+                if t in FULL_TOOLS and _builtin_perms.get(t, "always_allow") == "always_allow"
             ]
+
+            effective_disallowed = [
+                t for t in FULL_TOOLS
+                if _builtin_perms.get(t, "always_allow") == "deny"
+            ]
+
             if mcp_servers:
                 all_tools_list = load_all_tools()
                 for name in mcp_servers:
+                    if name == "openswarm-browser-agent":
+                        for bt in _browser_delegation_tools:
+                            policy = _builtin_perms.get(bt, "always_allow")
+                            if policy == "always_allow":
+                                effective_allowed.append(f"mcp__openswarm-browser-agent__{bt}")
+                            elif policy == "deny":
+                                effective_disallowed.append(f"mcp__openswarm-browser-agent__{bt}")
+                        continue
+
+                    if name == "openswarm-invoke-agent":
+                        for it in _invoke_agent_tools:
+                            policy = _builtin_perms.get(it, "always_allow")
+                            if policy == "always_allow":
+                                effective_allowed.append(f"mcp__openswarm-invoke-agent__{it}")
+                            elif policy == "deny":
+                                effective_disallowed.append(f"mcp__openswarm-invoke-agent__{it}")
+                        continue
+
                     tool_def = next(
                         (t for t in all_tools_list
                          if t.mcp_config and t.enabled and _sanitize_server_name(t.name) == name),
@@ -644,20 +808,22 @@ class AgentManager:
                             policy = tool_def.tool_permissions.get(tn, "ask")
                             if policy == "always_allow":
                                 effective_allowed.append(f"mcp__{name}__{tn}")
+                        for tn in denied:
+                            effective_disallowed.append(f"mcp__{name}__{tn}")
                     else:
                         effective_allowed.append(f"mcp__{name}__*")
-
-            effective_allowed.append("mcp__openswarm-browser-agent__*")
 
             options_kwargs = {
                 "model": session.model,
                 "max_buffer_size": 5 * 1024 * 1024,
+                "permission_mode": "default",
                 "can_use_tool": can_use_tool,
                 "hooks": {
                     "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_hook])],
                     "PostToolUse": [HookMatcher(matcher=None, hooks=[post_tool_hook])],
                 },
                 "allowed_tools": effective_allowed,
+                "disallowed_tools": effective_disallowed,
                 "include_partial_messages": True,
             }
             if not global_settings.anthropic_api_key:
@@ -675,6 +841,8 @@ class AgentManager:
 
             if session.sdk_session_id:
                 options_kwargs["resume"] = session.sdk_session_id
+                if fork_session:
+                    options_kwargs["fork_session"] = True
 
             options = ClaudeAgentOptions(**options_kwargs)
 
@@ -775,6 +943,7 @@ class AgentManager:
                             id=stream_text_msg_id or uuid4().hex,
                             role="assistant",
                             content="\n".join(content_parts),
+                            branch_id=session.active_branch_id,
                         )
                         session.messages.append(asst_msg)
                         await ws_manager.send_to_session(session_id, "agent:message", {
@@ -784,7 +953,7 @@ class AgentManager:
 
                     for i, tu in enumerate(tool_uses):
                         msg_id = stream_tool_msg_ids_ordered[i] if i < len(stream_tool_msg_ids_ordered) else uuid4().hex
-                        tool_msg = Message(id=msg_id, role="tool_call", content=tu)
+                        tool_msg = Message(id=msg_id, role="tool_call", content=tu, branch_id=session.active_branch_id)
                         session.messages.append(tool_msg)
                         await ws_manager.send_to_session(session_id, "agent:message", {
                             "session_id": session_id,
@@ -811,7 +980,7 @@ class AgentManager:
         except Exception as e:
             logger.exception(f"Agent {session_id} error: {e}")
             session.status = "error"
-            error_msg = Message(role="system", content=f"Error: {str(e)}")
+            error_msg = Message(role="system", content=f"Error: {str(e)}", branch_id=session.active_branch_id)
             session.messages.append(error_msg)
             await ws_manager.send_to_session(session_id, "agent:message", {
                 "session_id": session_id,
@@ -912,7 +1081,7 @@ class AgentManager:
             session_id, tool_msg_id, "Bash",
             _json.dumps(tool_input_content["input"], indent=2),
         )
-        tool_msg = Message(id=tool_msg_id, role="tool_call", content=tool_input_content)
+        tool_msg = Message(id=tool_msg_id, role="tool_call", content=tool_input_content, branch_id=session.active_branch_id)
         session.messages.append(tool_msg)
         await ws_manager.send_to_session(session_id, "agent:message", {
             "session_id": session_id,
@@ -922,7 +1091,7 @@ class AgentManager:
         await asyncio.sleep(1)
         
         if decision.get("behavior") == "allow":
-            tool_result = Message(role="tool_result", content=f"Processing: {prompt}")
+            tool_result = Message(role="tool_result", content=f"Processing: {prompt}", branch_id=session.active_branch_id)
             session.messages.append(tool_result)
             await ws_manager.send_to_session(session_id, "agent:message", {
                 "session_id": session_id,
@@ -940,7 +1109,7 @@ class AgentManager:
         asst_msg_id = uuid4().hex
         await self._stream_text(session_id, asst_msg_id, asst_text)
 
-        asst_msg = Message(id=asst_msg_id, role="assistant", content=asst_text)
+        asst_msg = Message(id=asst_msg_id, role="assistant", content=asst_text, branch_id=session.active_branch_id)
         session.messages.append(asst_msg)
         await ws_manager.send_to_session(session_id, "agent:message", {
             "session_id": session_id,
@@ -969,6 +1138,8 @@ class AgentManager:
         context_paths: list | None = None,
         forced_tools: list[str] | None = None,
         attached_skills: list | None = None,
+        hidden: bool = False,
+        selected_browser_ids: list[str] | None = None,
     ):
         """Send a follow-up message to an existing session."""
         session = self.sessions.get(session_id)
@@ -1000,10 +1171,12 @@ class AgentManager:
         user_msg = Message(
             role="user",
             content=prompt,
+            branch_id=session.active_branch_id,
             context_paths=context_paths if context_paths else None,
             attached_skills=skill_meta,
             forced_tools=forced_tools if forced_tools else None,
             images=image_meta,
+            hidden=hidden,
         )
         session.messages.append(user_msg)
         await ws_manager.send_to_session(session_id, "agent:message", {
@@ -1011,7 +1184,14 @@ class AgentManager:
             "message": user_msg.model_dump(mode="json"),
         })
 
-        task = asyncio.create_task(self._run_agent_loop(session_id, prompt, images=images, context_paths=context_paths, forced_tools=forced_tools, attached_skills=attached_skills))
+        session.status = "running"
+        await ws_manager.send_to_session(session_id, "agent:status", {
+            "session_id": session_id,
+            "status": "running",
+            "session": session.model_dump(mode="json"),
+        })
+
+        task = asyncio.create_task(self._run_agent_loop(session_id, prompt, images=images, context_paths=context_paths, forced_tools=forced_tools, attached_skills=attached_skills, selected_browser_ids=selected_browser_ids))
         self.tasks[session_id] = task
 
     async def stop_agent(self, session_id: str):
@@ -1043,6 +1223,14 @@ class AgentManager:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
+        existing = self.tasks.get(session_id)
+        if existing and not existing.done():
+            existing.cancel()
+            try:
+                await existing
+            except asyncio.CancelledError:
+                pass
+
         target_msg = None
         for i, msg in enumerate(session.messages):
             if msg.id == message_id:
@@ -1052,11 +1240,24 @@ class AgentManager:
         if not target_msg or target_msg.role != "user":
             raise ValueError("Can only edit user messages")
 
-        new_branch_id = uuid4().hex[:8]
+        fork_point_id = message_id
+        fork_parent_branch = target_msg.branch_id
+
+        msg_branch = session.branches.get(target_msg.branch_id)
+        if msg_branch and msg_branch.fork_point_message_id:
+            branch_user_msgs = [
+                m for m in session.messages
+                if m.branch_id == target_msg.branch_id and m.role == "user"
+            ]
+            if branch_user_msgs and branch_user_msgs[0].id == message_id:
+                fork_point_id = msg_branch.fork_point_message_id
+                fork_parent_branch = msg_branch.parent_branch_id or "main"
+
+        new_branch_id = uuid4().hex
         new_branch = MessageBranch(
             id=new_branch_id,
-            parent_branch_id=target_msg.branch_id,
-            fork_point_message_id=message_id,
+            parent_branch_id=fork_parent_branch,
+            fork_point_message_id=fork_point_id,
         )
         session.branches[new_branch_id] = new_branch
         session.active_branch_id = new_branch_id
@@ -1066,6 +1267,10 @@ class AgentManager:
             content=new_content,
             branch_id=new_branch_id,
             parent_id=target_msg.parent_id,
+            images=target_msg.images,
+            context_paths=target_msg.context_paths,
+            forced_tools=target_msg.forced_tools,
+            attached_skills=target_msg.attached_skills,
         )
         session.messages.append(edited_msg)
 
@@ -1079,7 +1284,14 @@ class AgentManager:
             "active_branch_id": new_branch_id,
         })
 
-        task = asyncio.create_task(self._run_agent_loop(session_id, new_content))
+        session.sdk_session_id = None
+        task = asyncio.create_task(self._run_agent_loop(
+            session_id, new_content,
+            images=target_msg.images,
+            context_paths=target_msg.context_paths,
+            forced_tools=target_msg.forced_tools,
+            attached_skills=target_msg.attached_skills,
+        ))
         self.tasks[session_id] = task
 
     async def switch_branch(self, session_id: str, branch_id: str):
@@ -1369,7 +1581,6 @@ class AgentManager:
             if session.status in ("running", "waiting_approval"):
                 session.status = "stopped"
             session.pending_approvals = []
-            session.closed_at = session.closed_at or datetime.now()
             doc_data = session.model_dump(mode="json")
             doc_data["search_text"] = self._build_search_text(session)
             _save_session(session_id, doc_data)
@@ -1378,20 +1589,207 @@ class AgentManager:
         self.tasks.clear()
 
     async def restore_all_sessions(self) -> None:
-        """On startup, reload all persisted sessions from JSON files back into memory."""
+        """On startup, reload all persisted sessions from JSON files back into memory.
+
+        Only sessions without closed_at are restored (they were active at
+        shutdown).  Sessions with closed_at were explicitly closed by the user
+        and stay on disk so the history endpoint can still serve them.
+        """
         for sid, data in _load_all_session_data():
             try:
                 session = AgentSession(**data)
             except Exception as e:
                 logger.warning(f"Skipping corrupt session file {sid}: {e}")
                 continue
+            if session.closed_at is not None:
+                continue
             if session.status in ("running", "waiting_approval"):
                 session.status = "stopped"
-            session.closed_at = None
             session.pending_approvals = []
             self.sessions[session.id] = session
             _delete_session_file(sid)
             logger.info(f"Restored session {session.id}")
+
+    async def duplicate_session(self, session_id: str, dashboard_id: str | None = None, up_to_message_id: str | None = None) -> AgentSession:
+        """Create an independent copy of a session with the same chat history."""
+        source = self.sessions.get(session_id)
+        if not source:
+            data = _load_session_data(session_id)
+            if data is None:
+                raise ValueError(f"Session {session_id} not found")
+            source = AgentSession(**data)
+
+        source_messages = list(source.messages)
+        if up_to_message_id:
+            cut_idx = next(
+                (i for i, m in enumerate(source_messages) if m.id == up_to_message_id),
+                None,
+            )
+            if cut_idx is not None:
+                source_messages = source_messages[: cut_idx + 1]
+
+        old_to_new_msg: dict[str, str] = {}
+        new_messages: list[Message] = []
+        for msg in source_messages:
+            new_id = uuid4().hex
+            old_to_new_msg[msg.id] = new_id
+            new_messages.append(Message(
+                id=new_id,
+                role=msg.role,
+                content=msg.content,
+                timestamp=msg.timestamp,
+                branch_id=msg.branch_id,
+                parent_id=old_to_new_msg.get(msg.parent_id) if msg.parent_id else None,
+                context_paths=msg.context_paths,
+                attached_skills=msg.attached_skills,
+                forced_tools=msg.forced_tools,
+                images=msg.images,
+            ))
+
+        new_branches: dict[str, MessageBranch] = {}
+        for bid, branch in source.branches.items():
+            new_branches[bid] = MessageBranch(
+                id=bid,
+                parent_branch_id=branch.parent_branch_id,
+                fork_point_message_id=old_to_new_msg.get(branch.fork_point_message_id) if branch.fork_point_message_id else None,
+                created_at=branch.created_at,
+            )
+
+        new_session = AgentSession(
+            id=uuid4().hex,
+            name=f"{source.name} (copy)",
+            status="stopped",
+            model=source.model,
+            mode=source.mode,
+            system_prompt=source.system_prompt,
+            allowed_tools=list(source.allowed_tools),
+            max_turns=source.max_turns,
+            cwd=source.cwd,
+            created_at=datetime.now(),
+            messages=new_messages,
+            branches=new_branches,
+            active_branch_id=source.active_branch_id,
+            tool_group_meta=dict(source.tool_group_meta),
+            dashboard_id=dashboard_id or source.dashboard_id,
+        )
+
+        self.sessions[new_session.id] = new_session
+
+        await ws_manager.send_to_session(new_session.id, "agent:status", {
+            "session_id": new_session.id,
+            "status": new_session.status,
+            "session": new_session.model_dump(mode="json"),
+        })
+
+        return new_session
+
+    async def invoke_agent(
+        self,
+        source_session_id: str,
+        message: str,
+        parent_session_id: str | None = None,
+        dashboard_id: str | None = None,
+    ) -> dict:
+        """Fork an existing session and send it a new message, returning the result."""
+        source = self.sessions.get(source_session_id)
+        if not source:
+            data = _load_session_data(source_session_id)
+            if data is None:
+                raise ValueError(f"Session {source_session_id} not found")
+            source = AgentSession(**data)
+
+        source_name = source.name
+
+        old_to_new_msg: dict[str, str] = {}
+        new_messages: list[Message] = []
+        for msg in source.messages:
+            new_id = uuid4().hex
+            old_to_new_msg[msg.id] = new_id
+            new_messages.append(Message(
+                id=new_id,
+                role=msg.role,
+                content=msg.content,
+                timestamp=msg.timestamp,
+                branch_id=msg.branch_id,
+                parent_id=old_to_new_msg.get(msg.parent_id) if msg.parent_id else None,
+                context_paths=msg.context_paths,
+                attached_skills=msg.attached_skills,
+                forced_tools=msg.forced_tools,
+                images=msg.images,
+            ))
+
+        new_branches: dict[str, MessageBranch] = {}
+        for bid, branch in source.branches.items():
+            new_branches[bid] = MessageBranch(
+                id=bid,
+                parent_branch_id=branch.parent_branch_id,
+                fork_point_message_id=(
+                    old_to_new_msg.get(branch.fork_point_message_id)
+                    if branch.fork_point_message_id else None
+                ),
+                created_at=branch.created_at,
+            )
+
+        fork = AgentSession(
+            id=uuid4().hex,
+            name=f"{source_name} (invoked)",
+            status="running",
+            model=source.model,
+            mode="invoked-agent",
+            sdk_session_id=source.sdk_session_id,
+            system_prompt=source.system_prompt,
+            allowed_tools=list(source.allowed_tools),
+            max_turns=source.max_turns or 25,
+            cwd=source.cwd,
+            created_at=datetime.now(),
+            messages=new_messages,
+            branches=new_branches,
+            active_branch_id=source.active_branch_id,
+            tool_group_meta=dict(source.tool_group_meta),
+            dashboard_id=dashboard_id or source.dashboard_id,
+            parent_session_id=parent_session_id,
+        )
+
+        self.sessions[fork.id] = fork
+
+        await ws_manager.broadcast_global("agent:status", {
+            "session_id": fork.id,
+            "status": fork.status,
+            "session": fork.model_dump(mode="json"),
+        })
+
+        user_msg = Message(
+            role="user",
+            content=message,
+            branch_id=fork.active_branch_id,
+        )
+        fork.messages.append(user_msg)
+        await ws_manager.send_to_session(fork.id, "agent:message", {
+            "session_id": fork.id,
+            "message": user_msg.model_dump(mode="json"),
+        })
+
+        await self._run_agent_loop(fork.id, message, fork_session=True)
+
+        last_assistant = None
+        for msg in reversed(fork.messages):
+            if msg.role == "assistant":
+                content = msg.content
+                if isinstance(content, str):
+                    last_assistant = content
+                elif isinstance(content, list):
+                    texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                    last_assistant = "\n".join(texts)
+                else:
+                    last_assistant = str(content)
+                break
+
+        return {
+            "forked_session_id": fork.id,
+            "source_name": source_name,
+            "response": last_assistant or "No response from invoked agent.",
+            "cost_usd": fork.cost_usd,
+        }
 
     def get_all_sessions(self, dashboard_id: str | None = None) -> list[AgentSession]:
         if dashboard_id:
@@ -1400,5 +1798,23 @@ class AgentManager:
 
     def get_session(self, session_id: str) -> Optional[AgentSession]:
         return self.sessions.get(session_id)
+
+    def get_browser_agent_children(self, parent_session_id: str) -> list[dict]:
+        """Return browser-agent sessions for a parent, from memory or disk."""
+        results: list[dict] = []
+        seen: set[str] = set()
+
+        for s in self.sessions.values():
+            if s.mode == "browser-agent" and s.parent_session_id == parent_session_id:
+                results.append(s.model_dump(mode="json"))
+                seen.add(s.id)
+
+        for sid, data in _load_all_session_data():
+            if sid in seen:
+                continue
+            if data.get("mode") == "browser-agent" and data.get("parent_session_id") == parent_session_id:
+                results.append(data)
+
+        return results
 
 agent_manager = AgentManager()

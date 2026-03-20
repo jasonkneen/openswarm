@@ -37,6 +37,7 @@ class Message(BaseModel):
     attached_skills: Optional[list[dict]] = None
     forced_tools: Optional[list[str]] = None
     images: Optional[list[dict]] = None
+    hidden: bool = False
 
 class MessageBranch(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
@@ -72,3 +73,4 @@ class AgentSession(BaseModel):
     tool_group_meta: dict[str, "ToolGroupMeta"] = Field(default_factory=dict)
     dashboard_id: Optional[str] = None
     browser_id: Optional[str] = None
+    parent_session_id: Optional[str] = None
