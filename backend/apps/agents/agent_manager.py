@@ -1285,6 +1285,13 @@ class AgentManager:
         })
 
         session.sdk_session_id = None
+        session.status = "running"
+        await ws_manager.send_to_session(session_id, "agent:status", {
+            "session_id": session_id,
+            "status": "running",
+            "session": session.model_dump(mode="json"),
+        })
+
         task = asyncio.create_task(self._run_agent_loop(
             session_id, new_content,
             images=target_msg.images,

@@ -520,7 +520,13 @@ const agentsSlice = createSlice({
     },
 
     updateSession(state, action: PayloadAction<AgentSession>) {
-      if (state.history[action.payload.id]) return;
+      if (state.history[action.payload.id]) {
+        if (action.payload.status === 'running') {
+          delete state.history[action.payload.id];
+        } else {
+          return;
+        }
+      }
       const existing = state.sessions[action.payload.id];
       state.sessions[action.payload.id] = {
         ...action.payload,
@@ -720,8 +726,9 @@ const agentsSlice = createSlice({
       .addCase(fetchSessions.fulfilled, (state, action) => {
         state.loading = false;
         const sessions: Record<string, AgentSession> = {};
+        const trackedSet = new Set(state.trackedNotificationIds);
         for (const [id, existing] of Object.entries(state.sessions)) {
-          if (existing.status === 'draft') sessions[id] = existing;
+          if (existing.status === 'draft' || trackedSet.has(id)) sessions[id] = existing;
         }
         for (const s of action.payload) {
           const existing = state.sessions[s.id];
@@ -732,6 +739,11 @@ const agentsSlice = createSlice({
           };
         }
         state.sessions = sessions;
+        for (const s of action.payload) {
+          if ((s.status === 'running' || s.status === 'waiting_approval') && !state.trackedNotificationIds.includes(s.id)) {
+            state.trackedNotificationIds.push(s.id);
+          }
+        }
       })
       .addCase(fetchSessions.rejected, (state) => {
         state.loading = false;
@@ -783,6 +795,18 @@ const agentsSlice = createSlice({
           session.system_prompt = action.payload.systemPrompt;
         }
       })
+      .addCase(sendMessage.pending, (state, action) => {
+        const session = state.sessions[action.meta.arg.sessionId];
+        if (session) {
+          session.status = 'running';
+        }
+      })
+      .addCase(editMessage.pending, (state, action) => {
+        const session = state.sessions[action.meta.arg.sessionId];
+        if (session) {
+          session.status = 'running';
+        }
+      })
       .addCase(stopAgent.fulfilled, (state, action) => {
         const session = state.sessions[action.payload];
         if (session) {
@@ -829,6 +853,7 @@ const agentsSlice = createSlice({
           state.activeSessionId = null;
         }
         state.expandedSessionIds = state.expandedSessionIds.filter((id) => id !== sessionId);
+        state.trackedNotificationIds = state.trackedNotificationIds.filter((id) => id !== sessionId);
       })
       .addCase(closeSession.rejected, (state, action) => {
         const sessionId = action.meta.arg.sessionId;
@@ -851,6 +876,7 @@ const agentsSlice = createSlice({
           state.activeSessionId = null;
         }
         state.expandedSessionIds = state.expandedSessionIds.filter((id) => id !== sessionId);
+        state.trackedNotificationIds = state.trackedNotificationIds.filter((id) => id !== sessionId);
       })
       .addCase(deleteSession.fulfilled, (state, action) => {
         const sessionId = action.payload;

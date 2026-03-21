@@ -351,6 +351,36 @@ const AppShell: React.FC = () => {
         </Tooltip>
 
         <DynamicIsland />
+
+        <Box sx={{ flex: 1 }} />
+
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.75,
+            pr: 1.5,
+            WebkitAppRegion: 'no-drag',
+          }}
+        >
+          <Box
+            component="img"
+            src="./logo.png"
+            alt="OpenSwarm"
+            sx={{ width: 16, height: 16, borderRadius: 0.5, opacity: 0.6 }}
+          />
+          <Typography
+            sx={{
+              color: c.text.tertiary,
+              fontSize: '0.72rem',
+              fontWeight: 500,
+              letterSpacing: 0.3,
+              lineHeight: 1,
+            }}
+          >
+            OpenSwarm
+          </Typography>
+        </Box>
       </Box>
 
       {showUpdateBanner && (

@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import SearchIcon from '@mui/icons-material/Search';
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import CloseIcon from '@mui/icons-material/Close';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -217,7 +218,7 @@ const DynamicIsland: React.FC = () => {
   );
 
   const trackedAgents: TrackedAgent[] = useMemo(() => {
-    return trackedIds
+    const agents = trackedIds
       .map((id): TrackedAgent | null => {
         const session = sessions[id];
         if (session && session.status !== 'draft') {
@@ -230,7 +231,19 @@ const DynamicIsland: React.FC = () => {
         return null;
       })
       .filter((a): a is TrackedAgent => a !== null);
-  }, [trackedIds, sessions, history]);
+
+    const trackedIdSet = new Set(trackedIds);
+    for (const g of groups) {
+      if (!trackedIdSet.has(g.sessionId)) {
+        const session = sessions[g.sessionId];
+        if (session && session.status !== 'draft') {
+          agents.push({ id: g.sessionId, name: session.name, status: session.status, dashboardId: session.dashboard_id });
+        }
+      }
+    }
+
+    return agents;
+  }, [trackedIds, sessions, history, groups]);
 
   const activeAgents = useMemo(
     () => trackedAgents.filter((a) => a.status === 'running' || a.status === 'waiting_approval'),
@@ -317,9 +330,9 @@ const DynamicIsland: React.FC = () => {
   // ---- Styling — uses the same neutral palette as the rest of the UI ----
 
   const islandWidth = islandState === 'idle'
-    ? 126
+    ? 200
     : islandState === 'compact'
-      ? 220
+      ? 210
       : 400;
 
   const islandBorderRadius = islandState === 'expanded' ? 14 : 50;
@@ -413,7 +426,7 @@ const DynamicIsland: React.FC = () => {
 };
 
 // ---------------------------------------------------------------------------
-// Idle pill
+// Idle pill — disabled search bar
 // ---------------------------------------------------------------------------
 
 const IdlePill: React.FC<{ c: ReturnType<typeof useClaudeTokens> }> = ({ c }) => (
@@ -423,40 +436,32 @@ const IdlePill: React.FC<{ c: ReturnType<typeof useClaudeTokens> }> = ({ c }) =>
     exit={{ opacity: 0, scale: 0.92 }}
     transition={{ duration: 0.2 }}
   >
-    <motion.div
-      animate={{ scale: [1, 1.006, 1] }}
-      transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-    >
+    <Tooltip title="Coming soon" arrow placement="bottom">
       <Box
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          gap: 0.6,
-          px: 1.5,
+          gap: 0.75,
+          px: 1.25,
           height: 24,
           userSelect: 'none',
+          cursor: 'default',
         }}
       >
-        <Box
-          component="img"
-          src="./logo.png"
-          alt="OpenSwarm"
-          sx={{ width: 13, height: 13, borderRadius: 0.5, opacity: 0.6 }}
-        />
+        <SearchIcon sx={{ fontSize: 13, color: c.text.ghost, flexShrink: 0 }} />
         <Typography
           sx={{
-            color: c.text.tertiary,
-            fontSize: '0.68rem',
-            fontWeight: 500,
-            letterSpacing: 0.3,
+            color: c.text.ghost,
+            fontSize: '0.66rem',
+            fontWeight: 400,
             lineHeight: 1,
+            whiteSpace: 'nowrap',
           }}
         >
-          OpenSwarm
+          Search...
         </Typography>
       </Box>
-    </motion.div>
+    </Tooltip>
   </motion.div>
 );
 
@@ -512,12 +517,6 @@ const CompactPill: React.FC<{
           }}
         />
       )}
-      <Box
-        component="img"
-        src="./logo.png"
-        alt=""
-        sx={{ width: 11, height: 11, borderRadius: 0.25, opacity: 0.45, flexShrink: 0 }}
-      />
     </Box>
   </motion.div>
 );
