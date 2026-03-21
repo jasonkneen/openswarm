@@ -521,7 +521,7 @@ const agentsSlice = createSlice({
 
     updateSession(state, action: PayloadAction<AgentSession>) {
       if (state.history[action.payload.id]) {
-        if (action.payload.status === 'running') {
+        if (action.payload.status === 'running' || action.payload.mode === 'browser-agent') {
           delete state.history[action.payload.id];
         } else {
           return;
@@ -679,7 +679,7 @@ const agentsSlice = createSlice({
         delete state.sessions[entry.id];
         for (const [id, s] of Object.entries(state.sessions)) {
           if (s.mode === 'browser-agent' && s.parent_session_id === entry.id) {
-            delete state.sessions[id];
+            s.status = 'stopped';
           }
         }
       }

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 MODEL_MAP = {
     "sonnet": "claude-sonnet-4-20250514",
     "opus": "claude-opus-4-20250514",
-    "haiku": "claude-haiku-4-20250414",
+    "haiku": "claude-haiku-4-5-20251001",
 }
 
 BROWSER_TOOLS_SCHEMA = [
@@ -253,9 +253,15 @@ async def _request_browser_approval(
         "status": "waiting_approval",
     })
 
-    decision = await ws_manager.send_approval_request(
-        session.id, request_id, tool_name, tool_input,
-    )
+    try:
+        decision = await asyncio.wait_for(
+            ws_manager.send_approval_request(
+                session.id, request_id, tool_name, tool_input,
+            ),
+            timeout=300.0,
+        )
+    except asyncio.TimeoutError:
+        decision = {"behavior": "deny", "message": "Approval timed out"}
 
     session.pending_approvals = [
         a for a in session.pending_approvals if a.id != request_id
@@ -289,6 +295,7 @@ async def run_browser_agent(
     _browser_perms = load_builtin_permissions()
 
     session_id = uuid4().hex
+    cancel_event = asyncio.Event()
     session = AgentSession(
         id=session_id,
         name=f"Browser Agent",
@@ -300,6 +307,7 @@ async def run_browser_agent(
         system_prompt=SYSTEM_PROMPT,
         parent_session_id=parent_session_id,
     )
+    session._cancel_event = cancel_event
     agent_manager.sessions[session_id] = session
 
     await ws_manager.send_to_session(session_id, "agent:status", {
@@ -330,6 +338,9 @@ async def run_browser_agent(
 
     try:
         for turn in range(MAX_TURNS):
+            if cancel_event.is_set():
+                break
+
             response = await client.messages.create(
                 model=api_model,
                 max_tokens=4096,
@@ -383,7 +394,12 @@ async def run_browser_agent(
                 break
 
             tool_results = []
+            cancelled = False
             for tu in tool_uses:
+                if cancel_event.is_set():
+                    cancelled = True
+                    break
+
                 policy = _browser_perms.get(tu.name, "always_allow")
 
                 if policy == "deny":
@@ -462,6 +478,24 @@ async def run_browser_agent(
 
             messages.append({"role": "user", "content": tool_results})
 
+            if cancelled:
+                break
+
+        if cancel_event.is_set():
+            session.status = "stopped"
+            await ws_manager.send_to_session(session_id, "agent:status", {
+                "session_id": session_id,
+                "status": "stopped",
+                "session": session.model_dump(mode="json"),
+            })
+            return {
+                "session_id": session_id,
+                "browser_id": browser_id,
+                "summary": "Agent was stopped.",
+                "action_log": action_log,
+                "final_screenshot": final_screenshot,
+            }
+
         summary_parts = text_parts if text_parts else ["Task completed."]
         summary = "\n".join(summary_parts)
 
@@ -481,12 +515,6 @@ async def run_browser_agent(
             "status": "completed",
             "session": session.model_dump(mode="json"),
         })
-
-        await asyncio.sleep(2.5)
-        try:
-            await agent_manager.close_session(session_id)
-        except Exception:
-            logger.warning(f"Failed to auto-close browser agent session {session_id}")
 
         return {
             "session_id": session_id,
@@ -510,12 +538,6 @@ async def run_browser_agent(
             "status": "error",
             "session": session.model_dump(mode="json"),
         })
-
-        await asyncio.sleep(2.5)
-        try:
-            await agent_manager.close_session(session_id)
-        except Exception:
-            logger.warning(f"Failed to auto-close browser agent session {session_id} after error")
 
         return {
             "session_id": session_id,

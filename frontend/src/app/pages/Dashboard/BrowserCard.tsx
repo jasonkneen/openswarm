@@ -117,14 +117,16 @@ const BrowserCard: React.FC<Props> = ({
 
   const browserAgentSession = useAppSelector((state) => {
     const sessions = state.agents.sessions;
-    return Object.values(sessions).find(
+    const matches = Object.values(sessions).filter(
       (s) => s.browser_id === browserId && s.mode === 'browser-agent'
-        && (s.status === 'running' || s.status === 'completed' || s.status === 'error'),
-    ) ?? null;
+        && (s.status === 'running' || s.status === 'completed' || s.status === 'error' || s.status === 'stopped'),
+    );
+    return matches.find((s) => s.status === 'running') ?? matches[matches.length - 1] ?? null;
   });
 
   const activity = useBrowserActivity(browserId);
-  const agentActive = activity.active;
+  const agentRunning = browserAgentSession?.status === 'running';
+  const agentActive = activity.active || agentRunning;
   const agentAction = activity.action;
   const lastAction = activity.lastAction;
 
