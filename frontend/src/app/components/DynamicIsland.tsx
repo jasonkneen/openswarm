@@ -409,9 +409,18 @@ const DynamicIsland: React.FC = () => {
     return parts.join(' · ') || 'Agents';
   }, [activeAgents.length, finishedAgents.length]);
 
+  const glowKeyframes = useMemo(() => `
+    @keyframes approvalGlow {
+      0%, 100% { box-shadow: 0 0 6px 1px ${c.status.warning}30; }
+      50% { box-shadow: 0 0 12px 3px ${c.status.warning}60; }
+    }
+  `, [c.status.warning]);
+
   // ---- Render ----
 
   return (
+    <>
+    {islandState === 'compact-actionable' && <style>{glowKeyframes}</style>}
     <motion.div
       ref={islandRef}
       layout
@@ -435,10 +444,17 @@ const DynamicIsland: React.FC = () => {
         transition={SPRING_LAYOUT}
         style={{
           background: c.bg.secondary,
-          border: `0.5px solid ${c.border.medium}`,
+          border: islandState === 'compact-actionable'
+            ? `1px solid ${c.status.warning}`
+            : `0.5px solid ${c.border.medium}`,
           borderRadius: islandBorderRadius,
-          boxShadow: shadow,
+          boxShadow: islandState === 'compact-actionable'
+            ? `0 0 8px 1px ${c.status.warning}40`
+            : shadow,
           overflow: 'hidden',
+          animation: islandState === 'compact-actionable'
+            ? 'approvalGlow 2.5s ease-in-out infinite'
+            : 'none',
         }}
       >
         <AnimatePresence mode="wait">
@@ -487,6 +503,7 @@ const DynamicIsland: React.FC = () => {
         </AnimatePresence>
       </motion.div>
     </motion.div>
+    </>
   );
 };
 
