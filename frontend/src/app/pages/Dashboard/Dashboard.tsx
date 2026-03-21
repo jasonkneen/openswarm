@@ -35,6 +35,7 @@ import {
   pasteBrowserCard,
   placeCard,
   removeCard,
+  bringToFront,
   setGlowingAgentCard,
   clearGlowingAgentCard,
   DEFAULT_CARD_W,
@@ -204,6 +205,10 @@ const DashboardInner: React.FC = () => {
   const handleCardSelect = useCallback((id: string, type: CardType, shiftKey: boolean) => {
     selection.selectCard(id, type, shiftKey);
   }, [selection]);
+
+  const handleBringToFront = useCallback((id: string, type: CardType) => {
+    dispatch(bringToFront({ id, type }));
+  }, [dispatch]);
 
   // ---- Viewport event handlers (compose pan + marquee) ----
   const handleViewportMouseDown = useCallback((e: React.MouseEvent) => {
@@ -1233,6 +1238,7 @@ const DashboardInner: React.FC = () => {
                   cardY={card.y}
                   cardWidth={card.width}
                   cardHeight={card.height}
+                  cardZOrder={card.zOrder ?? 0}
                   zoom={canvas.zoom}
                   spawnFrom={origin}
                   exitTarget={exitTarget}
@@ -1247,6 +1253,7 @@ const DashboardInner: React.FC = () => {
                   onMeasuredHeight={handleMeasuredHeight}
                   snapColumn={snapColumn}
                   autoFocusInput={autoFocusSessionId === session.id}
+                  onBringToFront={handleBringToFront}
                 />
               );
             })}
@@ -1262,6 +1269,7 @@ const DashboardInner: React.FC = () => {
                   cardY={vc.y}
                   cardWidth={vc.width}
                   cardHeight={vc.height}
+                  cardZOrder={vc.zOrder ?? 0}
                   zoom={canvas.zoom}
                   cmdHeld={canvas.cmdHeld}
                   isSelected={selection.isSelected(vc.output_id)}
@@ -1271,6 +1279,7 @@ const DashboardInner: React.FC = () => {
                   onDragStart={handleCardDragStart}
                   onDragMove={handleCardDragMove}
                   onDragEnd={handleCardDragEnd}
+                  onBringToFront={handleBringToFront}
                 />
               );
             })}
@@ -1284,6 +1293,7 @@ const DashboardInner: React.FC = () => {
                 cardY={bc.y}
                 cardWidth={bc.width}
                 cardHeight={bc.height}
+                cardZOrder={bc.zOrder ?? 0}
                 zoom={canvas.zoom}
                 cmdHeld={canvas.cmdHeld}
                 isSelected={selection.isSelected(bc.browser_id)}
@@ -1293,6 +1303,7 @@ const DashboardInner: React.FC = () => {
                 onDragStart={handleCardDragStart}
                 onDragMove={handleCardDragMove}
                 onDragEnd={handleCardDragEnd}
+                onBringToFront={handleBringToFront}
               />
             ))}
             {/* Marquee selection rectangle */}
