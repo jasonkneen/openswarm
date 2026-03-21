@@ -16,7 +16,7 @@ import {
   closeSessionFromWs,
   trackAgentNotification,
 } from '../state/agentsSlice';
-import { addBrowserCardFromBackend } from '../state/dashboardLayoutSlice';
+import { addBrowserCardFromBackend, setBrowserCardPosition, GRID_GAP } from '../state/dashboardLayoutSlice';
 
 type WSEvent = {
   event: string;
@@ -239,6 +239,18 @@ class WebSocketManager {
       case 'dashboard:browser_card_added':
         if (data.browser_card) {
           store.dispatch(addBrowserCardFromBackend(data.browser_card));
+          const parentId = data.parent_session_id;
+          if (parentId) {
+            const layoutState = store.getState().dashboardLayout;
+            const parentCard = layoutState.cards[parentId];
+            if (parentCard) {
+              store.dispatch(setBrowserCardPosition({
+                browserId: data.browser_card.browser_id,
+                x: parentCard.x + parentCard.width + GRID_GAP * 12,
+                y: parentCard.y,
+              }));
+            }
+          }
         }
         break;
     }

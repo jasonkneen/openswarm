@@ -548,7 +548,7 @@ async def run_browser_agent(
         }
 
 
-async def _create_browser_card(dashboard_id: str, url: str) -> str:
+async def _create_browser_card(dashboard_id: str, url: str, parent_session_id: str | None = None) -> str:
     """Create a new browser card on the dashboard and return its browser_id."""
     from backend.apps.dashboards.dashboards import _load, _save
     from backend.apps.dashboards.models import BrowserCardPosition, BrowserTab
@@ -574,6 +574,7 @@ async def _create_browser_card(dashboard_id: str, url: str) -> str:
     await ws_manager.broadcast_global("dashboard:browser_card_added", {
         "dashboard_id": dashboard_id,
         "browser_card": card.model_dump(mode="json"),
+        "parent_session_id": parent_session_id or "",
     })
     return browser_id
 
@@ -599,7 +600,7 @@ async def run_browser_agents(
         url = task_def.get("url", "")
 
         if not browser_id and dashboard_id:
-            browser_id = await _create_browser_card(dashboard_id, url)
+            browser_id = await _create_browser_card(dashboard_id, url, parent_session_id)
             await asyncio.sleep(2.0)
 
         is_pre_selected = browser_id in pre_selected
