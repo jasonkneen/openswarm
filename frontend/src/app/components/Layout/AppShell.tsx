@@ -31,7 +31,7 @@ import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt';
 import CloseIcon from '@mui/icons-material/Close';
 import LinearProgress from '@mui/material/LinearProgress';
 import Settings from '@/app/pages/Settings/Settings';
-import GlobalApprovalOverlay from '@/app/components/GlobalApprovalOverlay';
+import DynamicIsland from '@/app/components/DynamicIsland';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { fetchDashboards, createDashboard, renameDashboard } from '@/shared/state/dashboardsSlice';
 import { addBrowserCard, addBrowserTab } from '@/shared/state/dashboardLayoutSlice';
@@ -296,6 +296,8 @@ const AppShell: React.FC = () => {
           borderBottom: `0.5px solid ${c.border.medium}`,
           display: 'flex',
           alignItems: 'center',
+          position: 'relative',
+          overflow: 'visible',
           WebkitAppRegion: 'drag',
           userSelect: 'none',
           pl: '78px',
@@ -348,35 +350,7 @@ const AppShell: React.FC = () => {
           </IconButton>
         </Tooltip>
 
-        <Box sx={{ flex: 1 }} />
-
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 0.75,
-            pr: 1.5,
-            WebkitAppRegion: 'no-drag',
-          }}
-        >
-          <Box
-            component="img"
-            src="./logo.png"
-            alt="OpenSwarm"
-            sx={{ width: 18, height: 18, borderRadius: 0.5, opacity: 0.7 }}
-          />
-          <Typography
-            sx={{
-              color: c.text.tertiary,
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              letterSpacing: 0.3,
-              lineHeight: 1,
-            }}
-          >
-            OpenSwarm
-          </Typography>
-        </Box>
+        <DynamicIsland />
       </Box>
 
       {showUpdateBanner && (
@@ -924,7 +898,6 @@ const AppShell: React.FC = () => {
       </Box>
 
       <Settings />
-      <GlobalApprovalOverlay />
 
       <Snackbar
         open={showUpdateSnackbar}
