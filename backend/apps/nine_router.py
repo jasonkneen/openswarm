@@ -123,20 +123,12 @@ async def start_oauth(provider: str) -> dict:
         except Exception:
             pass
 
-        # Fall back to authorization_code flow
-        callback_url = f"http://localhost:{NINE_ROUTER_PORT}/api/oauth/{provider}/callback"
-        r = await client.get(
-            f"{NINE_ROUTER_API}/oauth/{provider}/authorize",
-            params={"redirect_uri": callback_url},
-        )
-        r.raise_for_status()
-        data = r.json()
+        # For authorization_code providers (Claude, Codex, Gemini),
+        # open 9Router's own dashboard page where the user can connect.
+        # 9Router handles the full OAuth flow (popup + callback) internally.
         return {
-            "flow": "authorization_code",
-            "auth_url": data.get("authUrl", ""),
-            "code_verifier": data.get("codeVerifier", ""),
-            "state": data.get("state", ""),
-            "redirect_uri": callback_url,
+            "flow": "dashboard_redirect",
+            "dashboard_url": f"http://localhost:{NINE_ROUTER_PORT}/dashboard/providers",
         }
 
 

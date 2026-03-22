@@ -251,9 +251,10 @@ const SubscriptionCards: React.FC = () => {
         setPollTimer(timer);
         setTimeout(() => { clearInterval(timer); setConnecting(null); setUserCode(''); }, 300000);
 
-      } else if (data.flow === 'authorization_code') {
-        // Auth code flow (Claude, Codex, Gemini) — open browser, poll for connection
-        if (data.auth_url) window.open(data.auth_url, '_blank');
+      } else if (data.flow === 'authorization_code' || data.flow === 'dashboard_redirect') {
+        // Auth code flow (Claude, Codex, Gemini) — open 9Router dashboard, poll for connection
+        const url = data.dashboard_url || data.auth_url;
+        if (url) window.open(url, '_blank');
 
         // Poll the providers list until this provider appears as connected
         const timer = setInterval(async () => {
