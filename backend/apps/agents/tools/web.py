@@ -13,7 +13,8 @@ from backend.apps.agents.tools.base import BaseTool, ToolContext
 _MAX_OUTPUT_BYTES = 100 * 1024  # ~100 KB
 _HTTP_TIMEOUT = 30  # seconds
 _USER_AGENT = (
-    "Mozilla/5.0 (compatible; SelfSwarmBot/1.0; +https://github.com/openswarm-ai/self-swarm)"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 

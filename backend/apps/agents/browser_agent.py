@@ -198,16 +198,29 @@ MAX_TURNS = 25
 async def execute_browser_tool(
     tool_name: str, tool_input: dict, browser_id: str, tab_id: str = "",
 ) -> dict:
-    """Execute a browser tool via ws_manager directly (no MCP/HTTP round-trip)."""
+    """Execute a browser tool. Tries Electron webview first, falls back to headless Playwright."""
     action = ACTION_MAP.get(tool_name)
     if not action:
         return {"error": f"Unknown browser tool: {tool_name}"}
 
     params = {k: v for k, v in tool_input.items()}
     request_id = uuid4().hex
+
+    # Try Electron webview first
     result = await ws_manager.send_browser_command(
         request_id, action, browser_id, params, tab_id=tab_id,
     )
+
+    # If Electron webview not available, fall back to headless Playwright
+    if isinstance(result, dict) and result.get("error") and "not found" in result.get("error", "").lower():
+        try:
+            from backend.apps.agents.headless_browser import execute as headless_execute
+            result = await headless_execute(browser_id, action, params)
+        except ImportError:
+            return {"error": "Browser not available. Install playwright: pip install playwright && playwright install chromium"}
+        except Exception as e:
+            return {"error": f"Headless browser error: {e}"}
+
     return result
 
 
