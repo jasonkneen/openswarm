@@ -123,12 +123,21 @@ async def start_oauth(provider: str) -> dict:
         except Exception:
             pass
 
-        # For authorization_code providers (Claude, Codex, Gemini),
-        # open 9Router's own dashboard page where the user can connect.
-        # 9Router handles the full OAuth flow (popup + callback) internally.
+        # Authorization code flow — get the real auth URL from 9Router
+        # The callback goes to 9Router's /callback page which sends postMessage back
+        callback_url = f"http://localhost:{NINE_ROUTER_PORT}/callback"
+        r = await client.get(
+            f"{NINE_ROUTER_API}/oauth/{provider}/authorize",
+            params={"redirect_uri": callback_url},
+        )
+        r.raise_for_status()
+        data = r.json()
         return {
-            "flow": "dashboard_redirect",
-            "dashboard_url": f"http://localhost:{NINE_ROUTER_PORT}/dashboard/providers",
+            "flow": "authorization_code",
+            "auth_url": data.get("authUrl", ""),
+            "code_verifier": data.get("codeVerifier", ""),
+            "state": data.get("state", ""),
+            "redirect_uri": callback_url,
         }
 
 
@@ -147,6 +156,22 @@ async def poll_oauth(provider: str, device_code: str, code_verifier: str | None 
         r = await client.post(
             f"{NINE_ROUTER_API}/oauth/{provider}/poll",
             json=body,
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def exchange_oauth(provider: str, code: str, redirect_uri: str, code_verifier: str, state: str = "") -> dict:
+    """Exchange OAuth code for tokens via 9Router."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{NINE_ROUTER_API}/oauth/{provider}/exchange",
+            json={
+                "code": code,
+                "redirectUri": redirect_uri,
+                "codeVerifier": code_verifier,
+                "state": state,
+            },
         )
         r.raise_for_status()
         return r.json()

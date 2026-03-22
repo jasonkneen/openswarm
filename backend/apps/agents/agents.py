@@ -336,6 +336,26 @@ async def subscriptions_poll(body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@agents.router.post("/subscriptions/exchange")
+async def subscriptions_exchange(body: dict):
+    """Exchange OAuth code for tokens via 9Router."""
+    from backend.apps.nine_router import exchange_oauth
+    provider = body.get("provider", "")
+    code = body.get("code", "")
+    redirect_uri = body.get("redirect_uri", "")
+    code_verifier = body.get("code_verifier", "")
+    state = body.get("state", "")
+
+    if not provider or not code:
+        raise HTTPException(status_code=400, detail="provider and code required")
+
+    try:
+        result = await exchange_oauth(provider, code, redirect_uri, code_verifier, state)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @agents.router.get("/subscriptions/models")
 async def subscriptions_models():
     """List all models available through connected subscriptions."""

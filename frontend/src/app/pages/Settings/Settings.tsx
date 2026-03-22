@@ -251,27 +251,54 @@ const SubscriptionCards: React.FC = () => {
         setPollTimer(timer);
         setTimeout(() => { clearInterval(timer); setConnecting(null); setUserCode(''); }, 300000);
 
-      } else if (data.flow === 'authorization_code' || data.flow === 'dashboard_redirect') {
-        // Auth code flow (Claude, Codex, Gemini) — open 9Router dashboard, poll for connection
-        const url = data.dashboard_url || data.auth_url;
-        if (url) window.open(url, '_blank');
+      } else if (data.flow === 'authorization_code') {
+        // Auth code flow (Claude, Codex, Gemini) — open popup, listen for postMessage callback
+        const popup = window.open(data.auth_url, 'oauth', 'popup,width=600,height=700');
 
-        // Poll the providers list until this provider appears as connected
+        // Listen for OAuth callback from 9Router's /callback page
+        const handler = async (event: MessageEvent) => {
+          // 9Router's callback page sends: { type: 'oauth-callback', code, state } or just { code, state }
+          const d = event.data;
+          if (d?.code || d?.type === 'oauth-callback') {
+            window.removeEventListener('message', handler);
+            try {
+              // Exchange the code for tokens via our backend proxy
+              await fetch(`${API_BASE}/agents/subscriptions/exchange`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  provider: providerId,
+                  code: d.code,
+                  redirect_uri: data.redirect_uri,
+                  code_verifier: data.code_verifier,
+                  state: d.state || data.state,
+                }),
+              });
+            } catch {}
+            if (popup && !popup.closed) popup.close();
+            setConnecting(null);
+            fetchStatus();
+          }
+        };
+        window.addEventListener('message', handler);
+
+        // Also poll as fallback in case postMessage doesn't work
         const timer = setInterval(async () => {
           try {
             const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
             const sd = await sr.json();
-            const providers = Array.isArray(sd.providers?.connections) ? sd.providers.connections : Array.isArray(sd.providers) ? sd.providers : [];
-            const found = providers.some((p: any) => p.provider === providerId && p.isActive);
+            const connections = sd.providers?.connections || (Array.isArray(sd.providers) ? sd.providers : []);
+            const found = connections.some((p: any) => p.provider === providerId && p.isActive);
             if (found) {
               clearInterval(timer);
+              window.removeEventListener('message', handler);
               setConnecting(null);
               fetchStatus();
             }
           } catch {}
         }, 3000);
         setPollTimer(timer);
-        setTimeout(() => { clearInterval(timer); setConnecting(null); }, 300000);
+        setTimeout(() => { clearInterval(timer); window.removeEventListener('message', handler); setConnecting(null); }, 300000);
 
       } else {
         setConnecting(null);
