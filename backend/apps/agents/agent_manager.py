@@ -649,46 +649,33 @@ class AgentManager:
                     "type": "stdio",
                 }
 
-            # Lazy MCP: build tool schemas from saved metadata (no subprocess spawn)
-            # Actual MCP servers are only connected when a tool is first called
+            # Connect MCP servers in parallel with timeouts — get real schemas
             mcp_manager = MCPClientManager()
             await mcp_manager.__aenter__()
 
             from backend.apps.agents.providers.base import ToolSchema
 
-            mcp_tool_schemas: list[ToolSchema] = []
-            _pending_mcp_servers: dict[str, dict] = dict(mcp_servers)  # servers not yet connected
+            _pending_mcp_servers: dict[str, dict] = dict(mcp_servers)
             _connected_servers: set[str] = set()
 
-            # Build tool schemas from saved tool_permissions metadata (instant, no subprocess)
-            for tool in load_all_tools():
-                if not tool.mcp_config or not tool.enabled:
-                    continue
-                server_name = _sanitize_server_name(tool.name)
-                if server_name not in _pending_mcp_servers and server_name not in mcp_servers:
-                    continue
-                tool_descs = tool.tool_permissions.get("_tool_descriptions", {})
-                denied = _get_denied_tool_names(tool)
-                for tn, desc in tool_descs.items():
-                    if tn not in denied:
-                        mcp_tool_schemas.append(ToolSchema(
-                            name=f"mcp__{server_name}__{tn}",
-                            description=desc,
-                            input_schema={"type": "object", "properties": {}},
-                        ))
-
-            # Always add browser agent tools (they're lightweight)
-            browser_agent_name = "openswarm-browser-agent"
-            if browser_agent_name in mcp_servers:
+            async def _connect_one(name: str, config: dict) -> list[ToolSchema]:
                 try:
-                    ba_tools = await asyncio.wait_for(
-                        mcp_manager.connect(browser_agent_name, mcp_servers[browser_agent_name]),
-                        timeout=10.0,
-                    )
-                    mcp_tool_schemas.extend(ba_tools)
-                    _connected_servers.add(browser_agent_name)
+                    tools = await asyncio.wait_for(mcp_manager.connect(name, config), timeout=10.0)
+                    _connected_servers.add(name)
+                    return tools
+                except asyncio.TimeoutError:
+                    logger.warning(f"MCP server {name} timed out (10s)")
+                    return []
                 except Exception as e:
-                    logger.warning(f"Browser agent MCP connection failed: {e}")
+                    logger.warning(f"MCP server {name} failed: {e}")
+                    return []
+
+            results = await asyncio.gather(
+                *[_connect_one(n, c) for n, c in mcp_servers.items()]
+            )
+            mcp_tool_schemas: list[ToolSchema] = []
+            for tools in results:
+                mcp_tool_schemas.extend(tools)
 
             # Collect builtin + MCP tool schemas
             from backend.apps.agents.tools.registry import get_all_tool_schemas
