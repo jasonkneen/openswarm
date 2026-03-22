@@ -278,6 +278,8 @@ async def run_browser_agent(
     pre_selected: bool = False,
     initial_url: str | None = None,
     parent_session_id: str | None = None,
+    auth_token: str | None = None,
+    base_url: str | None = None,
 ) -> dict:
     """Run a browser sub-agent loop for a single browser card.
 
@@ -315,7 +317,17 @@ async def run_browser_agent(
         logger.info(f"Browser agent {session_id}: navigated to {initial_url}: {nav_result.get('text', nav_result.get('error', ''))}")
 
     api_model = MODEL_MAP.get(model, model)
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+
+    # Use OpenAI client for 9Router, Anthropic client for direct API
+    _use_openai_client = base_url is not None
+    if _use_openai_client:
+        from openai import AsyncOpenAI
+        # Map to 9Router model IDs
+        _9r_map = {"sonnet": "cc/claude-sonnet-4-6", "opus": "cc/claude-opus-4-6", "haiku": "cc/claude-haiku-4-5-20251001"}
+        api_model = _9r_map.get(model, f"cc/{api_model}" if not api_model.startswith("cc/") else api_model)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    else:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
 
     messages: list[dict] = [{"role": "user", "content": task}]
     action_log: list[dict] = []
@@ -330,30 +342,66 @@ async def run_browser_agent(
 
     try:
         for turn in range(MAX_TURNS):
-            response = await client.messages.create(
-                model=api_model,
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                tools=BROWSER_TOOLS_SCHEMA,
-                messages=messages,
-            )
+            if _use_openai_client:
+                # OpenAI-compatible format (9Router)
+                import json as _json
+                oai_tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in BROWSER_TOOLS_SCHEMA]
+                oai_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+                resp = await client.chat.completions.create(model=api_model, max_tokens=4096, tools=oai_tools, messages=oai_messages)
+                choice = resp.choices[0]
 
-            assistant_content = []
-            text_parts = []
-            tool_uses = []
+                assistant_content = []
+                text_parts = []
+                tool_uses = []
 
-            for block in response.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                    assistant_content.append({"type": "text", "text": block.text})
-                elif block.type == "tool_use":
-                    tool_uses.append(block)
-                    assistant_content.append({
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
-                    })
+                if choice.message.content:
+                    text_parts.append(choice.message.content)
+                    assistant_content.append({"type": "text", "text": choice.message.content})
+
+                if choice.message.tool_calls:
+                    for tc in choice.message.tool_calls:
+                        try:
+                            inp = _json.loads(tc.function.arguments)
+                        except Exception:
+                            inp = {}
+                        # Create a simple object with .id, .name, .input
+                        class _TC:
+                            pass
+                        tool_obj = _TC()
+                        tool_obj.id = tc.id
+                        tool_obj.name = tc.function.name
+                        tool_obj.input = inp
+                        tool_uses.append(tool_obj)
+                        assistant_content.append({"type": "tool_use", "id": tc.id, "name": tc.function.name, "input": inp})
+
+                stop_reason = "tool_use" if choice.message.tool_calls else "end_turn"
+            else:
+                # Anthropic format (direct API)
+                response = await client.messages.create(
+                    model=api_model,
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    tools=BROWSER_TOOLS_SCHEMA,
+                    messages=messages,
+                )
+
+                assistant_content = []
+                text_parts = []
+                tool_uses = []
+                stop_reason = response.stop_reason
+
+                for block in response.content:
+                    if block.type == "text":
+                        text_parts.append(block.text)
+                        assistant_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        tool_uses.append(block)
+                        assistant_content.append({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                        })
 
             if text_parts:
                 asst_msg = Message(
@@ -377,9 +425,16 @@ async def run_browser_agent(
                     "message": tool_msg.model_dump(mode="json"),
                 })
 
-            messages.append({"role": "assistant", "content": assistant_content})
+            if _use_openai_client:
+                # OpenAI format: assistant message with tool_calls
+                asst_api_msg: dict = {"role": "assistant", "content": choice.message.content}
+                if choice.message.tool_calls:
+                    asst_api_msg["tool_calls"] = [{"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in (choice.message.tool_calls or [])]
+                messages.append(asst_api_msg)
+            else:
+                messages.append({"role": "assistant", "content": assistant_content})
 
-            if response.stop_reason != "tool_use":
+            if stop_reason != "tool_use":
                 break
 
             tool_results = []
@@ -460,7 +515,16 @@ async def run_browser_agent(
                     "message": result_msg.model_dump(mode="json"),
                 })
 
-            messages.append({"role": "user", "content": tool_results})
+            if _use_openai_client:
+                # OpenAI format: each tool result is a separate message
+                for tr in tool_results:
+                    text_content = ""
+                    for block in (tr.get("content") or []):
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text_content += block.get("text", "")
+                    messages.append({"role": "tool", "tool_call_id": tr["tool_use_id"], "content": text_content or "Done."})
+            else:
+                messages.append({"role": "user", "content": tool_results})
 
         summary_parts = text_parts if text_parts else ["Task completed."]
         summary = "\n".join(summary_parts)
@@ -563,6 +627,8 @@ async def run_browser_agents(
     dashboard_id: str | None = None,
     pre_selected_browser_ids: list[str] | None = None,
     parent_session_id: str | None = None,
+    auth_token: str | None = None,
+    base_url: str | None = None,
 ) -> list[dict]:
     """Run multiple browser sub-agents in parallel.
 
@@ -590,6 +656,8 @@ async def run_browser_agents(
             pre_selected=is_pre_selected,
             initial_url=url if url and browser_id not in pre_selected else None,
             parent_session_id=parent_session_id,
+            auth_token=auth_token,
+            base_url=base_url,
         )
 
     results = await asyncio.gather(*[_run_one(t) for t in tasks], return_exceptions=True)
