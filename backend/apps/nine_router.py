@@ -101,25 +101,60 @@ async def get_providers() -> list[dict]:
 
 
 async def start_oauth(provider: str) -> dict:
-    """Start OAuth device flow for a provider.
+    """Start OAuth flow for a provider.
 
-    Returns: {user_code, verification_uri, device_code, ...}
+    For device_code providers (github, qwen, kiro): returns {user_code, verification_uri, device_code}
+    For authorization_code providers (claude, codex, gemini-cli): returns {authUrl, codeVerifier, state}
     """
     async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{NINE_ROUTER_API}/oauth/{provider}/device-code")
+        # Try device-code flow first
+        try:
+            r = await client.get(f"{NINE_ROUTER_API}/oauth/{provider}/device-code")
+            if r.status_code == 200:
+                data = r.json()
+                return {
+                    "flow": "device_code",
+                    "user_code": data.get("user_code", ""),
+                    "verification_uri": data.get("verification_uri", data.get("verification_uri_complete", "")),
+                    "device_code": data.get("device_code", ""),
+                    "code_verifier": data.get("codeVerifier", ""),
+                    "extra_data": {k: v for k, v in data.items() if k.startswith("_")},
+                }
+        except Exception:
+            pass
+
+        # Fall back to authorization_code flow
+        callback_url = f"http://localhost:{NINE_ROUTER_PORT}/api/oauth/{provider}/callback"
+        r = await client.get(
+            f"{NINE_ROUTER_API}/oauth/{provider}/authorize",
+            params={"redirect_uri": callback_url},
+        )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        return {
+            "flow": "authorization_code",
+            "auth_url": data.get("authUrl", ""),
+            "code_verifier": data.get("codeVerifier", ""),
+            "state": data.get("state", ""),
+            "redirect_uri": callback_url,
+        }
 
 
-async def poll_oauth(provider: str, device_code: str) -> dict:
+async def poll_oauth(provider: str, device_code: str, code_verifier: str | None = None, extra_data: dict | None = None) -> dict:
     """Poll for OAuth completion.
 
-    Returns: {status: "pending"} or {status: "connected", connection: {...}}
+    Returns: {success: true, connection: {...}} or {success: false, pending: true}
     """
+    body: dict = {"deviceCode": device_code}
+    if code_verifier:
+        body["codeVerifier"] = code_verifier
+    if extra_data:
+        body["extraData"] = extra_data
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.post(
             f"{NINE_ROUTER_API}/oauth/{provider}/poll",
-            json={"deviceCode": device_code},
+            json=body,
         )
         r.raise_for_status()
         return r.json()

@@ -326,7 +326,11 @@ async def subscriptions_poll(body: dict):
         raise HTTPException(status_code=400, detail="provider and device_code required")
 
     try:
-        result = await poll_oauth(provider, device_code)
+        result = await poll_oauth(
+            provider, device_code,
+            code_verifier=body.get("code_verifier"),
+            extra_data=body.get("extra_data"),
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

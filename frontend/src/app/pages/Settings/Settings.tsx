@@ -158,10 +158,10 @@ const CopilotAuthButton: React.FC = () => {
 
 // ── Subscription Provider Card ──
 const SUBSCRIPTION_PROVIDERS = [
-  { id: 'claude-code', name: 'Claude Pro / Max', desc: 'Sonnet, Opus, Haiku — use your Anthropic subscription', color: '#E8927A' },
-  { id: 'openai-codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, o3, o4-mini — use your OpenAI subscription', color: '#74AA9C' },
+  { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet, Opus, Haiku — use your Anthropic subscription', color: '#E8927A' },
+  { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, o3, o4-mini — use your OpenAI subscription', color: '#74AA9C' },
   { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models via your Copilot subscription', color: '#8B949E' },
-  { id: 'gemini', name: 'Gemini Advanced', desc: 'Gemini 2.5 Pro and Flash — use your Google subscription', color: '#4285F4' },
+  { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 2.5 Pro and Flash — use your Google subscription', color: '#4285F4' },
 ];
 
 const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; connected: boolean; onConnect: () => void; onDisconnect: () => void; connecting: boolean; userCode?: string }> = ({ provider, connected, onConnect, onDisconnect, connecting, userCode }) => {
@@ -213,8 +213,8 @@ const SubscriptionCards: React.FC = () => {
 
   const isConnected = (providerId: string) => {
     if (!status?.providers) return false;
-    const providers = Array.isArray(status.providers) ? status.providers : [];
-    return providers.some((p: any) => p.provider === providerId && p.isActive);
+    const connections = status.providers?.connections || (Array.isArray(status.providers) ? status.providers : []);
+    return connections.some((p: any) => p.provider === providerId && p.isActive);
   };
 
   const handleConnect = async (providerId: string) => {
@@ -226,21 +226,21 @@ const SubscriptionCards: React.FC = () => {
         body: JSON.stringify({ provider: providerId }),
       });
       const data = await r.json();
-      if (data.user_code || data.userCode) {
-        const code = data.user_code || data.userCode;
+
+      if (data.flow === 'device_code') {
+        // Device code flow (GitHub, Qwen, etc.) — show code, poll
+        const code = data.user_code || '';
         setUserCode(code);
-        if (data.verification_uri || data.verificationUri) {
-          window.open(data.verification_uri || data.verificationUri, '_blank');
-        }
-        // Start polling
+        if (data.verification_uri) window.open(data.verification_uri, '_blank');
+
         const timer = setInterval(async () => {
           try {
             const pr = await fetch(`${API_BASE}/agents/subscriptions/poll`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ provider: providerId, device_code: data.device_code || data.deviceCode }),
+              body: JSON.stringify({ provider: providerId, device_code: data.device_code, code_verifier: data.code_verifier, extra_data: data.extra_data }),
             });
             const pd = await pr.json();
-            if (pd.status === 'connected' || pd.success) {
+            if (pd.success) {
               clearInterval(timer);
               setConnecting(null);
               setUserCode('');
@@ -250,6 +250,30 @@ const SubscriptionCards: React.FC = () => {
         }, 5000);
         setPollTimer(timer);
         setTimeout(() => { clearInterval(timer); setConnecting(null); setUserCode(''); }, 300000);
+
+      } else if (data.flow === 'authorization_code') {
+        // Auth code flow (Claude, Codex, Gemini) — open browser, poll for connection
+        if (data.auth_url) window.open(data.auth_url, '_blank');
+
+        // Poll the providers list until this provider appears as connected
+        const timer = setInterval(async () => {
+          try {
+            const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
+            const sd = await sr.json();
+            const providers = Array.isArray(sd.providers?.connections) ? sd.providers.connections : Array.isArray(sd.providers) ? sd.providers : [];
+            const found = providers.some((p: any) => p.provider === providerId && p.isActive);
+            if (found) {
+              clearInterval(timer);
+              setConnecting(null);
+              fetchStatus();
+            }
+          } catch {}
+        }, 3000);
+        setPollTimer(timer);
+        setTimeout(() => { clearInterval(timer); setConnecting(null); }, 300000);
+
+      } else {
+        setConnecting(null);
       }
     } catch { setConnecting(null); }
   };
