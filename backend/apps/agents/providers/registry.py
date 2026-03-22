@@ -70,6 +70,25 @@ BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+_9router_cache: dict = {"available": None, "checked_at": 0}
+
+
+def _is_9router_available() -> bool:
+    """Check if 9Router is running on localhost:20128. Caches for 30 seconds."""
+    import time as _time
+    now = _time.time()
+    if _9router_cache["available"] is not None and now - _9router_cache["checked_at"] < 30:
+        return _9router_cache["available"]
+    try:
+        import httpx
+        r = httpx.get("http://localhost:20128/v1/models", timeout=2.0)
+        available = r.status_code == 200
+    except Exception:
+        available = False
+    _9router_cache["available"] = available
+    _9router_cache["checked_at"] = now
+    return available
+
 
 # ---------------------------------------------------------------------------
 # Provider factory
@@ -91,6 +110,37 @@ def create_provider(
     """
     api_type = _get_api_type(provider_name)
 
+    # Check for 9Router first
+    if provider_name in ("9Router", "9router"):
+        from backend.apps.agents.providers.openai_compat import OpenAICompatProvider
+        return OpenAICompatProvider(api_key="9router", base_url="http://localhost:20128/v1")
+
+    # Check for GitHub Copilot
+    if provider_name in ("GitHub Copilot", "copilot"):
+        from backend.apps.agents.providers.copilot import CopilotProvider
+        copilot_token = getattr(settings, "copilot_token", None)
+        if not copilot_token:
+            raise ValueError("GitHub Copilot not connected. Sign in via Settings → Models.")
+        # Auto-refresh if expired
+        import time as _time
+        expires = getattr(settings, "copilot_token_expires", None)
+        if expires and _time.time() > expires - 120:
+            github_token = getattr(settings, "copilot_github_token", None)
+            if github_token:
+                import asyncio
+                from backend.apps.agents.copilot_auth import exchange_for_copilot_token
+                try:
+                    loop = asyncio.get_event_loop()
+                    result = loop.run_until_complete(exchange_for_copilot_token(github_token))
+                    copilot_token = result["token"]
+                    settings.copilot_token = copilot_token
+                    settings.copilot_token_expires = result["expires_at"]
+                    from backend.apps.settings.settings import _save_settings
+                    _save_settings(settings)
+                except Exception as e:
+                    logger.warning(f"Copilot token refresh failed: {e}")
+        return CopilotProvider(copilot_token=copilot_token)
+
     if api_type == "anthropic":
         from backend.apps.agents.providers.anthropic import AnthropicProvider
         if getattr(settings, "connection_mode", "own_key") == "managed":
@@ -98,18 +148,41 @@ def create_provider(
                 auth_token=getattr(settings, "openswarm_auth_token", None),
                 base_url=getattr(settings, "openswarm_proxy_url", None) or "https://api.openswarm.ai",
             )
-        return AnthropicProvider(api_key=settings.anthropic_api_key)
+        if settings.anthropic_api_key:
+            return AnthropicProvider(api_key=settings.anthropic_api_key)
+        # No API key — try 9Router as fallback
+        if _is_9router_available():
+            from backend.apps.agents.providers.openai_compat import OpenAICompatProvider
+            provider = OpenAICompatProvider(api_key="9router", base_url="http://localhost:20128/v1")
+            # Override get_model_id to map our short names to 9Router's cc/ prefixed IDs
+            _original_get_model = provider.get_model_id
+            _9r_model_map = {
+                "sonnet": "cc/claude-sonnet-4-6",
+                "opus": "cc/claude-opus-4-6",
+                "haiku": "cc/claude-haiku-4-5-20251001",
+            }
+            provider.get_model_id = lambda name: _9r_model_map.get(name, f"cc/{name}" if not name.startswith("cc/") else name)
+            return provider
+        raise ValueError("Anthropic API key not configured. Set it in Settings, or connect 9Router.")
 
     if api_type == "openai":
         from backend.apps.agents.providers.openai_compat import OpenAICompatProvider
-        return OpenAICompatProvider(
-            api_key=settings.openai_api_key or "",
-            base_url="https://api.openai.com/v1",
-        )
+        if settings.openai_api_key:
+            return OpenAICompatProvider(api_key=settings.openai_api_key, base_url="https://api.openai.com/v1")
+        # No API key — try 9Router as fallback
+        if _is_9router_available():
+            return OpenAICompatProvider(api_key="9router", base_url="http://localhost:20128/v1")
+        raise ValueError("OpenAI API key not configured. Set it in Settings, or connect 9Router.")
 
     if api_type == "gemini":
         from backend.apps.agents.providers.gemini import GeminiProvider
-        return GeminiProvider(api_key=settings.google_api_key or "")
+        if settings.google_api_key:
+            return GeminiProvider(api_key=settings.google_api_key)
+        # No API key — try 9Router as fallback
+        if _is_9router_available():
+            from backend.apps.agents.providers.openai_compat import OpenAICompatProvider
+            return OpenAICompatProvider(api_key="9router", base_url="http://localhost:20128/v1")
+        raise ValueError("Google API key not configured. Set it in Settings, or connect 9Router.")
 
     if api_type == "openrouter":
         from backend.apps.agents.providers.openai_compat import OpenAICompatProvider

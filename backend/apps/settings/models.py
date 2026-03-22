@@ -37,6 +37,14 @@ class AppSettings(BaseModel):
     expand_new_chats_in_dashboard: bool = False
     auto_reveal_sub_agents: bool = True
     dev_mode: bool = False
+    # Subscription tokens (from CLI tools — alternative to API keys)
+    claude_subscription_token: Optional[str] = None
+    openai_subscription_token: Optional[str] = None
+    gemini_subscription_token: Optional[str] = None
+    # GitHub Copilot
+    copilot_github_token: Optional[str] = None
+    copilot_token: Optional[str] = None
+    copilot_token_expires: Optional[float] = None
     # Analytics: opted in by default, user can toggle off
     analytics_opt_in: bool = True
     installation_id: Optional[str] = None

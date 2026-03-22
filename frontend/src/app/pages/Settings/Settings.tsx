@@ -48,6 +48,196 @@ import DirectoryBrowser from '@/app/components/DirectoryBrowser';
 import { CommandsContent } from '@/app/pages/Commands/Commands';
 import { API_BASE } from '@/shared/config';
 
+// ── Copilot Auth Button ──
+const CopilotAuthButton: React.FC = () => {
+  const c = useClaudeTokens();
+  const [status, setStatus] = useState<'idle' | 'waiting' | 'connected' | 'error'>('idle');
+  const [userCode, setUserCode] = useState('');
+  const [username, setUsername] = useState('');
+  const [error, setError] = useState('');
+
+  // Check if already connected
+  useEffect(() => {
+    fetch(`${API_BASE}/agents/copilot/models`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.models && d.models.length > 0) setStatus('connected');
+      })
+      .catch(() => {});
+  }, []);
+
+  const startAuth = async () => {
+    setStatus('waiting');
+    setError('');
+    try {
+      const resp = await fetch(`${API_BASE}/agents/copilot/start-auth`, { method: 'POST' });
+      const data = await resp.json();
+      setUserCode(data.user_code);
+      window.open(data.verification_uri, '_blank');
+
+      // Poll for completion
+      const deviceCode = data.device_code;
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch(`${API_BASE}/agents/copilot/poll-auth`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_code: deviceCode }),
+          });
+          const d = await r.json();
+          if (d.status === 'connected') {
+            clearInterval(poll);
+            setStatus('connected');
+            setUsername(d.username || '');
+          }
+        } catch {}
+      }, 5000);
+
+      // Timeout after 5 minutes
+      setTimeout(() => { clearInterval(poll); if (status === 'waiting') { setStatus('error'); setError('Auth timed out'); } }, 300000);
+    } catch (e: any) {
+      setStatus('error');
+      setError(e.message || 'Failed to start auth');
+    }
+  };
+
+  const disconnect = async () => {
+    await fetch(`${API_BASE}/agents/copilot/disconnect`, { method: 'POST' });
+    setStatus('idle');
+    setUsername('');
+  };
+
+  if (status === 'connected') {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: c.status.success, flexShrink: 0 }} />
+        <Typography sx={{ fontSize: '0.78rem', color: c.text.primary }}>
+          Connected{username ? ` as @${username}` : ''}
+        </Typography>
+        <Typography
+          onClick={disconnect}
+          sx={{ fontSize: '0.72rem', color: c.text.tertiary, cursor: 'pointer', ml: 'auto', '&:hover': { color: c.status.error } }}
+        >
+          Disconnect
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (status === 'waiting') {
+    return (
+      <Box>
+        <Typography sx={{ fontSize: '0.78rem', color: c.text.primary, mb: 0.5 }}>
+          Enter code <strong style={{ fontFamily: 'monospace', fontSize: '0.9rem', letterSpacing: '0.1em' }}>{userCode}</strong> at github.com/login/device
+        </Typography>
+        <Typography sx={{ fontSize: '0.68rem', color: c.text.tertiary }}>Waiting for authorization...</Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <Button
+        onClick={startAuth}
+        variant="outlined"
+        size="small"
+        sx={{
+          textTransform: 'none',
+          fontSize: '0.78rem',
+          color: c.text.primary,
+          borderColor: c.border.medium,
+          '&:hover': { borderColor: c.accent.primary, color: c.accent.primary },
+        }}
+      >
+        Sign in with GitHub
+      </Button>
+      {error && <Typography sx={{ fontSize: '0.7rem', color: c.status.error, mt: 0.5 }}>{error}</Typography>}
+    </Box>
+  );
+};
+
+// ── 9Router Setup ──
+const NineRouterSetup: React.FC = () => {
+  const c = useClaudeTokens();
+  const [checking, setChecking] = useState(false);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    // Auto-detect if 9Router is running
+    fetch('http://localhost:20128/v1/models', { signal: AbortSignal.timeout(2000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.data?.length > 0 || d?.length > 0) setConnected(true); })
+      .catch(() => {});
+  }, []);
+
+  const checkConnection = async () => {
+    setChecking(true);
+    try {
+      const r = await fetch('http://localhost:20128/v1/models', { signal: AbortSignal.timeout(3000) });
+      if (r.ok) {
+        const d = await r.json();
+        if (d?.data?.length > 0 || d?.length > 0) { setConnected(true); setChecking(false); return; }
+      }
+      setConnected(false);
+    } catch { setConnected(false); }
+    setChecking(false);
+  };
+
+  if (connected) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: c.status.success, flexShrink: 0 }} />
+        <Typography sx={{ fontSize: '0.78rem', color: c.text.primary }}>
+          9Router detected and connected
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1.5 }}>
+        <Typography sx={{ fontSize: '0.72rem', fontWeight: 600, color: c.text.primary }}>
+          Quick setup (2 minutes):
+        </Typography>
+        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
+          1. Open any terminal app on your computer (Terminal, Command Prompt, etc.)
+        </Typography>
+        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
+          2. Copy and paste this command, then press Enter:
+        </Typography>
+        <Box
+          sx={{ bgcolor: 'rgba(255,255,255,0.04)', borderRadius: 1, px: 1.5, py: 0.75, fontFamily: 'monospace', fontSize: '0.72rem', color: c.accent.primary, cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.07)' } }}
+          onClick={() => navigator.clipboard.writeText('npx 9router')}
+        >
+          npx 9router <span style={{ fontSize: '0.6rem', color: c.text.ghost, marginLeft: 8 }}>click to copy</span>
+        </Box>
+        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
+          3. A dashboard will open in your browser. Sign in to your AI subscriptions there (Claude, ChatGPT, Gemini, etc.)
+        </Typography>
+        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
+          4. Come back here and click "Check Connection" — that's it!
+        </Typography>
+      </Box>
+      <Button
+        onClick={checkConnection}
+        variant="outlined"
+        size="small"
+        disabled={checking}
+        sx={{
+          textTransform: 'none',
+          fontSize: '0.75rem',
+          color: c.text.primary,
+          borderColor: c.border.medium,
+          '&:hover': { borderColor: c.status.success, color: c.status.success },
+        }}
+      >
+        {checking ? 'Checking...' : 'Check Connection'}
+      </Button>
+    </Box>
+  );
+};
+
 // ── Pixel Bar ──
 const PIXEL_SALMON = ['#C46B57', '#D4795F', '#E8927A', '#F0A088', '#F5B49E'];
 const PIXEL_BLUE = ['#445588', '#5577AA', '#6688BB', '#7799CC', '#88AADD'];
@@ -952,8 +1142,49 @@ const Settings: React.FC = () => {
       </Box>
       ) : activeTab === 'models' ? (
       <Box sx={{ display: 'flex', flexDirection: 'column', pt: 2.5, pb: 1, gap: 2.5 }}>
-          <Typography sx={descSx}>
-            Connect your AI model providers. Each key is stored locally on your device.
+
+          {/* ── USE EXISTING SUBSCRIPTIONS ── */}
+          <Typography sx={{ fontSize: '0.7rem', color: c.text.ghost, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+            Use Your Existing Subscriptions
+          </Typography>
+
+          {/* 9Router — use subscriptions */}
+          <Box sx={{ p: 2, borderRadius: `${c.radius.md}px`, bgcolor: `${c.status.success}06`, border: `1px solid ${c.status.success}20` }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography sx={{ ...labelSx, mb: 0 }}>9Router</Typography>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 1, py: 0.25, borderRadius: '4px' }}>
+                FREE — USE YOUR SUBSCRIPTIONS
+              </Typography>
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1.5 }}>
+              Already paying for Claude, ChatGPT, or Gemini? Use those subscriptions here — no extra cost.
+              9Router is a free tool that connects your existing subscriptions to OpenSwarm.
+            </Typography>
+
+            <NineRouterSetup />
+          </Box>
+
+          {/* GitHub Copilot */}
+          <Box sx={{ p: 2, borderRadius: `${c.radius.md}px`, bgcolor: `${c.accent.primary}06`, border: `1px solid ${c.accent.primary}20` }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography sx={{ ...labelSx, mb: 0 }}>GitHub Copilot</Typography>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 1, py: 0.25, borderRadius: '4px' }}>
+                USE SUBSCRIPTION
+              </Typography>
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>
+              Sign in with GitHub to use Claude, GPT, and other models through your Copilot subscription.
+            </Typography>
+            <CopilotAuthButton />
+          </Box>
+
+          {/* ── API KEYS ── */}
+          <Typography sx={{ fontSize: '0.7rem', color: c.text.ghost, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, mt: 1 }}>
+            Or Connect With API Keys
+          </Typography>
+
+          <Typography sx={{ ...descSx, mb: -1 }}>
+            Pay per use. Each key is stored locally on your device.
           </Typography>
 
           {/* OpenRouter — recommended */}
@@ -991,8 +1222,13 @@ const Settings: React.FC = () => {
 
           {/* Anthropic */}
           <Box>
-            <Typography sx={labelSx}>Anthropic</Typography>
-            <Typography sx={{ ...descSx, mb: 1 }}>Claude Sonnet, Opus, Haiku — direct API access.</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={labelSx}>Anthropic</Typography>
+              {form.anthropic_api_key ? (
+                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
+              ) : null}
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>Claude Sonnet, Opus, Haiku.</Typography>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField
                 type={showApiKey ? 'text' : 'password'}
@@ -1026,8 +1262,13 @@ const Settings: React.FC = () => {
 
           {/* OpenAI */}
           <Box>
-            <Typography sx={labelSx}>OpenAI</Typography>
-            <Typography sx={{ ...descSx, mb: 1 }}>GPT-5.4, o3, o4-mini — direct API access.</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={labelSx}>OpenAI</Typography>
+              {(form as any).openai_api_key ? (
+                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
+              ) : null}
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>GPT-5.4, o3, o4-mini.</Typography>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField
                 type="password"
@@ -1052,8 +1293,13 @@ const Settings: React.FC = () => {
 
           {/* Google */}
           <Box>
-            <Typography sx={labelSx}>Google</Typography>
-            <Typography sx={{ ...descSx, mb: 1 }}>Gemini 2.5 Pro and Flash — direct API access.</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={labelSx}>Google</Typography>
+              {(form as any).google_api_key ? (
+                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
+              ) : null}
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>Gemini 2.5 Pro and Flash.</Typography>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField
                 type="password"

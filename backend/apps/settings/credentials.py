@@ -15,25 +15,47 @@ if TYPE_CHECKING:
 OPENSWARM_DEFAULT_PROXY_URL = "https://api.openswarm.ai"
 
 
+def _check_9router() -> bool:
+    """Check if 9Router is running locally."""
+    try:
+        import httpx
+        r = httpx.get("http://localhost:20128/v1/models", timeout=2.0)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
 def validate_credentials(settings: AppSettings, provider: str = "anthropic") -> None:
-    """Raise ValueError if credentials are missing for the given provider."""
+    """Raise ValueError if credentials are missing for the given provider.
+
+    Allows through if 9Router is running as a fallback.
+    """
+    # 9Router or GitHub Copilot providers don't need traditional credentials
+    if provider in ("9Router", "9router", "GitHub Copilot", "copilot"):
+        return
+
     if provider == "anthropic":
         if getattr(settings, "connection_mode", "own_key") == "managed":
             if not getattr(settings, "openswarm_auth_token", None):
-                raise ValueError(
-                    "Open Swarm account not connected. Sign in via Settings → API."
-                )
-        else:
-            if not settings.anthropic_api_key:
-                raise ValueError(
-                    "Anthropic API key not configured. Set it in Settings."
-                )
+                raise ValueError("Open Swarm account not connected. Sign in via Settings → API.")
+            return
+        if settings.anthropic_api_key:
+            return
+        if _check_9router():
+            return  # 9Router will handle it
+        raise ValueError("Anthropic API key not configured. Set it in Settings, or connect 9Router.")
     elif provider == "openai":
-        if not settings.openai_api_key:
-            raise ValueError("OpenAI API key not configured. Set it in Settings.")
+        if settings.openai_api_key:
+            return
+        if _check_9router():
+            return
+        raise ValueError("OpenAI API key not configured. Set it in Settings, or connect 9Router.")
     elif provider == "gemini":
-        if not getattr(settings, "google_api_key", None):
-            raise ValueError("Google API key not configured. Set it in Settings.")
+        if getattr(settings, "google_api_key", None):
+            return
+        if _check_9router():
+            return
+        raise ValueError("Google API key not configured. Set it in Settings, or connect 9Router.")
     elif provider == "openrouter":
         if not getattr(settings, "openrouter_api_key", None):
             raise ValueError("OpenRouter API key not configured. Set it in Settings.")

@@ -188,3 +188,96 @@ async def list_models():
     settings = load_settings()
     return {"models": get_available_models(settings)}
 
+
+# ── GitHub Copilot Auth ──
+
+@agents.router.post("/copilot/start-auth")
+async def copilot_start_auth():
+    """Start GitHub device flow for Copilot auth."""
+    from backend.apps.agents.copilot_auth import start_device_flow
+    try:
+        result = await start_device_flow()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@agents.router.post("/copilot/poll-auth")
+async def copilot_poll_auth(body: dict):
+    """Poll for GitHub auth completion. Returns token on success."""
+    from backend.apps.agents.copilot_auth import poll_for_token, exchange_for_copilot_token, get_github_username, list_copilot_models
+    from backend.apps.settings.settings import load_settings, _save_settings
+
+    device_code = body.get("device_code", "")
+    if not device_code:
+        raise HTTPException(status_code=400, detail="device_code required")
+
+    try:
+        github_token = await poll_for_token(device_code)
+        if github_token is None:
+            return {"status": "pending"}
+
+        # Got GitHub token — exchange for Copilot token
+        copilot_result = await exchange_for_copilot_token(github_token)
+        username = await get_github_username(github_token)
+
+        # Fetch available models
+        models = await list_copilot_models(copilot_result["token"])
+
+        # Save to settings
+        settings = load_settings()
+        settings.copilot_github_token = github_token
+        settings.copilot_token = copilot_result["token"]
+        settings.copilot_token_expires = copilot_result["expires_at"]
+        _save_settings(settings)
+
+        return {
+            "status": "connected",
+            "username": username,
+            "models": models,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@agents.router.get("/copilot/models")
+async def copilot_models():
+    """List models available through Copilot."""
+    from backend.apps.agents.copilot_auth import list_copilot_models, get_copilot_token
+    from backend.apps.settings.settings import load_settings, _save_settings
+
+    settings = load_settings()
+    github_token = getattr(settings, "copilot_github_token", None)
+    if not github_token:
+        return {"models": []}
+
+    try:
+        result = await get_copilot_token(
+            github_token,
+            getattr(settings, "copilot_token", None),
+            getattr(settings, "copilot_token_expires", None),
+        )
+        settings.copilot_token = result["token"]
+        settings.copilot_token_expires = result["expires_at"]
+        _save_settings(settings)
+
+        models = await list_copilot_models(result["token"])
+        return {"models": models}
+    except Exception as e:
+        return {"models": [], "error": str(e)}
+
+
+@agents.router.post("/copilot/disconnect")
+async def copilot_disconnect():
+    """Clear Copilot tokens."""
+    from backend.apps.settings.settings import load_settings, _save_settings
+
+    settings = load_settings()
+    settings.copilot_github_token = None
+    settings.copilot_token = None
+    settings.copilot_token_expires = None
+    _save_settings(settings)
+    return {"ok": True}
+
