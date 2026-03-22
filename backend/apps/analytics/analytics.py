@@ -51,7 +51,21 @@ async def analytics_lifespan():
     except Exception as e:
         logger.debug(f"Analytics startup event failed (non-critical): {e}")
 
+    # Auto-start 9Router for subscription access
+    try:
+        from backend.apps.nine_router import ensure_running as ensure_9router, stop as stop_9router
+        await ensure_9router()
+    except Exception as e:
+        logger.debug(f"9Router auto-start skipped: {e}")
+
     yield
+
+    # Stop 9Router
+    try:
+        from backend.apps.nine_router import stop as stop_9router
+        stop_9router()
+    except Exception:
+        pass
 
     shutdown_collector()
     logger.info("PostHog analytics shut down")

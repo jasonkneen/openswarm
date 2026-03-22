@@ -156,84 +156,135 @@ const CopilotAuthButton: React.FC = () => {
   );
 };
 
-// ── 9Router Setup ──
-const NineRouterSetup: React.FC = () => {
+// ── Subscription Provider Card ──
+const SUBSCRIPTION_PROVIDERS = [
+  { id: 'claude-code', name: 'Claude Pro / Max', desc: 'Sonnet, Opus, Haiku — use your Anthropic subscription', color: '#E8927A' },
+  { id: 'openai-codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, o3, o4-mini — use your OpenAI subscription', color: '#74AA9C' },
+  { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models via your Copilot subscription', color: '#8B949E' },
+  { id: 'gemini', name: 'Gemini Advanced', desc: 'Gemini 2.5 Pro and Flash — use your Google subscription', color: '#4285F4' },
+];
+
+const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; connected: boolean; onConnect: () => void; onDisconnect: () => void; connecting: boolean; userCode?: string }> = ({ provider, connected, onConnect, onDisconnect, connecting, userCode }) => {
   const c = useClaudeTokens();
-  const [checking, setChecking] = useState(false);
-  const [connected, setConnected] = useState(false);
+  return (
+    <Box sx={{ p: 1.5, borderRadius: `${c.radius.md}px`, border: `1px solid ${connected ? c.status.success + '30' : c.border.subtle}`, bgcolor: connected ? `${c.status.success}04` : 'transparent' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: connected ? c.status.success : c.border.medium, flexShrink: 0 }} />
+          <Box>
+            <Typography sx={{ fontSize: '0.78rem', fontWeight: 600, color: c.text.primary }}>{provider.name}</Typography>
+            <Typography sx={{ fontSize: '0.65rem', color: c.text.muted }}>{provider.desc}</Typography>
+          </Box>
+        </Box>
+        {connected ? (
+          <Typography onClick={onDisconnect} sx={{ fontSize: '0.68rem', color: c.text.tertiary, cursor: 'pointer', '&:hover': { color: c.status.error } }}>
+            Disconnect
+          </Typography>
+        ) : connecting && userCode ? (
+          <Box sx={{ textAlign: 'right' }}>
+            <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>Enter code:</Typography>
+            <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: c.accent.primary, fontFamily: 'monospace', letterSpacing: '0.1em' }}>{userCode}</Typography>
+          </Box>
+        ) : (
+          <Button onClick={onConnect} disabled={connecting} variant="outlined" size="small" sx={{ textTransform: 'none', fontSize: '0.7rem', color: c.text.primary, borderColor: c.border.medium, minWidth: 70, '&:hover': { borderColor: c.accent.primary } }}>
+            {connecting ? 'Waiting...' : 'Connect'}
+          </Button>
+        )}
+      </Box>
+    </Box>
+  );
+};
 
-  useEffect(() => {
-    // Auto-detect if 9Router is running
-    fetch('http://localhost:20128/v1/models', { signal: AbortSignal.timeout(2000) })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data?.length > 0 || d?.length > 0) setConnected(true); })
-      .catch(() => {});
-  }, []);
+const SubscriptionCards: React.FC = () => {
+  const c = useClaudeTokens();
+  const [status, setStatus] = useState<any>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [userCode, setUserCode] = useState('');
+  const [pollTimer, setPollTimer] = useState<any>(null);
 
-  const checkConnection = async () => {
-    setChecking(true);
-    try {
-      const r = await fetch('http://localhost:20128/v1/models', { signal: AbortSignal.timeout(3000) });
-      if (r.ok) {
-        const d = await r.json();
-        if (d?.data?.length > 0 || d?.length > 0) { setConnected(true); setChecking(false); return; }
-      }
-      setConnected(false);
-    } catch { setConnected(false); }
-    setChecking(false);
+  const fetchStatus = () => {
+    fetch(`${API_BASE}/agents/subscriptions/status`)
+      .then(r => r.json())
+      .then(setStatus)
+      .catch(() => setStatus({ running: false, providers: [], models: [] }));
   };
 
-  if (connected) {
+  useEffect(() => { fetchStatus(); }, []);
+
+  const isConnected = (providerId: string) => {
+    if (!status?.providers) return false;
+    const providers = Array.isArray(status.providers) ? status.providers : [];
+    return providers.some((p: any) => p.provider === providerId && p.isActive);
+  };
+
+  const handleConnect = async (providerId: string) => {
+    setConnecting(providerId);
+    setUserCode('');
+    try {
+      const r = await fetch(`${API_BASE}/agents/subscriptions/connect`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: providerId }),
+      });
+      const data = await r.json();
+      if (data.user_code || data.userCode) {
+        const code = data.user_code || data.userCode;
+        setUserCode(code);
+        if (data.verification_uri || data.verificationUri) {
+          window.open(data.verification_uri || data.verificationUri, '_blank');
+        }
+        // Start polling
+        const timer = setInterval(async () => {
+          try {
+            const pr = await fetch(`${API_BASE}/agents/subscriptions/poll`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider: providerId, device_code: data.device_code || data.deviceCode }),
+            });
+            const pd = await pr.json();
+            if (pd.status === 'connected' || pd.success) {
+              clearInterval(timer);
+              setConnecting(null);
+              setUserCode('');
+              fetchStatus();
+            }
+          } catch {}
+        }, 5000);
+        setPollTimer(timer);
+        setTimeout(() => { clearInterval(timer); setConnecting(null); setUserCode(''); }, 300000);
+      }
+    } catch { setConnecting(null); }
+  };
+
+  const handleDisconnect = async (providerId: string) => {
+    // TODO: implement disconnect via 9Router API
+    fetchStatus();
+  };
+
+  if (!status?.running) {
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: c.status.success, flexShrink: 0 }} />
-        <Typography sx={{ fontSize: '0.78rem', color: c.text.primary }}>
-          9Router detected and connected
+      <Box sx={{ p: 2, borderRadius: `${c.radius.md}px`, border: `1px solid ${c.border.subtle}`, textAlign: 'center' }}>
+        <Typography sx={{ fontSize: '0.78rem', color: c.text.muted, mb: 1 }}>
+          Starting subscription service...
+        </Typography>
+        <Typography sx={{ fontSize: '0.65rem', color: c.text.ghost }}>
+          This connects your existing AI subscriptions. If this doesn't load, make sure Node.js is installed.
         </Typography>
       </Box>
     );
   }
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1.5 }}>
-        <Typography sx={{ fontSize: '0.72rem', fontWeight: 600, color: c.text.primary }}>
-          Quick setup (2 minutes):
-        </Typography>
-        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
-          1. Open any terminal app on your computer (Terminal, Command Prompt, etc.)
-        </Typography>
-        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
-          2. Copy and paste this command, then press Enter:
-        </Typography>
-        <Box
-          sx={{ bgcolor: 'rgba(255,255,255,0.04)', borderRadius: 1, px: 1.5, py: 0.75, fontFamily: 'monospace', fontSize: '0.72rem', color: c.accent.primary, cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.07)' } }}
-          onClick={() => navigator.clipboard.writeText('npx 9router')}
-        >
-          npx 9router <span style={{ fontSize: '0.6rem', color: c.text.ghost, marginLeft: 8 }}>click to copy</span>
-        </Box>
-        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
-          3. A dashboard will open in your browser. Sign in to your AI subscriptions there (Claude, ChatGPT, Gemini, etc.)
-        </Typography>
-        <Typography sx={{ fontSize: '0.68rem', color: c.text.muted }}>
-          4. Come back here and click "Check Connection" — that's it!
-        </Typography>
-      </Box>
-      <Button
-        onClick={checkConnection}
-        variant="outlined"
-        size="small"
-        disabled={checking}
-        sx={{
-          textTransform: 'none',
-          fontSize: '0.75rem',
-          color: c.text.primary,
-          borderColor: c.border.medium,
-          '&:hover': { borderColor: c.status.success, color: c.status.success },
-        }}
-      >
-        {checking ? 'Checking...' : 'Check Connection'}
-      </Button>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      {SUBSCRIPTION_PROVIDERS.map(p => (
+        <SubscriptionCard
+          key={p.id}
+          provider={p}
+          connected={isConnected(p.id)}
+          onConnect={() => handleConnect(p.id)}
+          onDisconnect={() => handleDisconnect(p.id)}
+          connecting={connecting === p.id}
+          userCode={connecting === p.id ? userCode : undefined}
+        />
+      ))}
     </Box>
   );
 };
@@ -1148,35 +1199,11 @@ const Settings: React.FC = () => {
             Use Your Existing Subscriptions
           </Typography>
 
-          {/* 9Router — use subscriptions */}
-          <Box sx={{ p: 2, borderRadius: `${c.radius.md}px`, bgcolor: `${c.status.success}06`, border: `1px solid ${c.status.success}20` }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography sx={{ ...labelSx, mb: 0 }}>9Router</Typography>
-              <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 1, py: 0.25, borderRadius: '4px' }}>
-                FREE — USE YOUR SUBSCRIPTIONS
-              </Typography>
-            </Box>
-            <Typography sx={{ ...descSx, mb: 1.5 }}>
-              Already paying for Claude, ChatGPT, or Gemini? Use those subscriptions here — no extra cost.
-              9Router is a free tool that connects your existing subscriptions to OpenSwarm.
-            </Typography>
+          <Typography sx={{ ...descSx, mb: 0 }}>
+            Already paying for Claude, ChatGPT, or Gemini? Connect your subscription — no API key needed, no extra cost.
+          </Typography>
 
-            <NineRouterSetup />
-          </Box>
-
-          {/* GitHub Copilot */}
-          <Box sx={{ p: 2, borderRadius: `${c.radius.md}px`, bgcolor: `${c.accent.primary}06`, border: `1px solid ${c.accent.primary}20` }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography sx={{ ...labelSx, mb: 0 }}>GitHub Copilot</Typography>
-              <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 1, py: 0.25, borderRadius: '4px' }}>
-                USE SUBSCRIPTION
-              </Typography>
-            </Box>
-            <Typography sx={{ ...descSx, mb: 1 }}>
-              Sign in with GitHub to use Claude, GPT, and other models through your Copilot subscription.
-            </Typography>
-            <CopilotAuthButton />
-          </Box>
+          <SubscriptionCards />
 
           {/* ── API KEYS ── */}
           <Typography sx={{ fontSize: '0.7rem', color: c.text.ghost, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, mt: 1 }}>

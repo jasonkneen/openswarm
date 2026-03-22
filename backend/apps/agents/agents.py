@@ -281,3 +281,63 @@ async def copilot_disconnect():
     _save_settings(settings)
     return {"ok": True}
 
+
+# ── Subscription Management (via 9Router) ──
+
+@agents.router.get("/subscriptions/status")
+async def subscriptions_status():
+    """Check if 9Router is running and list connected providers."""
+    from backend.apps.nine_router import is_running, get_providers, get_models
+    if not is_running():
+        return {"running": False, "providers": [], "models": []}
+    providers = await get_providers()
+    models = await get_models()
+    return {"running": True, "providers": providers, "models": models}
+
+
+@agents.router.post("/subscriptions/connect")
+async def subscriptions_connect(body: dict):
+    """Start OAuth flow for a subscription provider."""
+    from backend.apps.nine_router import is_running, ensure_running, start_oauth
+    provider = body.get("provider", "")
+    if not provider:
+        raise HTTPException(status_code=400, detail="provider required")
+
+    if not is_running():
+        import asyncio
+        await ensure_running()
+        if not is_running():
+            raise HTTPException(status_code=503, detail="9Router not available. Please install Node.js.")
+
+    try:
+        result = await start_oauth(provider)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@agents.router.post("/subscriptions/poll")
+async def subscriptions_poll(body: dict):
+    """Poll for OAuth completion."""
+    from backend.apps.nine_router import poll_oauth
+    provider = body.get("provider", "")
+    device_code = body.get("device_code", "")
+    if not provider or not device_code:
+        raise HTTPException(status_code=400, detail="provider and device_code required")
+
+    try:
+        result = await poll_oauth(provider, device_code)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@agents.router.get("/subscriptions/models")
+async def subscriptions_models():
+    """List all models available through connected subscriptions."""
+    from backend.apps.nine_router import is_running, get_models
+    if not is_running():
+        return {"models": []}
+    models = await get_models()
+    return {"models": models}
+
