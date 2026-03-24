@@ -158,16 +158,17 @@ const CopilotAuthButton: React.FC = () => {
 
 // ── Subscription Provider Card ──
 const SUBSCRIPTION_PROVIDERS = [
-  { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet, Opus, Haiku — use your Anthropic subscription', color: '#E8927A' },
-  { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, o3, o4-mini — use your OpenAI subscription', color: '#74AA9C' },
-  { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models via your Copilot subscription', color: '#8B949E' },
-  { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 2.5 Pro and Flash — use your Google subscription', color: '#4285F4' },
+  { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet, Opus, Haiku — use your Anthropic subscription', color: '#E8927A', preview: false },
+  { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 2.5 Pro and Flash — use your Google subscription', color: '#4285F4', preview: true },
+  { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, o3, o4-mini — use your OpenAI subscription', color: '#74AA9C', preview: true },
+  { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models via your Copilot subscription', color: '#8B949E', preview: true },
 ];
 
 const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; connected: boolean; onConnect: () => void; onDisconnect: () => void; connecting: boolean; userCode?: string }> = ({ provider, connected, onConnect, onDisconnect, connecting, userCode }) => {
   const c = useClaudeTokens();
+  const isPreview = (provider as any).preview;
   return (
-    <Box sx={{ p: 1.5, borderRadius: `${c.radius.md}px`, border: `1px solid ${connected ? c.status.success + '30' : c.border.subtle}`, bgcolor: connected ? `${c.status.success}04` : 'transparent' }}>
+    <Box sx={{ p: 1.5, borderRadius: `${c.radius.md}px`, border: `1px solid ${connected ? c.status.success + '30' : c.border.subtle}`, bgcolor: connected ? `${c.status.success}04` : 'transparent', opacity: isPreview ? 0.5 : 1 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: connected ? c.status.success : c.border.medium, flexShrink: 0 }} />
@@ -176,7 +177,11 @@ const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; c
             <Typography sx={{ fontSize: '0.65rem', color: c.text.muted }}>{provider.desc}</Typography>
           </Box>
         </Box>
-        {connected ? (
+        {isPreview ? (
+          <Typography sx={{ fontSize: '0.65rem', color: c.text.ghost, fontStyle: 'italic' }}>
+            Coming soon
+          </Typography>
+        ) : connected ? (
           <Typography onClick={onDisconnect} sx={{ fontSize: '0.68rem', color: c.text.tertiary, cursor: 'pointer', '&:hover': { color: c.status.error } }}>
             Disconnect
           </Typography>

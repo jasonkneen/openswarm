@@ -5,10 +5,10 @@ import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { API_BASE } from '@/shared/config';
 
 const SUBSCRIPTION_PROVIDERS = [
-  { id: 'claude', name: 'Claude', desc: 'Sonnet, Opus, Haiku', color: '#E8927A' },
-  { id: 'codex', name: 'ChatGPT', desc: 'GPT-5.4, o3, o4-mini', color: '#74AA9C' },
-  { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models', color: '#8B949E' },
-  { id: 'gemini-cli', name: 'Gemini', desc: 'Gemini 2.5 Pro & Flash', color: '#4285F4' },
+  { id: 'claude', name: 'Claude', desc: 'Sonnet, Opus, Haiku', color: '#E8927A', preview: false },
+  { id: 'gemini-cli', name: 'Gemini', desc: 'Gemini 2.5 Pro & Flash', color: '#4285F4', preview: true },
+  { id: 'codex', name: 'ChatGPT', desc: 'GPT-5.4, o3, o4-mini', color: '#74AA9C', preview: true },
+  { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models', color: '#8B949E', preview: true },
 ];
 
 const OnboardingModal: React.FC = () => {
@@ -165,21 +165,22 @@ const OnboardingModal: React.FC = () => {
           {SUBSCRIPTION_PROVIDERS.map((p) => (
             <Box
               key={p.id}
-              onClick={() => !connecting && handleConnect(p.id)}
+              onClick={() => !p.preview && !connecting && handleConnect(p.id)}
               sx={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 p: 1.5, borderRadius: `${c.radius.md}px`, border: `1px solid ${c.border.subtle}`,
-                cursor: connecting ? 'wait' : 'pointer',
+                cursor: p.preview ? 'default' : connecting ? 'wait' : 'pointer',
+                opacity: p.preview ? 0.5 : 1,
                 transition: 'border-color 0.15s, background 0.15s',
-                '&:hover': { borderColor: c.border.medium, bgcolor: `${c.accent.primary}05` },
+                ...(!p.preview && { '&:hover': { borderColor: c.border.medium, bgcolor: `${c.accent.primary}05` } }),
               }}
             >
               <Box>
                 <Typography sx={{ fontSize: '0.82rem', fontWeight: 600, color: c.text.primary }}>{p.name}</Typography>
                 <Typography sx={{ fontSize: '0.65rem', color: c.text.muted }}>{p.desc}</Typography>
               </Box>
-              <Typography sx={{ fontSize: '0.68rem', color: connecting === p.id ? c.accent.primary : c.text.tertiary }}>
-                {connecting === p.id ? 'Connecting...' : 'Connect →'}
+              <Typography sx={{ fontSize: '0.68rem', color: p.preview ? c.text.ghost : connecting === p.id ? c.accent.primary : c.text.tertiary, fontStyle: p.preview ? 'italic' : 'normal' }}>
+                {p.preview ? 'Coming soon' : connecting === p.id ? 'Connecting...' : 'Connect →'}
               </Typography>
             </Box>
           ))}
