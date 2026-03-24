@@ -25,3 +25,6 @@ class AppSettings(BaseModel):
     expand_new_chats_in_dashboard: bool = False
     auto_reveal_sub_agents: bool = True
     dev_mode: bool = False
+    # Analytics: opted in by default, user can toggle off
+    analytics_opt_in: bool = True
+    installation_id: Optional[str] = None
