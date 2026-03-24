@@ -123,8 +123,8 @@ async def start_oauth(provider: str) -> dict:
         except Exception:
             pass
 
-        # Authorization code flow — get the real auth URL from 9Router
-        # The callback goes to 9Router's /callback page which sends postMessage back
+        # Authorization code flow — redirect to 9Router's own callback page
+        # (Anthropic only accepts redirect URIs registered with 9Router's client ID)
         callback_url = f"http://localhost:{NINE_ROUTER_PORT}/callback"
         r = await client.get(
             f"{NINE_ROUTER_API}/oauth/{provider}/authorize",

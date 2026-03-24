@@ -252,53 +252,47 @@ const SubscriptionCards: React.FC = () => {
         setTimeout(() => { clearInterval(timer); setConnecting(null); setUserCode(''); }, 300000);
 
       } else if (data.flow === 'authorization_code') {
-        // Auth code flow (Claude, Codex, Gemini) — open popup, listen for postMessage callback
-        const popup = window.open(data.auth_url, 'oauth', 'popup,width=600,height=700');
+        // Open auth URL as popup — window.opener lets callback page postMessage back
+        const popup = window.open(data.auth_url, 'oauth_connect', 'width=600,height=700');
 
-        // Listen for OAuth callback from 9Router's /callback page
-        const handler = async (event: MessageEvent) => {
-          // 9Router's callback page sends: { type: 'oauth-callback', code, state } or just { code, state }
+        const msgHandler = async (event: MessageEvent) => {
           const d = event.data;
-          if (d?.code || d?.type === 'oauth-callback') {
-            window.removeEventListener('message', handler);
+          const callbackData = d?.type === 'oauth_callback' ? d.data : d;
+          if (callbackData?.code) {
+            window.removeEventListener('message', msgHandler);
+            clearInterval(statusPoller);
+            if (popup && !popup.closed) popup.close();
             try {
-              // Exchange the code for tokens via our backend proxy
               await fetch(`${API_BASE}/agents/subscriptions/exchange`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  provider: providerId,
-                  code: d.code,
-                  redirect_uri: data.redirect_uri,
-                  code_verifier: data.code_verifier,
-                  state: d.state || data.state,
+                  provider: providerId, code: callbackData.code,
+                  redirect_uri: data.redirect_uri, code_verifier: data.code_verifier,
+                  state: callbackData.state || data.state,
                 }),
               });
             } catch {}
-            if (popup && !popup.closed) popup.close();
             setConnecting(null);
             fetchStatus();
           }
         };
-        window.addEventListener('message', handler);
+        window.addEventListener('message', msgHandler);
 
-        // Also poll as fallback in case postMessage doesn't work
-        const timer = setInterval(async () => {
+        const statusPoller = setInterval(async () => {
           try {
             const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
             const sd = await sr.json();
-            const connections = sd.providers?.connections || (Array.isArray(sd.providers) ? sd.providers : []);
-            const found = connections.some((p: any) => p.provider === providerId && p.isActive);
-            if (found) {
-              clearInterval(timer);
-              window.removeEventListener('message', handler);
+            const connections = sd.providers?.connections || [];
+            if (connections.some((p: any) => p.provider === providerId && p.isActive)) {
+              clearInterval(statusPoller);
+              window.removeEventListener('message', msgHandler);
               setConnecting(null);
               fetchStatus();
             }
           } catch {}
-        }, 3000);
-        setPollTimer(timer);
-        setTimeout(() => { clearInterval(timer); window.removeEventListener('message', handler); setConnecting(null); }, 300000);
+        }, 2000);
+        setPollTimer(statusPoller);
+        setTimeout(() => { clearInterval(statusPoller); window.removeEventListener('message', msgHandler); setConnecting(null); }, 300000);
 
       } else {
         setConnecting(null);

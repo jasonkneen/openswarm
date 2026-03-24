@@ -4,8 +4,11 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi import Request
+
+# In-memory store for pending OAuth flows (state → {provider, code_verifier, redirect_uri})
+_pending_oauth: dict[str, dict] = {}
 from backend.config.Apps import MainApp
 from backend.apps.health.health import health
 from backend.apps.agents.agents import agents
@@ -125,6 +128,53 @@ async def browser_command(request: Request):
     request_id = uuid4().hex
     result = await ws_manager.send_browser_command(request_id, action, browser_id, params, tab_id=tab_id)
     return JSONResponse(result)
+
+
+@app.get("/api/subscriptions/pending/{state}")
+async def subscriptions_pending(state: str):
+    """Return pending OAuth data for a state param. Called by 9Router's callback page."""
+    pending = _pending_oauth.get(state)
+    if not pending:
+        return JSONResponse({"error": "not found"}, status_code=404,
+                           headers={"Access-Control-Allow-Origin": "*"})
+    return JSONResponse({
+        "provider": pending["provider"],
+        "code_verifier": pending["code_verifier"],
+        "redirect_uri": pending["redirect_uri"],
+    }, headers={"Access-Control-Allow-Origin": "*"})
+
+
+@app.get("/api/subscriptions/callback")
+async def subscriptions_callback(request: Request):
+    """Catch OAuth redirect from provider, exchange code via 9Router, close window."""
+    code = request.query_params.get("code", "")
+    state = request.query_params.get("state", "")
+    error = request.query_params.get("error", "")
+
+    if error:
+        desc = request.query_params.get("error_description", error)
+        return HTMLResponse(f'<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif"><div style="text-align:center"><h2>Authorization failed</h2><p style="color:#888">{desc}</p></div></body></html>')
+
+    pending = _pending_oauth.pop(state, None)
+    if not pending:
+        return HTMLResponse('<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif"><div style="text-align:center"><h2>Session expired</h2><p style="color:#888">Please try connecting again.</p></div></body></html>')
+
+    from backend.apps.nine_router import exchange_oauth
+    try:
+        await exchange_oauth(pending["provider"], code, pending["redirect_uri"], pending["code_verifier"], state)
+    except Exception as e:
+        return HTMLResponse(f'<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif"><div style="text-align:center"><h2>Connection failed</h2><p style="color:#888">{e}</p></div></body></html>')
+
+    return HTMLResponse(
+        '<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">'
+        '<div style="text-align:center">'
+        '<div style="width:64px;height:64px;border-radius:50%;background:#22c55e20;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">✓</div>'
+        '<h2 style="margin:0 0 8px">Connected!</h2>'
+        '<p style="color:#888;margin:0">You can close this window</p>'
+        '</div>'
+        '<script>setTimeout(()=>window.close(),1500)</script>'
+        '</body></html>'
+    )
 
 
 @app.post("/api/browser-agent/run")
