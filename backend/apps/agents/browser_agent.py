@@ -304,6 +304,7 @@ async def run_browser_agent(
     _browser_perms = load_builtin_permissions()
 
     session_id = uuid4().hex
+    cancel_event = asyncio.Event()
     session = AgentSession(
         id=session_id,
         name=f"Browser Agent",
@@ -315,6 +316,7 @@ async def run_browser_agent(
         system_prompt=SYSTEM_PROMPT,
         parent_session_id=parent_session_id,
     )
+    session._cancel_event = cancel_event
     agent_manager.sessions[session_id] = session
 
     await ws_manager.send_to_session(session_id, "agent:status", {
@@ -355,6 +357,9 @@ async def run_browser_agent(
 
     try:
         for turn in range(MAX_TURNS):
+            if cancel_event.is_set():
+                break
+
             if _use_openai_client:
                 # OpenAI-compatible format (9Router)
                 import json as _json
@@ -451,7 +456,12 @@ async def run_browser_agent(
                 break
 
             tool_results = []
+            cancelled = False
             for tu in tool_uses:
+                if cancel_event.is_set():
+                    cancelled = True
+                    break
+
                 policy = _browser_perms.get(tu.name, "always_allow")
 
                 if policy == "deny":
@@ -538,6 +548,16 @@ async def run_browser_agent(
                     messages.append({"role": "tool", "tool_call_id": tr["tool_use_id"], "content": text_content or "Done."})
             else:
                 messages.append({"role": "user", "content": tool_results})
+
+            if cancelled:
+                break
+
+        if cancel_event.is_set():
+            session.status = "stopped"
+            await ws_manager.send_to_session(session_id, "agent:status", {
+                "session_id": session_id,
+                "status": "stopped",
+            })
 
         summary_parts = text_parts if text_parts else ["Task completed."]
         summary = "\n".join(summary_parts)
