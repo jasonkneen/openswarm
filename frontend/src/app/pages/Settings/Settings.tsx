@@ -1265,39 +1265,6 @@ const Settings: React.FC = () => {
             Pay per use. Each key is stored locally on your device.
           </Typography>
 
-          {/* OpenRouter — recommended */}
-          <Box sx={{ p: 2, borderRadius: `${c.radius.md}px`, bgcolor: `${c.accent.primary}06`, border: `1px solid ${c.accent.primary}20` }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography sx={{ ...labelSx, mb: 0 }}>OpenRouter</Typography>
-              <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: c.accent.primary, bgcolor: `${c.accent.primary}15`, px: 1, py: 0.25, borderRadius: '4px' }}>
-                RECOMMENDED
-              </Typography>
-            </Box>
-            <Typography sx={{ ...descSx, mb: 1 }}>
-              One key for 300+ models — Llama, DeepSeek, Mistral, Qwen, Grok, and more. Easiest way to get started.
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField
-                type="password"
-                value={(form as any).openrouter_api_key ?? ''}
-                onChange={(e) => setForm({ ...form, openrouter_api_key: e.target.value || null } as any)}
-                size="small"
-                fullWidth
-                placeholder="sk-or-..."
-                sx={{ ...fieldSx, '& .MuiOutlinedInput-root': { ...fieldSx['& .MuiOutlinedInput-root'], fontFamily: c.font.mono } }}
-              />
-              <Typography
-                component="a"
-                href="https://openrouter.ai/keys"
-                target="_blank"
-                rel="noopener"
-                sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}
-              >
-                Get key <OpenInNewIcon sx={{ fontSize: 11 }} />
-              </Typography>
-            </Box>
-          </Box>
-
           {/* Anthropic */}
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1338,67 +1305,6 @@ const Settings: React.FC = () => {
             </Box>
           </Box>
 
-          {/* OpenAI */}
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography sx={labelSx}>OpenAI</Typography>
-              {(form as any).openai_api_key ? (
-                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
-              ) : null}
-            </Box>
-            <Typography sx={{ ...descSx, mb: 1 }}>GPT-5.4, o3, o4-mini.</Typography>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField
-                type="password"
-                value={(form as any).openai_api_key ?? ''}
-                onChange={(e) => setForm({ ...form, openai_api_key: e.target.value || null } as any)}
-                size="small"
-                fullWidth
-                placeholder="sk-..."
-                sx={{ ...fieldSx, '& .MuiOutlinedInput-root': { ...fieldSx['& .MuiOutlinedInput-root'], fontFamily: c.font.mono } }}
-              />
-              <Typography
-                component="a"
-                href="https://platform.openai.com/api-keys"
-                target="_blank"
-                rel="noopener"
-                sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}
-              >
-                Get key <OpenInNewIcon sx={{ fontSize: 11 }} />
-              </Typography>
-            </Box>
-          </Box>
-
-          {/* Google */}
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography sx={labelSx}>Google</Typography>
-              {(form as any).google_api_key ? (
-                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
-              ) : null}
-            </Box>
-            <Typography sx={{ ...descSx, mb: 1 }}>Gemini 2.5 Pro and Flash.</Typography>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField
-                type="password"
-                value={(form as any).google_api_key ?? ''}
-                onChange={(e) => setForm({ ...form, google_api_key: e.target.value || null } as any)}
-                size="small"
-                fullWidth
-                placeholder="AIza..."
-                sx={{ ...fieldSx, '& .MuiOutlinedInput-root': { ...fieldSx['& .MuiOutlinedInput-root'], fontFamily: c.font.mono } }}
-              />
-              <Typography
-                component="a"
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noopener"
-                sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}
-              >
-                Get key <OpenInNewIcon sx={{ fontSize: 11 }} />
-              </Typography>
-            </Box>
-          </Box>
       </Box>
       ) : activeTab === 'usage' ? (
       <Box sx={{ display: 'flex', flexDirection: 'column', pt: 2.5, pb: 1 }}>
@@ -1431,7 +1337,7 @@ const Settings: React.FC = () => {
       )}
       </DialogContent>
 
-      {activeTab === 'general' && (
+      {(activeTab === 'general' || activeTab === 'models') && (
       <DialogActions sx={{ borderTop: `1px solid ${c.border.subtle}`, px: 3, py: 1.5, justifyContent: 'flex-end' }}>
         <Button
           onClick={handleRequestClose}

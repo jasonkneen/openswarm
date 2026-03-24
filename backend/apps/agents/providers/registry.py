@@ -23,44 +23,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
-    # ── Native API providers (use direct SDK) ──
     "Anthropic": [
         {"value": "sonnet", "label": "Claude Sonnet 4.6", "context_window": 1_000_000, "model_id": "claude-sonnet-4-6", "api": "anthropic"},
         {"value": "opus", "label": "Claude Opus 4.6", "context_window": 1_000_000, "model_id": "claude-opus-4-6", "api": "anthropic"},
         {"value": "haiku", "label": "Claude Haiku 4.5", "context_window": 200_000, "model_id": "claude-haiku-4-5", "api": "anthropic"},
-    ],
-    "OpenAI": [
-        {"value": "gpt-5.4", "label": "GPT-5.4", "context_window": 1_000_000, "api": "openai"},
-        {"value": "gpt-5.4-mini", "label": "GPT-5.4 Mini", "context_window": 400_000, "api": "openai"},
-        {"value": "o3", "label": "o3", "context_window": 200_000, "api": "openai"},
-        {"value": "o4-mini", "label": "o4-mini", "context_window": 200_000, "api": "openai"},
-    ],
-    "Google": [
-        {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "context_window": 1_048_576, "api": "gemini"},
-        {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "context_window": 1_048_576, "api": "gemini"},
-    ],
-    # ── Via OpenRouter (need OpenRouter API key) ──
-    "xAI": [
-        {"value": "x-ai/grok-4-0214", "label": "Grok 4", "context_window": 2_000_000, "api": "openrouter"},
-    ],
-    "Meta": [
-        {"value": "meta-llama/llama-4-maverick", "label": "Llama 4 Maverick", "context_window": 1_000_000, "api": "openrouter"},
-        {"value": "meta-llama/llama-4-scout", "label": "Llama 4 Scout", "context_window": 10_000_000, "api": "openrouter"},
-    ],
-    "DeepSeek": [
-        {"value": "deepseek/deepseek-chat-v3-0324", "label": "DeepSeek V3", "context_window": 163_840, "api": "openrouter"},
-        {"value": "deepseek/deepseek-r1", "label": "DeepSeek R1", "context_window": 163_840, "api": "openrouter"},
-    ],
-    "Mistral": [
-        {"value": "mistralai/mistral-large-2501", "label": "Mistral Large", "context_window": 256_000, "api": "openrouter"},
-        {"value": "mistralai/mistral-small-3.1-24b-instruct", "label": "Mistral Small 3.1", "context_window": 128_000, "api": "openrouter"},
-    ],
-    "Qwen": [
-        {"value": "qwen/qwen3-coder", "label": "Qwen3 Coder 480B", "context_window": 262_144, "api": "openrouter"},
-        {"value": "qwen/qwen3-235b-a22b", "label": "Qwen3 235B", "context_window": 131_072, "api": "openrouter"},
-    ],
-    "Cohere": [
-        {"value": "cohere/command-a-03-2025", "label": "Command A", "context_window": 256_000, "api": "openrouter"},
     ],
 }
 
