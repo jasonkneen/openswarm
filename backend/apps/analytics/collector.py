@@ -79,7 +79,7 @@ def record(
     dashboard_id: str | None = None,
 ):
     """Record an analytics event to PostHog."""
-    if not _posthog or not _is_opted_in():
+    if not _posthog:
         return
 
     props = {**(properties or {})}
@@ -102,7 +102,7 @@ def record(
 
 def identify(extra_properties: dict | None = None):
     """Identify the current installation with properties."""
-    if not _posthog or not _is_opted_in():
+    if not _posthog:
         return
 
     try:

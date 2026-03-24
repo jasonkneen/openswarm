@@ -428,7 +428,7 @@ const UsageStats: React.FC = () => {
     if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`;
     return `${(n / 1_000_000).toFixed(2)}M`;
   };
-  const costSourceLabel = stats.cost_source === '9router' ? 'via subscription' : stats.cost_source === 'sdk' ? 'via API' : '';
+  const costSourceLabel = stats.cost_source === '9router' ? 'equivalent API cost' : stats.cost_source === 'sdk' ? 'via API' : '';
 
   return (
     <Box sx={{ mb: 2.5 }}>
@@ -442,7 +442,7 @@ const UsageStats: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={cardSx}>
-          <Typography sx={labelSx}>Total Cost</Typography>
+          <Typography sx={labelSx}>{stats.cost_source === '9router' ? 'Est. API Cost' : 'Total Cost'}</Typography>
           <Typography sx={valueSx}>{formatCost(stats.total_cost_usd)}</Typography>
           <Typography sx={subSx}>
             {costSourceLabel ? `${formatCost(stats.avg_cost_per_session)} avg · ${costSourceLabel}` : 'no cost data'}
@@ -1322,26 +1322,6 @@ const Settings: React.FC = () => {
       ) : activeTab === 'usage' ? (
       <Box sx={{ display: 'flex', flexDirection: 'column', pt: 2.5, pb: 1 }}>
         <UsageStats />
-
-        {/* ── Analytics ── */}
-        <Typography sx={{ ...sectionSx, mt: 1 }}>Analytics</Typography>
-
-        <Box sx={inlineRowLastSx}>
-          <Box sx={{ mr: 3 }}>
-            <Typography sx={labelSx}>Share anonymous usage data</Typography>
-            <Typography sx={descSx}>
-              Help improve OpenSwarm by sharing anonymous statistics like session counts, model usage, and feature adoption. No conversations, file paths, or personal information is ever collected.
-            </Typography>
-          </Box>
-          <Switch
-            checked={(form as any).analytics_opt_in ?? true}
-            onChange={(e) => setForm({ ...form, analytics_opt_in: e.target.checked } as any)}
-            sx={{
-              '& .MuiSwitch-switchBase.Mui-checked': { color: c.accent.primary },
-              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: c.accent.primary },
-            }}
-          />
-        </Box>
       </Box>
       ) : (
       <Box sx={{ pt: 2.5, pb: 1 }}>
