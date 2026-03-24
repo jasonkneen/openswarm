@@ -88,23 +88,9 @@ echo "Installing backend dependencies..."
 echo "Installing debugger module..."
 "$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT/debugger"
 
-# Verify claude-agent-sdk and its bundled binary
-echo "Verifying claude-agent-sdk..."
-"$PYTHON_BIN" -c "import claude_agent_sdk; print(f'claude-agent-sdk installed')"
-
-CLAUDE_BIN=$("$PYTHON_BIN" -c "
-from pathlib import Path
-import claude_agent_sdk
-sdk_dir = Path(claude_agent_sdk.__file__).parent
-bundled = sdk_dir / '_bundled' / 'claude'
-print(bundled)
-")
-if [[ -f "$CLAUDE_BIN" ]]; then
-    echo "Claude binary found: $CLAUDE_BIN"
-    chmod +x "$CLAUDE_BIN"
-else
-    echo "WARNING: Claude binary not found at $CLAUDE_BIN"
-fi
+# Verify core dependencies
+echo "Verifying Python environment..."
+"$PYTHON_BIN" -c "import anthropic; import openai; import httpx; print('Core dependencies OK')"
 
 # Clean up build artifacts to reduce size
 echo "Cleaning up..."
