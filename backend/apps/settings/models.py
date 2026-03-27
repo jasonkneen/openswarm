@@ -52,6 +52,7 @@ class AppSettings(BaseModel):
     # Analytics: opted in by default, user can toggle off
     analytics_opt_in: bool = True
     installation_id: Optional[str] = None
+    first_opened_at: Optional[str] = None  # ISO timestamp of first app open
 
 
 class CustomProvider(BaseModel):

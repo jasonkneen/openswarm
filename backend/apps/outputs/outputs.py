@@ -305,6 +305,8 @@ async def create_output(body: OutputCreate):
         updated_at=now,
     )
     _save(output)
+    from backend.apps.analytics.collector import record as _analytics
+    _analytics("feature.used", {"feature": "view.created"})
     return {"ok": True, "output": output.model_dump()}
 
 
@@ -349,6 +351,8 @@ Return ONLY valid JSON with these keys. No markdown fences, no extra text.\
 @outputs.router.post("/vibe-code")
 async def vibe_code(body: VibeCodeRequest):
     """Use an LLM to generate or iterate on Output code from a natural language prompt."""
+    from backend.apps.analytics.collector import record as _analytics
+    _analytics("feature.used", {"feature": "vibe_code.used"})
     try:
         import anthropic
     except ImportError:

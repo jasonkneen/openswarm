@@ -239,6 +239,9 @@ async def subscriptions_poll(body: dict):
             code_verifier=body.get("code_verifier"),
             extra_data=body.get("extra_data"),
         )
+        if result.get("success"):
+            from backend.apps.analytics.collector import record as _analytics
+            _analytics("subscription.connected", {"provider": provider})
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -259,6 +262,9 @@ async def subscriptions_exchange(body: dict):
 
     try:
         result = await exchange_oauth(provider, code, redirect_uri, code_verifier, state)
+        if result.get("success"):
+            from backend.apps.analytics.collector import record as _analytics
+            _analytics("subscription.connected", {"provider": provider})
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -290,6 +296,8 @@ async def subscriptions_disconnect(body: dict):
         if conn and conn.get("id"):
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.delete(f"{NINE_ROUTER_API}/providers/{conn['id']}")
+            from backend.apps.analytics.collector import record as _analytics
+            _analytics("subscription.disconnected", {"provider": provider})
             return {"ok": True}
         return {"ok": False, "error": "Connection not found"}
     except Exception as e:

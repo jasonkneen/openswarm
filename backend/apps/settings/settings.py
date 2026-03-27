@@ -52,6 +52,39 @@ async def get_settings():
 
 @settings.router.put("")
 async def update_settings(body: AppSettings):
+    from backend.apps.analytics.collector import record as _analytics
+
+    old = load_settings()
+
+    # Track provider key changes
+    provider_keys = {
+        "anthropic_api_key": "anthropic",
+        "openai_api_key": "openai",
+        "google_api_key": "gemini",
+        "openrouter_api_key": "openrouter",
+    }
+    for key, provider_name in provider_keys.items():
+        old_val = bool(getattr(old, key, None))
+        new_val = bool(getattr(body, key, None))
+        if old_val != new_val:
+            _analytics("provider.configured", {
+                "provider": provider_name,
+                "action": "added" if new_val else "removed",
+            })
+
+    # Track settings changes (key names only, not values)
+    old_dict = old.model_dump()
+    new_dict = body.model_dump()
+    secret_keys = {"anthropic_api_key", "openai_api_key", "google_api_key", "openrouter_api_key",
+                   "claude_subscription_token", "openai_subscription_token", "gemini_subscription_token",
+                   "copilot_github_token", "copilot_token", "installation_id"}
+    safe_changed = [
+        k for k in new_dict
+        if k in old_dict and new_dict[k] != old_dict[k] and k not in secret_keys
+    ]
+    if safe_changed:
+        _analytics("settings.changed", {"changed_keys": safe_changed})
+
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(SETTINGS_FILE, "w") as f:
         json.dump(body.model_dump(), f, indent=2)

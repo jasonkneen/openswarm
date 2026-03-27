@@ -539,6 +539,12 @@ class AgentManager:
             session.pending_approvals.append(approval_req)
             session.status = "waiting_approval"
 
+            _analytics("approval.requested", {
+                "tool_name": tool_name,
+                "is_first_approval_in_session": len(session.pending_approvals) == 1,
+                "model": session.model,
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
+
             await ws_manager.send_to_session(session_id, "agent:status", {
                 "session_id": session_id,
                 "status": "waiting_approval",
@@ -547,6 +553,15 @@ class AgentManager:
             decision = await ws_manager.send_approval_request(
                 session_id, request_id, tool_name, safe_input
             )
+
+            approval_latency_ms = int((datetime.now() - approval_req.created_at).total_seconds() * 1000)
+            _analytics("approval.resolved", {
+                "tool_name": tool_name,
+                "decision": decision.get("behavior", "unknown"),
+                "latency_ms": approval_latency_ms,
+                "input_was_modified": decision.get("updated_input") is not None,
+                "model": session.model,
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
 
             session.pending_approvals = [
                 a for a in session.pending_approvals if a.id != request_id
@@ -624,6 +639,18 @@ class AgentManager:
                 elapsed_ms = int((time.time() - tool_start_times.pop(tool_use_id)) * 1000)
 
             raw_response = input_data.get("tool_response", "")
+
+            # Track individual tool execution
+            hook_tool_name_early = input_data.get("tool_name", "")
+            if hook_tool_name_early:
+                _analytics("tool.executed", {
+                    "tool_name": hook_tool_name_early,
+                    "tool_type": "mcp" if "__" in hook_tool_name_early else "builtin",
+                    "duration_ms": elapsed_ms,
+                    "success": not (isinstance(raw_response, str) and raw_response.startswith("Error")),
+                    "model": session.model,
+                    "provider": session.provider,
+                }, session_id=session_id, dashboard_id=session.dashboard_id)
 
             if isinstance(raw_response, list) and raw_response:
                 text_parts = [
@@ -839,8 +866,11 @@ class AgentManager:
             from backend.apps.nine_router import is_running as _9r_running
             if _9r_running():
                 options_kwargs["env"] = {
+                    "ANTHROPIC_API_KEY": "9router",
                     "ANTHROPIC_BASE_URL": "http://localhost:20128",
                 }
+                # --bare skips CLI's own OAuth/keychain auth, uses only ANTHROPIC_API_KEY
+                options_kwargs["extra_args"] = {"bare": None}
             elif global_settings.anthropic_api_key:
                 options_kwargs["env"] = {"ANTHROPIC_API_KEY": global_settings.anthropic_api_key}
             else:
@@ -871,6 +901,7 @@ class AgentManager:
             stream_text_msg_id = None
             stream_tool_msg_ids_ordered = []
             stream_block_index_map = {}
+            _turn_number = 0
 
             async for message in query(
                 prompt=prompt_stream(),
@@ -976,6 +1007,13 @@ class AgentManager:
                             "message": tool_msg.model_dump(mode="json"),
                         })
 
+                    _turn_number += 1
+                    _analytics("turn.completed", {
+                        "turn_number": _turn_number,
+                        "tool_calls_in_turn": len(tool_uses),
+                        "model": session.model,
+                    }, session_id=session_id, dashboard_id=session.dashboard_id)
+
                     stream_text_msg_id = None
                     stream_tool_msg_ids_ordered = []
                     stream_block_index_map = {}
@@ -996,6 +1034,13 @@ class AgentManager:
         except Exception as e:
             logger.exception(f"Agent {session_id} error: {e}")
             session.status = "error"
+            _analytics("session.error", {
+                "error_type": type(e).__name__,
+                "error_message": str(e)[:500],
+                "model": session.model,
+                "provider": session.provider,
+                "mode": session.mode,
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
             error_msg = Message(role="system", content=f"Error: {str(e)}", branch_id=session.active_branch_id)
             session.messages.append(error_msg)
             await ws_manager.send_to_session(session_id, "agent:message", {
@@ -1026,6 +1071,12 @@ class AgentManager:
                     "tools_list": list(set(tool_names)),
                     "session_title": session.name,
                     "first_user_message": user_messages[0] if user_messages else "",
+                    "input_tokens": session.tokens.get("input", 0),
+                    "output_tokens": session.tokens.get("output", 0),
+                    "is_sub_agent": session.parent_session_id is not None,
+                    "parent_session_id": session.parent_session_id,
+                    "sub_agent_count": len([s for s in self.sessions.values() if s.parent_session_id == session_id]),
+                    "branch_count": len(session.branches),
                 }, session_id=session_id, dashboard_id=session.dashboard_id)
 
                 await ws_manager.send_to_session(session_id, "agent:status", {
@@ -1193,9 +1244,22 @@ class AgentManager:
 
         session_changed = False
         if model and model != session.model:
+            _analytics("model.switched", {
+                "from_model": session.model,
+                "to_model": model,
+                "from_provider": session.provider,
+                "to_provider": provider or session.provider,
+                "message_number": len([m for m in session.messages if m.role == "user"]),
+                "cost_so_far": session.cost_usd,
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
             session.model = model
             session_changed = True
         if mode and mode != session.mode:
+            _analytics("feature.used", {
+                "feature": "mode.switched",
+                "from_mode": session.mode,
+                "to_mode": mode,
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
             session.mode = mode
             mode_tools, _, _ = self._resolve_mode(mode)
             session.allowed_tools = mode_tools
@@ -1224,6 +1288,34 @@ class AgentManager:
             "session_id": session_id,
             "message": user_msg.model_dump(mode="json"),
         })
+
+        # Track context attachment patterns
+        if context_paths or attached_skills or images or forced_tools:
+            _analytics("context.attached", {
+                "file_count": len([c for c in (context_paths or []) if c.get("type") == "file"]),
+                "directory_count": len([c for c in (context_paths or []) if c.get("type") == "directory"]),
+                "skill_count": len(attached_skills or []),
+                "image_count": len(images or []),
+                "has_forced_tools": bool(forced_tools),
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
+
+        # Track skill usage
+        for skill in (attached_skills or []):
+            _analytics("feature.used", {
+                "feature": "skill.used",
+                "skill_name": skill.get("name", ""),
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
+
+        # Track first message sophistication
+        is_first_message = sum(1 for m in session.messages if m.role == "user") == 1
+        if is_first_message:
+            _analytics("session.first_message", {
+                "message_length": len(prompt),
+                "has_code_block": "```" in prompt,
+                "has_url": "http://" in prompt or "https://" in prompt,
+                "model": session.model,
+                "mode": session.mode,
+            }, session_id=session_id, dashboard_id=session.dashboard_id)
 
         session.status = "running"
         await ws_manager.send_to_session(session_id, "agent:status", {
@@ -1316,6 +1408,13 @@ class AgentManager:
         )
         session.branches[new_branch_id] = new_branch
         session.active_branch_id = new_branch_id
+
+        _analytics("feature.used", {
+            "feature": "message.branched",
+            "branch_depth": len([b for b in session.branches.values() if b.parent_branch_id]),
+            "total_branches_in_session": len(session.branches),
+            "messages_before_fork": len([m for m in session.messages if m.branch_id == fork_parent_branch]),
+        }, session_id=session_id, dashboard_id=session.dashboard_id)
 
         edited_msg = Message(
             role="user",
@@ -1591,6 +1690,20 @@ class AgentManager:
             raise ValueError(f"Session {session_id} not found in history")
 
         session = AgentSession(**data)
+
+        hours_since_closed = 0
+        if data.get("closed_at"):
+            try:
+                closed = datetime.fromisoformat(data["closed_at"][:19])
+                hours_since_closed = round((datetime.now() - closed).total_seconds() / 3600, 1)
+            except Exception:
+                pass
+        _analytics("session.resumed", {
+            "hours_since_closed": hours_since_closed,
+            "original_message_count": len(data.get("messages", [])),
+            "original_cost_usd": data.get("cost_usd", 0),
+            "model": session.model,
+        }, session_id=session_id, dashboard_id=session.dashboard_id)
 
         session.closed_at = None
         self.sessions[session_id] = session

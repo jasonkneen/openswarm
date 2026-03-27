@@ -210,6 +210,7 @@ const AgentCard: React.FC<Props> = ({
 }) => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
+  const hasApiKey = !!useAppSelector((s) => s.settings.data.anthropic_api_key);
   const scrollOverlayRef = useOverlayScrollPassthrough(isSelected);
 
   const cardBoxRef = useRef<HTMLDivElement>(null);
@@ -783,7 +784,7 @@ const AgentCard: React.FC<Props> = ({
           <Typography variant="caption" sx={{ color: c.text.tertiary }}>
             {formatDuration(session.created_at, (session as any).closed_at, session.status)}
           </Typography>
-          {session.cost_usd > 0 && (
+          {session.cost_usd > 0 && hasApiKey && (
             <Typography variant="caption" sx={{ color: c.accent.primary }}>
               ${session.cost_usd.toFixed(4)}
             </Typography>

@@ -1,11 +1,13 @@
 """Analytics SubApp: PostHog for product analytics + local usage summary from session data."""
 
+import asyncio
 import json
 import logging
 import os
 import platform
 from collections import Counter
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from backend.config.Apps import SubApp
 from backend.config.paths import SESSIONS_DIR
@@ -13,15 +15,48 @@ from backend.apps.analytics.collector import init as init_collector, shutdown as
 
 logger = logging.getLogger(__name__)
 
+APP_VERSION = "1.0.15"
+
+_heartbeat_task: asyncio.Task | None = None
+
+
+async def _heartbeat_loop():
+    """Send a heartbeat event every 60 seconds for usage-time tracking."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            from backend.apps.agents.agent_manager import agent_manager
+            record("app.heartbeat", {
+                "active_session_count": len(agent_manager.sessions),
+            })
+        except Exception:
+            pass
+
 
 @asynccontextmanager
 async def analytics_lifespan():
+    global _heartbeat_task
+
     init_collector()
     logger.info("PostHog analytics initialised")
 
     try:
-        from backend.apps.settings.settings import load_settings
+        from backend.apps.settings.settings import load_settings, _save_settings
         settings = load_settings()
+
+        # Track first open
+        is_first_open = settings.first_opened_at is None
+        if is_first_open:
+            settings.first_opened_at = datetime.now().isoformat()
+            _save_settings(settings)
+
+        days_since_install = 0
+        if settings.first_opened_at:
+            try:
+                first = datetime.fromisoformat(settings.first_opened_at[:19])
+                days_since_install = (datetime.now() - first).days
+            except Exception:
+                pass
 
         providers = []
         if getattr(settings, "anthropic_api_key", None):
@@ -40,11 +75,15 @@ async def analytics_lifespan():
             "platform": platform.platform(),
             "provider_count": len(providers),
             "providers": providers,
+            "is_first_open": is_first_open,
+            "days_since_install": days_since_install,
+            "app_version": APP_VERSION,
         })
 
         identify({
             "providers_configured": providers,
             "provider_count": len(providers),
+            "app_version": APP_VERSION,
         })
     except Exception as e:
         logger.debug(f"Analytics startup event failed (non-critical): {e}")
@@ -56,7 +95,19 @@ async def analytics_lifespan():
     except Exception as e:
         logger.debug(f"9Router auto-start skipped: {e}")
 
+    # Start heartbeat
+    _heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
     yield
+
+    # Stop heartbeat
+    if _heartbeat_task:
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        _heartbeat_task = None
 
     # Stop 9Router
     try:
@@ -123,7 +174,6 @@ async def usage_summary():
         closed = s.get("closed_at")
         if created and closed:
             try:
-                from datetime import datetime
                 c_str = created[:19]
                 cl_str = closed[:19]
                 dur = (datetime.fromisoformat(cl_str) - datetime.fromisoformat(c_str)).total_seconds()
@@ -230,3 +280,15 @@ async def cost_breakdown(period: str = "7d"):
 @analytics.router.get("/status")
 async def analytics_status():
     return {"status": "posthog", "enabled": True}
+
+
+@analytics.router.post("/event")
+async def record_event(body: dict):
+    """Accept analytics events from the frontend (e.g. feature.time_spent)."""
+    event_type = body.get("event_type", "")
+    properties = body.get("properties", {})
+    if event_type:
+        record(event_type, properties,
+               session_id=body.get("session_id"),
+               dashboard_id=body.get("dashboard_id"))
+    return {"ok": True}

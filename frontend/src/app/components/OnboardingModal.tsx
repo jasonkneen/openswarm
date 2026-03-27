@@ -29,13 +29,14 @@ const OnboardingModal: React.FC = () => {
         .then((r) => r.json())
         .then((data) => {
           if (data.running) {
-            setNineRouterReady(true);
             // Check if already has subscription
             const connections = data.providers?.connections || [];
             if (connections.some((p: any) => p.isActive)) {
               // Already connected — don't show onboarding
               return;
             }
+            // Delay before marking ready — 9Router's OAuth needs time to warm up
+            setTimeout(() => setNineRouterReady(true), 3000);
           } else {
             attempts++;
             if (attempts < maxAttempts) {
@@ -79,9 +80,16 @@ const OnboardingModal: React.FC = () => {
     setOpen(false);
   };
 
-  // Exact same connect logic as Settings/SubscriptionCards
+  // Same connect logic as Settings/SubscriptionCards
   const handleConnect = async (providerId: string) => {
+    // Cancel any previous attempt
+    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+    if (msgHandlerRef.current) { window.removeEventListener('message', msgHandlerRef.current); msgHandlerRef.current = null; }
     setConnecting(providerId);
+
+    // Delay before calling connect — avoids Claude OAuth rate limit on retries
+    await new Promise(r => setTimeout(r, 1000));
+
     try {
       const r = await fetch(`${API_BASE}/agents/subscriptions/connect`, {
         method: 'POST',
@@ -118,7 +126,7 @@ const OnboardingModal: React.FC = () => {
           } catch {}
         }, 5000);
         pollTimerRef.current = timer;
-        setTimeout(() => { clearInterval(timer); pollTimerRef.current = null; setConnecting(null); }, 300000);
+        setTimeout(() => { clearInterval(timer); pollTimerRef.current = null; setConnecting(null); }, 30000);
 
       } else if (data.flow === 'authorization_code') {
         const popup = window.open(data.auth_url, 'oauth_connect', 'width=600,height=700');
@@ -174,7 +182,7 @@ const OnboardingModal: React.FC = () => {
           if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
           if (msgHandlerRef.current) { window.removeEventListener('message', msgHandlerRef.current); msgHandlerRef.current = null; }
           setConnecting(null);
-        }, 300000);
+        }, 30000);
 
       } else {
         setConnecting(null);

@@ -223,17 +223,23 @@ const SubscriptionCards: React.FC = () => {
   };
 
   const handleConnect = async (providerId: string) => {
+    // Cancel any previous attempt first
+    if (pollTimer) { clearInterval(pollTimer); setPollTimer(null); }
     setConnecting(providerId);
     setUserCode('');
+
+    // Small delay if retrying — avoids hitting Claude's rate limit
+    await new Promise(r => setTimeout(r, 500));
+
     try {
       const r = await fetch(`${API_BASE}/agents/subscriptions/connect`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: providerId }),
       });
+      if (!r.ok) { setConnecting(null); return; }
       const data = await r.json();
 
       if (data.flow === 'device_code') {
-        // Device code flow (GitHub, Qwen, etc.) — show code, poll
         const code = data.user_code || '';
         setUserCode(code);
         if (data.verification_uri) window.open(data.verification_uri, '_blank');
@@ -247,6 +253,7 @@ const SubscriptionCards: React.FC = () => {
             const pd = await pr.json();
             if (pd.success) {
               clearInterval(timer);
+              setPollTimer(null);
               setConnecting(null);
               setUserCode('');
               fetchStatus();
@@ -254,18 +261,36 @@ const SubscriptionCards: React.FC = () => {
           } catch {}
         }, 5000);
         setPollTimer(timer);
-        setTimeout(() => { clearInterval(timer); setConnecting(null); setUserCode(''); }, 300000);
+        setTimeout(() => { clearInterval(timer); setPollTimer(null); setConnecting(null); setUserCode(''); }, 300000);
 
       } else if (data.flow === 'authorization_code') {
-        // Open auth URL as popup — window.opener lets callback page postMessage back
         const popup = window.open(data.auth_url, 'oauth_connect', 'width=600,height=700');
 
+        // Status polling as primary detection
+        const statusPoller = setInterval(async () => {
+          try {
+            const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
+            const sd = await sr.json();
+            const connections = sd.providers?.connections || [];
+            if (connections.some((p: any) => p.provider === providerId && p.isActive)) {
+              clearInterval(statusPoller);
+              setPollTimer(null);
+              window.removeEventListener('message', msgHandler);
+              setConnecting(null);
+              fetchStatus();
+            }
+          } catch {}
+        }, 2000);
+        setPollTimer(statusPoller);
+
+        // postMessage listener as secondary (faster when it works)
         const msgHandler = async (event: MessageEvent) => {
           const d = event.data;
           const callbackData = d?.type === 'oauth_callback' ? d.data : d;
           if (callbackData?.code) {
             window.removeEventListener('message', msgHandler);
             clearInterval(statusPoller);
+            setPollTimer(null);
             if (popup && !popup.closed) popup.close();
             try {
               await fetch(`${API_BASE}/agents/subscriptions/exchange`, {
@@ -283,21 +308,13 @@ const SubscriptionCards: React.FC = () => {
         };
         window.addEventListener('message', msgHandler);
 
-        const statusPoller = setInterval(async () => {
-          try {
-            const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
-            const sd = await sr.json();
-            const connections = sd.providers?.connections || [];
-            if (connections.some((p: any) => p.provider === providerId && p.isActive)) {
-              clearInterval(statusPoller);
-              window.removeEventListener('message', msgHandler);
-              setConnecting(null);
-              fetchStatus();
-            }
-          } catch {}
-        }, 2000);
-        setPollTimer(statusPoller);
-        setTimeout(() => { clearInterval(statusPoller); window.removeEventListener('message', msgHandler); setConnecting(null); }, 300000);
+        // Timeout: reset after 30s so user can try again (not 5min)
+        setTimeout(() => {
+          clearInterval(statusPoller);
+          setPollTimer(null);
+          window.removeEventListener('message', msgHandler);
+          setConnecting(null);
+        }, 30000);
 
       } else {
         setConnecting(null);
@@ -435,7 +452,8 @@ const UsageStats: React.FC = () => {
     if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`;
     return `${(n / 1_000_000).toFixed(2)}M`;
   };
-  const costSourceLabel = stats.cost_source === '9router' ? 'equivalent API cost' : stats.cost_source === 'sdk' ? 'via API' : '';
+  const isSubscription = stats.cost_source === '9router';
+  const costSourceLabel = isSubscription ? 'saved with your subscription' : stats.cost_source === 'sdk' ? 'via API' : '';
 
   return (
     <Box sx={{ mb: 2.5 }}>
@@ -449,10 +467,12 @@ const UsageStats: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={cardSx}>
-          <Typography sx={labelSx}>{stats.cost_source === '9router' ? 'Est. API Cost' : 'Total Cost'}</Typography>
+          <Typography sx={labelSx}>{isSubscription ? 'You Saved' : 'Total Cost'}</Typography>
           <Typography sx={valueSx}>{formatCost(stats.total_cost_usd)}</Typography>
           <Typography sx={subSx}>
-            {costSourceLabel ? `${formatCost(stats.avg_cost_per_session)} avg · ${costSourceLabel}` : 'no cost data'}
+            {isSubscription
+              ? `${formatCost(stats.avg_cost_per_session)} avg · saved with your subscription`
+              : costSourceLabel ? `${formatCost(stats.avg_cost_per_session)} avg · ${costSourceLabel}` : 'no cost data'}
           </Typography>
         </Box>
         <Box sx={cardSx}>

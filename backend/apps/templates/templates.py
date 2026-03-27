@@ -62,6 +62,8 @@ async def create_template(body: PromptTemplateCreate):
         tags=body.tags,
     )
     _save(template)
+    from backend.apps.analytics.collector import record as _analytics
+    _analytics("feature.used", {"feature": "template.created"})
     return {"ok": True, "template": template.model_dump()}
 
 @templates.router.put("/{template_id}")
@@ -88,4 +90,6 @@ async def render_template(body: dict):
         placeholder = "{{" + field.name + "}}"
         value = values.get(field.name, field.default or "")
         rendered = rendered.replace(placeholder, str(value))
+    from backend.apps.analytics.collector import record as _analytics
+    _analytics("feature.used", {"feature": "template.used"})
     return {"rendered": rendered}

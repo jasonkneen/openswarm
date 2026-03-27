@@ -592,6 +592,13 @@ async def run_browser_agents(
     Each task dict has: { browser_id (optional), task, url (optional) }
     Returns a list of result dicts, one per task.
     """
+    from backend.apps.analytics.collector import record as _analytics
+    _analytics("feature.used", {
+        "feature": "browser_agent.launched",
+        "task_count": len(tasks),
+        "model": model,
+    }, dashboard_id=dashboard_id)
+
     pre_selected = set(pre_selected_browser_ids or [])
 
     async def _run_one(task_def: dict) -> dict:

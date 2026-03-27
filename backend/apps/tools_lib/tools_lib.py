@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 # Default Google OAuth credentials for the OpenSwarm project.
 # These are public credentials for a desktop/web OAuth client (safe to embed per Google's docs).
 # Users can override via GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET env vars.
-_DEFAULT_GOOGLE_CLIENT_ID = "514323102245-ivhcnod6q9jj16ck1hbaiaelivtgtnd1.apps.googleusercontent.com"
-_DEFAULT_GOOGLE_CLIENT_SECRET = "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"
+_DEFAULT_GOOGLE_CLIENT_ID = "6741219524-8vpt07arcc5rvkdb4j1b6v9g53469ugq.apps.googleusercontent.com"
+_DEFAULT_GOOGLE_CLIENT_SECRET = "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"
 os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", _DEFAULT_GOOGLE_CLIENT_ID)
 os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", _DEFAULT_GOOGLE_CLIENT_SECRET)
 
@@ -410,6 +410,19 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
         env = config.setdefault("env", {})
         env.setdefault("PATH", _augmented_path())
         env.setdefault("PYTHONPATH", "")
+        # Point uv/uvx at our bundled Python — avoids macOS CLT popup on fresh Macs
+        # and avoids downloading Python at runtime
+        _is_packaged = os.environ.get("OPENSWARM_PACKAGED") == "1"
+        if _is_packaged:
+            _resources = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            _bundled_python = os.path.join(_resources, "python-env", "bin", "python3")
+            if os.path.exists(_bundled_python):
+                env.setdefault("UV_PYTHON", _bundled_python)
+        else:
+            _backend = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            _venv_python = os.path.join(_backend, ".venv", "bin", "python3")
+            if os.path.exists(_venv_python):
+                env.setdefault("UV_PYTHON", _venv_python)
 
     return config
 
