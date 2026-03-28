@@ -15,20 +15,49 @@ from backend.apps.analytics.collector import init as init_collector, shutdown as
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.0.17"
+APP_VERSION = "1.0.18"
 
 _heartbeat_task: asyncio.Task | None = None
 
 
 async def _heartbeat_loop():
-    """Send a heartbeat event every 60 seconds for usage-time tracking."""
+    """Send a heartbeat event every 60 seconds for usage-time tracking and cost snapshots."""
     while True:
         await asyncio.sleep(60)
         try:
             from backend.apps.agents.agent_manager import agent_manager
-            record("app.heartbeat", {
+            props = {
                 "active_session_count": len(agent_manager.sessions),
-            })
+            }
+
+            # Include 9Router cost snapshot if available
+            try:
+                from backend.apps.nine_router import get_usage_stats, is_running as _9r_running
+                if _9r_running():
+                    stats = await get_usage_stats()
+                    if stats:
+                        props["nine_router_total_cost"] = stats.get("totalCost", 0)
+                        props["nine_router_total_prompt_tokens"] = stats.get("totalPromptTokens", 0)
+                        props["nine_router_total_completion_tokens"] = stats.get("totalCompletionTokens", 0)
+                        props["nine_router_total_requests"] = stats.get("totalRequests", 0)
+                        # Per-model breakdown as flat properties for PostHog
+                        for model_name, model_data in (stats.get("byModel") or {}).items():
+                            safe_name = model_name.replace(".", "_").replace("-", "_")[:40]
+                            props[f"cost_model_{safe_name}"] = model_data.get("cost", 0)
+                            props[f"tokens_model_{safe_name}"] = model_data.get("promptTokens", 0) + model_data.get("completionTokens", 0)
+            except Exception:
+                pass
+
+            record("app.heartbeat", props)
+
+            # Also fire a dedicated cost snapshot for cleaner dashboards
+            if "nine_router_total_cost" in props:
+                record("cost.snapshot", {
+                    "total_cost_usd": props["nine_router_total_cost"],
+                    "total_prompt_tokens": props.get("nine_router_total_prompt_tokens", 0),
+                    "total_completion_tokens": props.get("nine_router_total_completion_tokens", 0),
+                    "total_requests": props.get("nine_router_total_requests", 0),
+                })
         except Exception:
             pass
 

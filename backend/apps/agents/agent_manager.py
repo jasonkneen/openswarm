@@ -194,9 +194,7 @@ class AgentManager:
 
             tool_names = list(tool_descs.keys())
             if tool_names:
-                lines.append(f"  Available tools ({len(tool_names)}): {', '.join(tool_names[:15])}")
-                if len(tool_names) > 15:
-                    lines.append(f"    ... and {len(tool_names) - 15} more")
+                lines.append(f"  Available tools ({len(tool_names)}): {', '.join(tool_names)}")
 
             sections.append("\n".join(lines))
 
@@ -643,9 +641,20 @@ class AgentManager:
             # Track individual tool execution
             hook_tool_name_early = input_data.get("tool_name", "")
             if hook_tool_name_early:
+                import re as _re_tool
+                _is_mcp = "__" in hook_tool_name_early
+                _mcp_server = ""
+                _tool_short = hook_tool_name_early
+                if _is_mcp:
+                    _mcp_match = _re_tool.match(r"mcp__([^_]+(?:-[^_]+)*)__(.+)", hook_tool_name_early)
+                    if _mcp_match:
+                        _mcp_server = _mcp_match.group(1)
+                        _tool_short = _mcp_match.group(2)
                 _analytics("tool.executed", {
                     "tool_name": hook_tool_name_early,
-                    "tool_type": "mcp" if "__" in hook_tool_name_early else "builtin",
+                    "tool_short_name": _tool_short,
+                    "tool_type": "mcp" if _is_mcp else "builtin",
+                    "mcp_server": _mcp_server,
                     "duration_ms": elapsed_ms,
                     "success": not (isinstance(raw_response, str) and raw_response.startswith("Error")),
                     "model": session.model,
@@ -1027,6 +1036,15 @@ class AgentManager:
                             "session_id": session_id,
                             "cost_usd": session.cost_usd,
                         })
+                    # Extract token usage from ResultMessage
+                    usage = getattr(message, "usage", None) or {}
+                    if isinstance(usage, dict):
+                        inp = usage.get("input_tokens", 0) or 0
+                        out = usage.get("output_tokens", 0) or 0
+                        cache_create = usage.get("cache_creation_input_tokens", 0) or 0
+                        cache_read = usage.get("cache_read_input_tokens", 0) or 0
+                        session.tokens["input"] = inp + cache_create + cache_read
+                        session.tokens["output"] = out
 
             session.status = "completed"
         except asyncio.CancelledError:
@@ -1049,36 +1067,6 @@ class AgentManager:
             })
         finally:
             if session_id in self.sessions:
-                # Analytics
-                duration = (datetime.now() - session.created_at).total_seconds()
-                tool_names = [
-                    m.content.get("tool", "") for m in session.messages
-                    if m.role == "tool_call" and isinstance(m.content, dict)
-                ]
-                user_messages = [
-                    (m.content if isinstance(m.content, str) else str(m.content))[:200]
-                    for m in session.messages if m.role == "user"
-                ]
-                _analytics("session.completed", {
-                    "model": session.model,
-                    "provider": getattr(session, "provider", "anthropic"),
-                    "mode": session.mode,
-                    "cost_usd": session.cost_usd,
-                    "message_count": len([m for m in session.messages if m.role in ("user", "assistant")]),
-                    "duration_seconds": round(duration, 1),
-                    "status": session.status,
-                    "tool_count": len(tool_names),
-                    "tools_list": list(set(tool_names)),
-                    "session_title": session.name,
-                    "first_user_message": user_messages[0] if user_messages else "",
-                    "input_tokens": session.tokens.get("input", 0),
-                    "output_tokens": session.tokens.get("output", 0),
-                    "is_sub_agent": session.parent_session_id is not None,
-                    "parent_session_id": session.parent_session_id,
-                    "sub_agent_count": len([s for s in self.sessions.values() if s.parent_session_id == session_id]),
-                    "branch_count": len(session.branches),
-                }, session_id=session_id, dashboard_id=session.dashboard_id)
-
                 await ws_manager.send_to_session(session_id, "agent:status", {
                     "session_id": session_id,
                     "status": session.status,
@@ -1208,6 +1196,7 @@ class AgentManager:
         })
         
         session.status = "completed"
+        session.closed_at = datetime.now()
         session.cost_usd = 0.001
         await ws_manager.send_to_session(session_id, "agent:status", {
             "session_id": session_id,
@@ -1347,6 +1336,8 @@ class AgentManager:
                 session._cancel_event.set()
 
             session.status = "stopped"
+            if not session.closed_at:
+                session.closed_at = datetime.now()
             await ws_manager.send_to_session(session_id, "agent:status", {
                 "session_id": session_id,
                 "status": "stopped",
@@ -1602,6 +1593,40 @@ class AgentManager:
         text = " ".join(parts)
         return text[:max_len]
 
+    def _fire_session_completed(self, session: AgentSession):
+        """Fire the session.completed analytics event exactly once when a session ends."""
+        duration = 0.0
+        if session.created_at:
+            end = session.closed_at or datetime.now()
+            duration = (end - session.created_at).total_seconds()
+        tool_names = [
+            m.content.get("tool", "") for m in session.messages
+            if m.role == "tool_call" and isinstance(m.content, dict)
+        ]
+        user_messages = [
+            (m.content if isinstance(m.content, str) else str(m.content))[:200]
+            for m in session.messages if m.role == "user"
+        ]
+        _analytics("session.completed", {
+            "model": session.model,
+            "provider": getattr(session, "provider", "anthropic"),
+            "mode": session.mode,
+            "cost_usd": session.cost_usd,
+            "message_count": len([m for m in session.messages if m.role in ("user", "assistant")]),
+            "duration_seconds": round(duration, 1),
+            "status": session.status,
+            "tool_count": len(tool_names),
+            "tools_list": list(set(tool_names)),
+            "session_title": session.name,
+            "first_user_message": user_messages[0] if user_messages else "",
+            "input_tokens": session.tokens.get("input", 0),
+            "output_tokens": session.tokens.get("output", 0),
+            "is_sub_agent": session.parent_session_id is not None,
+            "parent_session_id": session.parent_session_id,
+            "sub_agent_count": len([s for s in self.sessions.values() if s.parent_session_id == session.id]),
+            "branch_count": len(session.branches),
+        }, session_id=session.id, dashboard_id=session.dashboard_id)
+
     async def close_session(self, session_id: str) -> None:
         """Close a session: pause the agent if running, persist to JSON file,
         and remove from in-memory state. Also stops browser-agent children."""
@@ -1634,6 +1659,8 @@ class AgentManager:
 
         if hasattr(session, '_cancel_event'):
             session._cancel_event.set()
+
+        self._fire_session_completed(session)
 
         doc_data = session.model_dump(mode="json")
         doc_data["search_text"] = self._build_search_text(session)
@@ -1776,6 +1803,7 @@ class AgentManager:
             for req in list(session.pending_approvals):
                 ws_manager.resolve_approval(req.id, {"behavior": "deny", "message": "Server shutting down"})
             session.pending_approvals = []
+            self._fire_session_completed(session)
             doc_data = session.model_dump(mode="json")
             doc_data["search_text"] = self._build_search_text(session)
             _save_session(session_id, doc_data)
