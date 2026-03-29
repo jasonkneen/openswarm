@@ -1,6 +1,7 @@
 .DS_Store
 .worktrees
 .env
+openswarm-demo1/
 backend/data/**
 !backend/data/outputs/
 !backend/data/outputs/*.json
