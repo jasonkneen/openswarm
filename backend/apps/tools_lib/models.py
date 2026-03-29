@@ -65,6 +65,7 @@ class ToolDefinition(BaseModel):
     credentials: dict[str, str] = Field(default_factory=dict)
     auth_type: str = "none"
     auth_status: str = "none"
+    oauth_provider: Optional[str] = None
     oauth_tokens: dict[str, Any] = Field(default_factory=dict)
     tool_permissions: dict[str, Any] = Field(default_factory=dict)
     connected_account_email: Optional[str] = None
@@ -79,6 +80,7 @@ class ToolCreate(BaseModel):
     credentials: dict[str, str] = Field(default_factory=dict)
     auth_type: str = "none"
     auth_status: str = "none"
+    oauth_provider: Optional[str] = None
 
 
 class ToolUpdate(BaseModel):
@@ -89,6 +91,7 @@ class ToolUpdate(BaseModel):
     credentials: Optional[dict[str, str]] = None
     auth_type: Optional[str] = None
     auth_status: Optional[str] = None
+    oauth_provider: Optional[str] = None
     oauth_tokens: Optional[dict[str, Any]] = None
     tool_permissions: Optional[dict[str, Any]] = None
     connected_account_email: Optional[str] = None

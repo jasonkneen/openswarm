@@ -12,6 +12,7 @@ export interface ToolDefinition {
   credentials: Record<string, string>;
   auth_type: string;
   auth_status: string;
+  oauth_provider?: string;
   oauth_tokens: Record<string, any>;
   tool_permissions: Record<string, any>;
   connected_account_email?: string;
@@ -92,7 +93,10 @@ export const startOAuth = createAsyncThunk(
   'tools/startOAuth',
   async (toolId: string) => {
     const res = await fetch(`${TOOLS_API}/${toolId}/oauth/start`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to start OAuth');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start OAuth');
+    }
     const data = await res.json();
     return data as { auth_url: string };
   }

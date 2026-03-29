@@ -117,6 +117,7 @@ const DashboardInner: React.FC = () => {
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   const [toolbarOpen, setToolbarOpen] = useState(false);
+  const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [autoFocusSessionId, setAutoFocusSessionId] = useState<string | null>(null);
@@ -530,6 +531,66 @@ const DashboardInner: React.FC = () => {
     window.addEventListener('keydown', handleEnter);
     return () => window.removeEventListener('keydown', handleEnter);
   }, [selection.selectedIds, dispatch]);
+
+  // Focus mode: pop a card out as full-viewport overlay
+  const handleFocusRequest = useCallback((sessionId: string) => {
+    // Auto-expand if collapsed
+    if (!expandedSessionIds.includes(sessionId)) {
+      dispatch(toggleExpandSession(sessionId));
+    }
+    setFocusedCardId(sessionId);
+  }, [expandedSessionIds, dispatch]);
+
+  const handleFocusExit = useCallback(() => {
+    setFocusedCardId(null);
+  }, []);
+
+  // Focus mode keyboard: Escape to exit, F to enter
+  useEffect(() => {
+    const handleFocusKeys = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+
+      if (e.key === 'Escape' && focusedCardId) {
+        e.preventDefault();
+        setFocusedCardId(null);
+        return;
+      }
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !focusedCardId) {
+        if (selection.selectedIds.size !== 1) return;
+        const [id, type] = selection.selectedIds.entries().next().value!;
+        if (type !== 'agent') return;
+        e.preventDefault();
+        handleFocusRequest(id);
+      }
+    };
+    window.addEventListener('keydown', handleFocusKeys);
+    return () => window.removeEventListener('keydown', handleFocusKeys);
+  }, [focusedCardId, selection.selectedIds, handleFocusRequest]);
+
+  // Auto-zoom to card when it gets expanded (not on initial load)
+  const prevExpandedRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (!layoutInitialized) {
+      prevExpandedRef.current = expandedSessionIds;
+      return;
+    }
+    const prev = new Set(prevExpandedRef.current);
+    const newlyExpanded = expandedSessionIds.filter((id) => !prev.has(id));
+    prevExpandedRef.current = expandedSessionIds;
+
+    // Only auto-zoom for single-card expansions (not bulk restore)
+    if (newlyExpanded.length !== 1) return;
+
+    const cardId = newlyExpanded[0];
+    const card = cards[cardId];
+    if (!card) return;
+
+    setTimeout(() => {
+      const height = Math.max(EXPANDED_CARD_MIN_H, measuredHeightsRef.current[cardId] || card.height);
+      canvas.actions.fitToCards([{ x: card.x, y: card.y, width: card.width, height }], 2.0, true);
+    }, 200);
+  }, [expandedSessionIds, layoutInitialized, cards, canvas.actions]);
 
   useEffect(() => {
     const handleDelete = (e: KeyboardEvent) => {
@@ -1303,6 +1364,8 @@ const DashboardInner: React.FC = () => {
             {Object.values(cards).map((card) => {
               const session = sessions[card.session_id];
               if (!session) return null;
+              // Skip focused card here — rendered outside the canvas transform
+              if (focusedCardId === session.id) return null;
 
               let origin = spawnOriginsRef.current[session.id];
               if (origin) {
@@ -1378,6 +1441,9 @@ const DashboardInner: React.FC = () => {
                   snapColumn={snapColumn}
                   autoFocusInput={autoFocusSessionId === session.id}
                   onBringToFront={handleBringToFront}
+                  isFocused={focusedCardId === session.id}
+                  onFocusRequest={handleFocusRequest}
+                  onFocusExit={handleFocusExit}
                 />
               );
             })}
@@ -1467,9 +1533,53 @@ const DashboardInner: React.FC = () => {
       </Box>
 
       {/* Floating zoom controls */}
-      <Box sx={{ position: 'absolute', bottom: 16, right: 16, zIndex: 10 }}>
-        <CanvasControls zoom={canvas.zoom} actions={canvas.actions} onTidy={handleTidy} />
-      </Box>
+      {!focusedCardId && (
+        <Box sx={{ position: 'absolute', bottom: 16, right: 16, zIndex: 10 }}>
+          <CanvasControls zoom={canvas.zoom} actions={canvas.actions} onTidy={handleTidy} />
+        </Box>
+      )}
+
+      {/* Focus mode: backdrop + card rendered outside canvas transform */}
+      {focusedCardId && (() => {
+        const focusedCard = cards[focusedCardId];
+        const focusedSession = focusedCard ? sessions[focusedCard.session_id] : null;
+        if (!focusedSession || !focusedCard) return null;
+        return (
+          <>
+            <Box
+              onClick={handleFocusExit}
+              sx={{
+                position: 'fixed',
+                inset: 0,
+                bgcolor: 'rgba(0, 0, 0, 0.5)',
+                zIndex: 1200,
+                cursor: 'pointer',
+              }}
+            />
+            <Box sx={{ position: 'fixed', inset: 48, zIndex: 1250 }}>
+              <AgentCard
+                session={focusedSession}
+                expanded={true}
+                cardX={0}
+                cardY={0}
+                cardWidth={0}
+                cardHeight={0}
+                cardZOrder={100000}
+                zoom={1}
+                isSelected={false}
+                isHighlighted={false}
+                onCardSelect={() => {}}
+                onMeasuredHeight={() => {}}
+                onBringToFront={() => {}}
+                isFocused={true}
+                onFocusRequest={handleFocusRequest}
+                onFocusExit={handleFocusExit}
+                autoFocusInput={true}
+              />
+            </Box>
+          </>
+        );
+      })()}
     </Box>
     </>
   );

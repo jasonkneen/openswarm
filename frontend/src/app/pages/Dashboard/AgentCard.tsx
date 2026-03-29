@@ -190,6 +190,9 @@ interface Props {
   autoFocusInput?: boolean;
   cardZOrder?: number;
   onBringToFront?: (id: string, type: 'agent' | 'view' | 'browser') => void;
+  isFocused?: boolean;
+  onFocusRequest?: (sessionId: string) => void;
+  onFocusExit?: () => void;
 }
 
 const MIN_W = 480;
@@ -207,6 +210,7 @@ const AgentCard: React.FC<Props> = ({
   session, expanded, cardX, cardY, cardWidth, cardHeight, zoom = 1, spawnFrom, exitTarget,
   isSelected = false, isHighlighted = false, multiDragDelta, onCardSelect, onDragStart, onDragMove, onDragEnd,
   onBranch, onMeasuredHeight, snapColumn, autoFocusInput, cardZOrder = 0, onBringToFront,
+  isFocused = false, onFocusRequest, onFocusExit,
 }) => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
@@ -463,6 +467,51 @@ const AgentCard: React.FC<Props> = ({
       }
     : { opacity: 0, scale: 0.85, transition: { duration: 0.2 } };
 
+  if (isFocused) {
+    // Focus mode: render as a simple box filling its container (outside canvas transform)
+    return (
+      <Box
+        ref={cardBoxRef}
+        sx={{
+          width: '100%',
+          height: '100%',
+          bgcolor: c.bg.surface,
+          border: `1px solid ${c.border.strong}`,
+          borderRadius: 3,
+          p: 2,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
+        }}
+      >
+        {/* Header with close button */}
+        <Box
+          onDoubleClick={(e) => { e.stopPropagation(); onFocusExit?.(); }}
+          sx={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            mb: 1, flexShrink: 0, cursor: 'default',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+            <Typography sx={{ fontSize: '0.95rem', fontWeight: 600, color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {session.name || 'Agent'}
+            </Typography>
+            <Chip label={session.status} size="small" sx={{ fontSize: '0.7rem', height: 20, bgcolor: session.status === 'running' ? c.status.info : session.status === 'completed' ? c.status.success : c.bg.elevated, color: c.text.secondary }} />
+            <Typography sx={{ fontSize: '0.75rem', color: c.text.ghost }}>{session.model} · {formatDuration(session.created_at, undefined, session.status)}</Typography>
+          </Box>
+          <IconButton size="small" onClick={() => onFocusExit?.()} sx={{ color: c.text.ghost }}>
+            <CloseIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Box>
+        {/* Chat fills remaining space */}
+        <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <AgentChat sessionId={session.id} autoFocus={true} embedded={true} />
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <motion.div
       layout={false}
@@ -481,7 +530,7 @@ const AgentCard: React.FC<Props> = ({
       data-select-type="agent-card"
       data-select-id={session.id}
       data-select-meta={JSON.stringify({ name: session.name || session.id, status: session.status, model: session.model, mode: session.mode })}
-      
+
       onClick={(e: React.MouseEvent) => {
         if (justDraggedRef.current) return;
         if (!isSelected && !e.shiftKey) {
@@ -642,8 +691,8 @@ const AgentCard: React.FC<Props> = ({
         </Box>
       )}
 
-      {/* Resize handles: 4 edges + 4 corners */}
-      {HANDLE_DEFS.map(({ dir, sx }) => (
+      {/* Resize handles: 4 edges + 4 corners (hidden in focus mode) */}
+      {!isFocused && HANDLE_DEFS.map(({ dir, sx }) => (
         <Box
           key={dir}
           onPointerDown={handleResizeDown(dir)}
@@ -687,6 +736,10 @@ const AgentCard: React.FC<Props> = ({
         onPointerDown={handleDragPointerDown}
         onPointerMove={handleDragPointerMove}
         onPointerUp={handleDragPointerUp}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onFocusRequest?.(session.id);
+        }}
         sx={{
           position: 'relative',
           zIndex: 16,
@@ -695,7 +748,7 @@ const AgentCard: React.FC<Props> = ({
           px: 2,
           pt: 2,
           pb: 1.5,
-          cursor: isDragging ? 'grabbing' : 'grab',
+          cursor: isFocused ? 'default' : isDragging ? 'grabbing' : 'grab',
           touchAction: 'none',
           userSelect: 'none',
           flexShrink: 0,

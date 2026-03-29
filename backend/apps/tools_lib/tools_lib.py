@@ -1,11 +1,15 @@
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import re
 import logging
+import secrets
 import shutil
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import urlencode
 
@@ -25,6 +29,26 @@ _DEFAULT_GOOGLE_CLIENT_ID = "6741219524-8vpt07arcc5rvkdb4j1b6v9g53469ugq.apps.go
 _DEFAULT_GOOGLE_CLIENT_SECRET = "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"
 os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", _DEFAULT_GOOGLE_CLIENT_ID)
 os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", _DEFAULT_GOOGLE_CLIENT_SECRET)
+
+# Default GitHub OAuth credentials for the OpenSwarm project.
+os.environ.setdefault("GITHUB_OAUTH_CLIENT_ID", "Ov23liDcwNJaKMjXY2jI")
+os.environ.setdefault("GITHUB_OAUTH_CLIENT_SECRET", "b25fe39409896aad3fd5155f032e9868440002f8")
+
+# Default Slack OAuth credentials (requires HTTPS redirect — not yet functional)
+os.environ.setdefault("SLACK_CLIENT_ID", "10795695056323.10799999254534")
+os.environ.setdefault("SLACK_CLIENT_SECRET", "d3a85a286bb0205157d7e4963502a91d")
+
+# Default Figma OAuth credentials for the OpenSwarm project.
+os.environ.setdefault("FIGMA_CLIENT_ID", "q6WduT7UuPaO6lM88v6ddN")
+os.environ.setdefault("FIGMA_CLIENT_SECRET", "dhNZdbEuyEWC15cKLwWpqTclyOSplD")
+
+# Default Airtable OAuth credentials for the OpenSwarm project.
+os.environ.setdefault("AIRTABLE_CLIENT_ID", "0699038b-a3a4-46b2-8fa6-690eb76fadfa")
+os.environ.setdefault("AIRTABLE_CLIENT_SECRET", "187fa83c8bab8ebcd11b8f226d75e7a1f14a8174ac0494463c1a53e66a3036d0")
+
+# Default HubSpot MCP Auth App credentials for the OpenSwarm project.
+os.environ.setdefault("HUBSPOT_CLIENT_ID", "6f4a1d4c-6a2f-4336-9b65-2cd84e218ff6")
+os.environ.setdefault("HUBSPOT_CLIENT_SECRET", "5747b5de-0800-4c35-a2da-e0655ee7ea37")
 
 from backend.config.paths import BACKEND_DIR, DATA_ROOT, TOOLS_DIR as DATA_DIR, BUILTIN_PERMISSIONS_PATH as BUILTIN_PERMS_PATH
 
@@ -53,7 +77,179 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/contacts.readonly",
 ]
 
+
+# ---------------------------------------------------------------------------
+# Multi-provider OAuth registry
+# ---------------------------------------------------------------------------
+
+@dataclass
+class OAuthProvider:
+    auth_url: str
+    token_url: str
+    scopes: list[str]
+    userinfo_url: str | None
+    userinfo_field: str  # JSON field for display name/email
+    client_id_env: str
+    client_secret_env: str
+    token_env_mapping: dict[str, str]  # oauth_tokens key -> MCP env var name
+    extra_auth_params: dict[str, str] = field(default_factory=dict)
+    revoke_url: str | None = None
+    # For providers where token response nests the access_token differently
+    token_response_path: str | None = None  # e.g. "authed_user.access_token" for Slack
+    # Token exchange auth method: "form" (default), "basic" (Basic Auth header), "basic_json" (Basic Auth + JSON body)
+    token_auth_method: str = "form"
+    # Whether PKCE is required
+    pkce_required: bool = False
+    # Custom transform for env var value (e.g., wrapping token in JSON for Notion)
+    env_value_transform: str | None = None  # e.g., "notion_headers"
+    # Extra token response fields to extract (e.g., Slack team_id)
+    extra_token_fields: dict[str, str] = field(default_factory=dict)  # response_path -> env_var
+
+
+OAUTH_PROVIDERS: dict[str, OAuthProvider] = {
+    "google": OAuthProvider(
+        auth_url=GOOGLE_AUTH_URL,
+        token_url=GOOGLE_TOKEN_URL,
+        scopes=GOOGLE_SCOPES,
+        userinfo_url=GOOGLE_USERINFO_URL,
+        userinfo_field="email",
+        client_id_env="GOOGLE_OAUTH_CLIENT_ID",
+        client_secret_env="GOOGLE_OAUTH_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "OAUTH_ACCESS_TOKEN",
+            "refresh_token": "GOOGLE_WORKSPACE_REFRESH_TOKEN",
+            "_client_id": "GOOGLE_WORKSPACE_CLIENT_ID",
+            "_client_secret": "GOOGLE_WORKSPACE_CLIENT_SECRET",
+        },
+        extra_auth_params={"access_type": "offline", "prompt": "consent"},
+    ),
+    "github": OAuthProvider(
+        auth_url="https://github.com/login/oauth/authorize",
+        token_url="https://github.com/login/oauth/access_token",
+        scopes=["repo", "read:user", "user:email"],
+        userinfo_url="https://api.github.com/user",
+        userinfo_field="login",
+        client_id_env="GITHUB_OAUTH_CLIENT_ID",
+        client_secret_env="GITHUB_OAUTH_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "GITHUB_PERSONAL_ACCESS_TOKEN",
+        },
+    ),
+    "slack": OAuthProvider(
+        auth_url="https://slack.com/oauth/v2/authorize",
+        token_url="https://slack.com/api/oauth.v2.access",
+        scopes=[
+            "channels:read", "channels:history", "chat:write",
+            "groups:read", "groups:history", "im:read", "im:history",
+            "mpim:read", "mpim:history", "users:read", "users:read.email",
+            "team:read", "reactions:read", "reactions:write",
+            "files:read", "files:write",
+        ],
+        userinfo_url="https://slack.com/api/auth.test",
+        userinfo_field="user",
+        client_id_env="SLACK_CLIENT_ID",
+        client_secret_env="SLACK_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "SLACK_BOT_TOKEN",
+        },
+        extra_token_fields={"team.id": "SLACK_TEAM_ID"},
+    ),
+    "notion": OAuthProvider(
+        auth_url="https://api.notion.com/v1/oauth/authorize",
+        token_url="https://api.notion.com/v1/oauth/token",
+        scopes=[],  # Notion doesn't use scopes in the auth URL
+        userinfo_url=None,
+        userinfo_field="owner",
+        client_id_env="NOTION_OAUTH_CLIENT_ID",
+        client_secret_env="NOTION_OAUTH_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "OPENAPI_MCP_HEADERS",
+        },
+        extra_auth_params={"owner": "user"},
+        token_auth_method="basic_json",
+        env_value_transform="notion_headers",
+    ),
+    "spotify": OAuthProvider(
+        auth_url="https://accounts.spotify.com/authorize",
+        token_url="https://accounts.spotify.com/api/token",
+        scopes=[
+            "user-read-playback-state", "user-modify-playback-state",
+            "user-read-currently-playing", "playlist-read-private",
+            "playlist-modify-public", "playlist-modify-private",
+            "user-library-read", "user-library-modify",
+            "user-read-recently-played", "user-top-read",
+        ],
+        userinfo_url="https://api.spotify.com/v1/me",
+        userinfo_field="display_name",
+        client_id_env="SPOTIFY_CLIENT_ID",
+        client_secret_env="SPOTIFY_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "SPOTIFY_ACCESS_TOKEN",
+            "refresh_token": "SPOTIFY_REFRESH_TOKEN",
+            "_client_id": "SPOTIFY_CLIENT_ID",
+            "_client_secret": "SPOTIFY_CLIENT_SECRET",
+        },
+        token_auth_method="basic",
+    ),
+    "figma": OAuthProvider(
+        auth_url="https://www.figma.com/oauth",
+        token_url="https://api.figma.com/v1/oauth/token",
+        scopes=["current_user:read", "file_content:read", "file_metadata:read", "file_comments:read", "file_comments:write", "file_versions:read", "file_variables:read"],
+        userinfo_url="https://api.figma.com/v1/me",
+        userinfo_field="email",
+        client_id_env="FIGMA_CLIENT_ID",
+        client_secret_env="FIGMA_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "FIGMA_API_KEY",
+        },
+    ),
+    "airtable": OAuthProvider(
+        auth_url="https://airtable.com/oauth2/v1/authorize",
+        token_url="https://airtable.com/oauth2/v1/token",
+        scopes=[
+            "data.records:read", "data.records:write",
+            "data.recordComments:read", "data.recordComments:write",
+            "schema.bases:read", "schema.bases:write",
+            "user.email:read", "webhook:manage",
+        ],
+        userinfo_url="https://api.airtable.com/v0/meta/whoami",
+        userinfo_field="email",
+        client_id_env="AIRTABLE_CLIENT_ID",
+        client_secret_env="AIRTABLE_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "AIRTABLE_API_KEY",
+        },
+        pkce_required=True,
+        token_auth_method="basic",
+    ),
+    "hubspot": OAuthProvider(
+        auth_url="https://mcp-na2.hubspot.com/oauth/authorize/user",
+        token_url="https://api.hubapi.com/oauth/v1/token",
+        scopes=[],  # MCP Auth Apps have preconfigured scopes
+        userinfo_url=None,  # HubSpot userinfo requires token-in-path, handle separately
+        userinfo_field="user",
+        client_id_env="HUBSPOT_CLIENT_ID",
+        client_secret_env="HUBSPOT_CLIENT_SECRET",
+        token_env_mapping={
+            "access_token": "PRIVATE_APP_ACCESS_TOKEN",
+            "refresh_token": "HUBSPOT_REFRESH_TOKEN",
+        },
+        pkce_required=True,
+    ),
+}
+
+
+def _resolve_oauth_provider(tool: ToolDefinition) -> OAuthProvider:
+    """Resolve the OAuth provider for a tool, defaulting to Google for backward compat."""
+    key = tool.oauth_provider or "google"
+    provider = OAUTH_PROVIDERS.get(key)
+    if not provider:
+        raise HTTPException(status_code=400, detail=f"Unknown OAuth provider: {key}")
+    return provider
+
+
 _pending_oauth: dict[str, str] = {}
+_pending_pkce: dict[str, str] = {}  # state -> code_verifier (for PKCE flows)
 
 
 def _load_all() -> list[ToolDefinition]:
@@ -122,49 +318,108 @@ async def list_tools():
 
 @tools_lib.router.get("/oauth/callback")
 async def oauth_callback(code: str = Query(...), state: str = Query("")):
+    # Backward compat: old state was just tool_id, new state is "provider:tool_id"
     tool_id = _pending_oauth.pop(state, None)
+    if not tool_id:
+        # Try legacy format (state = tool_id directly)
+        tool_id = _pending_oauth.pop(state.split(":")[-1] if ":" in state else state, None)
     if not tool_id:
         return HTMLResponse("<html><body><h2>Invalid OAuth state</h2></body></html>", status_code=400)
 
     tool = _load(tool_id)
-    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    provider = _resolve_oauth_provider(tool)
+
+    client_id = os.environ.get(provider.client_id_env, "")
+    client_secret = os.environ.get(provider.client_secret_env, "")
     _port = os.environ.get("OPENSWARM_PORT", "8324")
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
 
+    # Build token exchange request based on provider's auth method
+    token_data: dict[str, str] = {
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    headers: dict[str, str] = {}
+
+    if provider.token_auth_method == "basic":
+        # Spotify, etc: Basic Auth header, credentials in form body
+        creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
+    elif provider.token_auth_method == "basic_json":
+        # Notion: Basic Auth header, JSON body
+        creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
+        headers["Content-Type"] = "application/json"
+    else:
+        # Default: credentials as form data fields
+        token_data["client_id"] = client_id
+        token_data["client_secret"] = client_secret
+
+    # GitHub requires Accept: application/json
+    if (tool.oauth_provider or "google") == "github":
+        headers["Accept"] = "application/json"
+
+    # PKCE: include code_verifier if we stored one
+    code_verifier = _pending_pkce.pop(state, None)
+    if code_verifier:
+        token_data["code_verifier"] = code_verifier
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(GOOGLE_TOKEN_URL, data={
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        })
+        if provider.token_auth_method == "basic_json":
+            resp = await client.post(provider.token_url, json=token_data, headers=headers)
+        else:
+            resp = await client.post(provider.token_url, data=token_data, headers=headers)
 
     if resp.status_code != 200:
         logger.warning(f"OAuth token exchange failed: {resp.text}")
         return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
 
     tokens = resp.json()
+
+    # Extract access_token, handling nested responses (e.g., Slack)
     access_token = tokens.get("access_token", "")
+    if provider.token_response_path and not access_token:
+        # Walk nested path like "authed_user.access_token"
+        obj = tokens
+        for part in provider.token_response_path.split("."):
+            obj = obj.get(part, {}) if isinstance(obj, dict) else ""
+        if isinstance(obj, str) and obj:
+            access_token = obj
+
     tool.oauth_tokens = {
         "access_token": access_token,
         "refresh_token": tokens.get("refresh_token", ""),
         "token_expiry": time.time() + tokens.get("expires_in", 3600),
     }
+
+    # Extract extra fields (e.g., Slack team_id)
+    for response_path, env_var in provider.extra_token_fields.items():
+        obj: Any = tokens
+        for part in response_path.split("."):
+            obj = obj.get(part, "") if isinstance(obj, dict) else ""
+        if obj:
+            tool.oauth_tokens[env_var] = str(obj)
+
     tool.auth_status = "connected"
 
-    if access_token:
+    if access_token and provider.userinfo_url:
         try:
             async with httpx.AsyncClient(timeout=10.0) as info_client:
                 info_resp = await info_client.get(
-                    GOOGLE_USERINFO_URL,
+                    provider.userinfo_url,
                     headers={"Authorization": f"Bearer {access_token}"},
                 )
             if info_resp.status_code == 200:
-                tool.connected_account_email = info_resp.json().get("email")
+                tool.connected_account_email = info_resp.json().get(provider.userinfo_field)
         except Exception as e:
-            logger.warning(f"Failed to fetch Google userinfo: {e}")
+            logger.warning(f"Failed to fetch userinfo for {tool.oauth_provider or 'google'}: {e}")
+
+    # Notion: extract workspace name from token response
+    if (tool.oauth_provider or "google") == "notion" and not tool.connected_account_email:
+        workspace_name = tokens.get("workspace_name")
+        if workspace_name:
+            tool.connected_account_email = workspace_name
 
     _save(tool)
 
@@ -195,68 +450,10 @@ async def create_tool(body: ToolCreate):
         credentials=body.credentials,
         auth_type=body.auth_type,
         auth_status=body.auth_status,
+        oauth_provider=body.oauth_provider,
     )
     _save(tool)
     return {"ok": True, "tool": tool.model_dump()}
-
-
-_XBIRD_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "xbird")
-_XBIRD_CONFIG_PATH = os.path.join(_XBIRD_CONFIG_DIR, "config.json")
-
-
-async def _fetch_twitter_screen_name(auth_token: str, ct0: str) -> str | None:
-    """Fetch the logged-in Twitter/X screen name using session cookies."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.twitter.com/1.1/account/verify_credentials.json",
-                headers={"x-csrf-token": ct0},
-                cookies={"auth_token": auth_token, "ct0": ct0},
-            )
-        if resp.status_code == 200:
-            screen_name = resp.json().get("screen_name")
-            return f"@{screen_name}" if screen_name else None
-    except Exception as e:
-        logger.warning("Failed to fetch Twitter screen name: %s", e)
-    return None
-
-
-def _sync_external_config(tool: ToolDefinition):
-    """Write credentials to external config files for tools that need them.
-
-    xbird reads auth from ~/.config/xbird/config.json rather than env vars,
-    so we sync credentials there when the user connects via the UI.
-    """
-    if tool.name == "xbird" and tool.credentials:
-        auth_token = tool.credentials.get("TWITTER_AUTH_TOKEN", "")
-        ct0 = tool.credentials.get("TWITTER_CT0", "")
-        if auth_token and ct0:
-            os.makedirs(_XBIRD_CONFIG_DIR, exist_ok=True)
-            config = {}
-            if os.path.exists(_XBIRD_CONFIG_PATH):
-                try:
-                    with open(_XBIRD_CONFIG_PATH) as f:
-                        config = json.load(f)
-                except Exception:
-                    pass
-            config["auth_token"] = auth_token
-            config["ct0"] = ct0
-            with open(_XBIRD_CONFIG_PATH, "w") as f:
-                json.dump(config, f, indent=2)
-            os.chmod(_XBIRD_CONFIG_PATH, 0o600)
-            logger.info("Synced xbird credentials to %s", _XBIRD_CONFIG_PATH)
-    elif tool.name == "xbird" and not tool.credentials:
-        if os.path.exists(_XBIRD_CONFIG_PATH):
-            try:
-                with open(_XBIRD_CONFIG_PATH) as f:
-                    config = json.load(f)
-                config.pop("auth_token", None)
-                config.pop("ct0", None)
-                with open(_XBIRD_CONFIG_PATH, "w") as f:
-                    json.dump(config, f, indent=2)
-                logger.info("Cleared xbird credentials from %s", _XBIRD_CONFIG_PATH)
-            except Exception:
-                pass
 
 
 @tools_lib.router.put("/{tool_id}")
@@ -264,15 +461,6 @@ async def update_tool(tool_id: str, body: ToolUpdate):
     tool = _load(tool_id)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(tool, k, v)
-    _sync_external_config(tool)
-
-    if tool.name == "xbird" and tool.auth_status == "connected" and tool.credentials:
-        auth_token = tool.credentials.get("TWITTER_AUTH_TOKEN", "")
-        ct0 = tool.credentials.get("TWITTER_CT0", "")
-        if auth_token and ct0:
-            screen_name = await _fetch_twitter_screen_name(auth_token, ct0)
-            if screen_name:
-                tool.connected_account_email = screen_name
 
     _save(tool)
     return {"ok": True, "tool": tool.model_dump()}
@@ -390,15 +578,37 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
             headers["Authorization"] = f"Bearer {tool.oauth_tokens['access_token']}"
         else:
             env = config.setdefault("env", {})
-            env["OAUTH_ACCESS_TOKEN"] = tool.oauth_tokens["access_token"]
-            if tool.oauth_tokens.get("refresh_token"):
-                env["GOOGLE_WORKSPACE_REFRESH_TOKEN"] = tool.oauth_tokens["refresh_token"]
-            client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-            client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
-            if client_id:
-                env["GOOGLE_WORKSPACE_CLIENT_ID"] = client_id
-            if client_secret:
-                env["GOOGLE_WORKSPACE_CLIENT_SECRET"] = client_secret
+            provider_key = tool.oauth_provider or "google"
+            provider = OAUTH_PROVIDERS.get(provider_key)
+            if provider:
+                for token_field, env_var in provider.token_env_mapping.items():
+                    if token_field.startswith("_client_id"):
+                        val = os.environ.get(provider.client_id_env, "")
+                    elif token_field.startswith("_client_secret"):
+                        val = os.environ.get(provider.client_secret_env, "")
+                    else:
+                        val = tool.oauth_tokens.get(token_field, "")
+                    if val:
+                        # Apply value transforms (e.g., Notion needs JSON headers)
+                        if provider.env_value_transform == "notion_headers" and token_field == "access_token":
+                            val = json.dumps({
+                                "Authorization": f"Bearer {val}",
+                                "Notion-Version": "2022-06-28",
+                            })
+                        env[env_var] = val
+                # Inject extra token fields (e.g., Slack SLACK_TEAM_ID)
+                for _, env_var in provider.extra_token_fields.items():
+                    val = tool.oauth_tokens.get(env_var, "")
+                    if val:
+                        env[env_var] = val
+                # Figma: inject token as CLI arg (it doesn't read env vars)
+                if provider_key == "figma" and tool.oauth_tokens.get("access_token"):
+                    args = config.get("args", [])
+                    if "--figma-api-key" not in args:
+                        config["args"] = args + ["--figma-api-key", tool.oauth_tokens["access_token"]]
+            else:
+                # Fallback: inject generic access token
+                env["OAUTH_ACCESS_TOKEN"] = tool.oauth_tokens["access_token"]
 
     if config.get("type") == "stdio":
         if config.get("command"):
@@ -455,22 +665,86 @@ _SERVICE_RULES: list[tuple[list[str], str, str]] = [
     (["contact"], "Contacts", "Google"),
     (["script", "deployment", "version", "trigger"], "Apps Script", "Google"),
     (["search_custom", "search_engine"], "Search", "Google"),
-    # Reddit (before Twitter so "search_reddit" etc. don't mis-match)
+    # Reddit
     (["subreddit"], "Subreddits", "Reddit"),
     (["search_reddit"], "Search", "Reddit"),
     (["post_detail"], "Posts", "Reddit"),
     (["user_analysis"], "Users", "Reddit"),
     (["reddit_explain"], "Reference", "Reddit"),
-    # Twitter / X
-    (["tweet", "thread", "reply", "replies", "quote", "retweet", "article"], "Tweets", "Twitter"),
-    (["timeline", "home", "news", "trending"], "Timeline", "Twitter"),
-    (["follower", "following", "follow", "unfollow"], "Network", "Twitter"),
-    (["like", "unlike", "bookmark"], "Engagement", "Twitter"),
-    (["mention"], "Mentions", "Twitter"),
-    (["user", "profile"], "Users", "Twitter"),
-    (["media", "upload", "image", "video"], "Media", "Twitter"),
-    (["search"], "Search", "Twitter"),
-    (["list", "list_member"], "Lists", "Twitter"),
+    # Sequential Thinking
+    (["sequentialthinking", "thinking"], "Thinking", "Sequential Thinking"),
+    # Memory (knowledge graph)
+    (["create_entities", "create_relations", "add_observations", "delete_entities",
+      "delete_observations", "delete_relations", "read_graph", "search_nodes",
+      "open_nodes"], "Knowledge Graph", "Memory"),
+    # Filesystem
+    (["read_file", "read_multiple_files", "write_file", "edit_file",
+      "create_directory", "list_directory", "directory_tree", "move_file",
+      "search_files", "get_file_info", "list_allowed_directories"], "Files", "Filesystem"),
+    # Playwright
+    (["browser_navigate", "browser_screenshot", "browser_click", "browser_fill",
+      "browser_select", "browser_hover", "browser_evaluate", "browser_console",
+      "browser_tab", "browser_close", "browser_resize", "browser_snapshot",
+      "browser_wait", "browser_pdf", "browser_drag"], "Browser", "Playwright"),
+    # Git
+    (["git_status", "git_diff", "git_diff_unstaged", "git_diff_staged",
+      "git_commit", "git_log", "git_add", "git_reset", "git_show",
+      "git_create_branch", "git_checkout", "git_list_branches", "git_init",
+      "git_clone"], "Repository", "Git"),
+    # YouTube Transcripts
+    (["get_transcript"], "Transcripts", "YouTube"),
+    # Desktop Commander
+    (["execute_command", "read_output", "force_terminate", "list_sessions",
+      "list_processes", "kill_process", "block_command", "unblock_command",
+      "read_file", "write_file", "search_code", "list_directory",
+      "get_file_info", "edit_block"], "System", "Desktop Commander"),
+    # GitHub
+    (["repository", "issue", "pull_request", "commit", "branch", "fork", "star",
+      "create_issue", "list_issues", "get_issue", "create_pull_request",
+      "list_commits", "search_repositories", "create_repository",
+      "get_file_contents", "push_files", "create_branch",
+      "search_code", "search_issues"], "Repository", "GitHub"),
+    # Slack
+    (["channel", "slack_message", "thread", "reply", "workspace",
+      "list_channels", "post_message", "reply_to_thread", "search_messages",
+      "get_channel_history", "get_thread_replies", "get_users",
+      "get_user_profile"], "Messaging", "Slack"),
+    # Notion
+    (["notion_page", "database", "block", "create_page", "update_page",
+      "search_pages", "get_page", "get_database", "query_database",
+      "create_database", "append_block_children"], "Pages", "Notion"),
+    # Spotify
+    (["play", "pause", "skip", "playlist", "track", "album", "artist",
+      "search_tracks", "get_playlist", "get_currently_playing",
+      "add_to_playlist", "create_playlist", "get_recommendations",
+      "get_top_items"], "Music", "Spotify"),
+    # Figma
+    (["figma", "design", "component", "style", "node",
+      "get_file", "get_file_nodes", "get_image", "get_comments",
+      "get_team_projects", "get_project_files"], "Design", "Figma"),
+    # Airtable
+    (["airtable", "base", "record", "field", "view",
+      "list_records", "get_record", "create_record", "update_record",
+      "delete_record", "list_bases", "get_base_schema"], "Data", "Airtable"),
+    # HubSpot
+    (["hubspot", "contact", "deal", "company", "ticket", "pipeline",
+      "crm", "engagement", "association"], "CRM", "HubSpot"),
+    # Discord
+    (["discord", "guild", "server", "channel_message", "send_message",
+      "get_messages", "get_guilds", "get_channels", "add_reaction"], "Messaging", "Discord"),
+    # Twitter / X (TweetSave)
+    (["tweetsave", "get_tweet", "get_thread", "to_blog", "batch",
+      "extract_media"], "Tweets", "Twitter"),
+    # Shopify Dev
+    (["shopify", "introspect", "graphql", "search_dev_docs", "liquid",
+      "polaris", "admin_api", "storefront_api"], "Developer", "Shopify"),
+    # Zoom
+    (["zoom", "meeting", "recording", "participant", "webinar",
+      "create_meeting", "list_meetings", "get_meeting", "delete_meeting",
+      "update_meeting"], "Meetings", "Zoom"),
+    # Microsoft 365
+    (["outlook", "onedrive", "ms365", "microsoft", "mail_folder",
+      "email", "calendar_event", "contact", "drive_item"], "Mail & Files", "Microsoft 365"),
 ]
 
 
@@ -597,6 +871,7 @@ async def _discover_mcp_tools_stdio(command: str, args: list[str] | None = None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=proc_env,
+        limit=1024 * 1024,  # 1MB buffer for large MCP responses (e.g., MS365 with 87 tools)
     )
 
     async def _send(msg: dict) -> None:
@@ -765,15 +1040,17 @@ async def oauth_disconnect(tool_id: str):
     access_token = tool.oauth_tokens.get("access_token")
 
     if access_token:
+        provider = _resolve_oauth_provider(tool)
+        revoke_url = provider.revoke_url or "https://oauth2.googleapis.com/revoke"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    "https://oauth2.googleapis.com/revoke",
+                    revoke_url,
                     params={"token": access_token},
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
         except Exception as e:
-            logger.warning(f"Failed to revoke Google token for tool {tool.id}: {e}")
+            logger.warning(f"Failed to revoke token for tool {tool.id}: {e}")
 
     tool.oauth_tokens = {}
     tool.auth_status = "configured"
@@ -784,14 +1061,17 @@ async def oauth_disconnect(tool_id: str):
 
 @tools_lib.router.post("/{tool_id}/oauth/start")
 async def oauth_start(tool_id: str):
-    _load(tool_id)
-    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    tool = _load(tool_id)
+    provider = _resolve_oauth_provider(tool)
+
+    client_id = os.environ.get(provider.client_id_env, "")
     if not client_id:
-        raise HTTPException(status_code=400, detail="GOOGLE_OAUTH_CLIENT_ID not set in backend .env")
+        raise HTTPException(status_code=400, detail=f"{provider.client_id_env} not set in backend .env")
 
     _port = os.environ.get("OPENSWARM_PORT", "8324")
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
-    state = tool_id
+    provider_key = tool.oauth_provider or "google"
+    state = f"{provider_key}:{tool_id}"
 
     _pending_oauth[state] = tool_id
 
@@ -799,19 +1079,28 @@ async def oauth_start(tool_id: str):
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": " ".join(GOOGLE_SCOPES),
-        "access_type": "offline",
-        "prompt": "consent",
         "state": state,
+        **provider.extra_auth_params,
     }
-    auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    if provider.scopes:
+        params["scope"] = " ".join(provider.scopes)
+
+    # PKCE support (required by Airtable, etc.)
+    if provider.pkce_required:
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
+        _pending_pkce[state] = code_verifier
+
+    auth_url = f"{provider.auth_url}?{urlencode(params)}"
     return {"auth_url": auth_url}
 
 
-
-
-async def refresh_google_token(tool: ToolDefinition) -> Optional[str]:
-    """Refresh an expired Google OAuth token. Returns the fresh access_token or None."""
+async def refresh_oauth_token(tool: ToolDefinition) -> Optional[str]:
+    """Refresh an expired OAuth token. Returns the fresh access_token or None."""
     if tool.auth_type != "oauth2":
         return None
     refresh_token = tool.oauth_tokens.get("refresh_token")
@@ -821,14 +1110,15 @@ async def refresh_google_token(tool: ToolDefinition) -> Optional[str]:
     if time.time() < expiry - 60:
         return tool.oauth_tokens.get("access_token")
 
-    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    provider = _resolve_oauth_provider(tool)
+    client_id = os.environ.get(provider.client_id_env, "")
+    client_secret = os.environ.get(provider.client_secret_env, "")
     if not client_id or not client_secret:
         return None
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(GOOGLE_TOKEN_URL, data={
+            resp = await client.post(provider.token_url, data={
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "refresh_token": refresh_token,
@@ -840,20 +1130,24 @@ async def refresh_google_token(tool: ToolDefinition) -> Optional[str]:
             tool.oauth_tokens["access_token"] = new_token
             tool.oauth_tokens["token_expiry"] = time.time() + data.get("expires_in", 3600)
 
-            if not tool.connected_account_email:
+            if not tool.connected_account_email and provider.userinfo_url:
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as info_client:
                         info_resp = await info_client.get(
-                            GOOGLE_USERINFO_URL,
+                            provider.userinfo_url,
                             headers={"Authorization": f"Bearer {new_token}"},
                         )
                     if info_resp.status_code == 200:
-                        tool.connected_account_email = info_resp.json().get("email")
+                        tool.connected_account_email = info_resp.json().get(provider.userinfo_field)
                 except Exception:
                     pass
 
             _save(tool)
             return new_token
     except Exception as e:
-        logger.warning(f"Google token refresh failed for tool {tool.id}: {e}")
+        logger.warning(f"OAuth token refresh failed for tool {tool.id}: {e}")
     return None
+
+
+# Backward-compatible alias
+refresh_google_token = refresh_oauth_token

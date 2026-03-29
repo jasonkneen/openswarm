@@ -207,6 +207,21 @@ class AgentManager:
 
             sections.append("\n".join(lines))
 
+        # Add awareness of tools that are installed but not yet connected
+        not_connected = [
+            t for t in all_tools
+            if t.mcp_config and t.enabled
+            and t.auth_type in ("oauth2", "env_vars")
+            and t.auth_status != "connected"
+        ]
+        if not_connected:
+            nc_lines = [
+                "Tools installed but not yet connected (user needs to authorize in Settings → Tools):"
+            ]
+            for t in not_connected:
+                nc_lines.append(f"  - {t.name}")
+            sections.append("\n".join(nc_lines))
+
         if not sections:
             return None
         return (

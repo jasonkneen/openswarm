@@ -1,8 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Typography, Modal, Button, CircularProgress } from '@mui/material';
+import LinkIcon from '@mui/icons-material/Link';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAppSelector } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { API_BASE } from '@/shared/config';
+
+const ONBOARDING_TOOL_INTEGRATIONS = [
+  { name: 'Google Workspace', desc: 'Gmail, Calendar, Drive, Docs, Sheets', color: '#4285F4', oauthProvider: 'google',
+    mcp_config: { type: 'stdio', command: 'uvx', args: ['--from', 'google-workspace-mcp', 'google-workspace-worker'] } },
+  { name: 'GitHub', desc: 'Repos, issues, pull requests', color: '#24292E', oauthProvider: 'github',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] } },
+  { name: 'Slack', desc: 'Channels, messages, search', color: '#4A154B', oauthProvider: 'slack',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-slack'] } },
+  { name: 'Notion', desc: 'Pages, databases, search', color: '#000000', oauthProvider: 'notion',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', '@notionhq/notion-mcp-server'] } },
+];
 
 const SUBSCRIPTION_PROVIDERS = [
   { id: 'claude', name: 'Claude', desc: 'Sonnet, Opus, Haiku', color: '#E8927A', preview: false },
@@ -15,8 +28,10 @@ const OnboardingModal: React.FC = () => {
   const c = useClaudeTokens();
   const settings = useAppSelector((s) => s.settings);
   const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<'provider' | 'tools'>('provider');
   const [connecting, setConnecting] = useState<string | null>(null);
   const [nineRouterReady, setNineRouterReady] = useState<boolean | null>(null);
+  const [connectedTools, setConnectedTools] = useState<Set<string>>(new Set());
   const pollTimerRef = useRef<any>(null);
   const msgHandlerRef = useRef<any>(null);
 
@@ -121,7 +136,7 @@ const OnboardingModal: React.FC = () => {
             if (pd.success) {
               clearInterval(timer);
               pollTimerRef.current = null;
-              dismiss();
+              advanceToTools();
             }
           } catch {}
         }, 5000);
@@ -144,7 +159,7 @@ const OnboardingModal: React.FC = () => {
                 window.removeEventListener('message', msgHandlerRef.current);
                 msgHandlerRef.current = null;
               }
-              dismiss();
+              advanceToTools();
             }
           } catch {}
         }, 2000);
@@ -172,7 +187,7 @@ const OnboardingModal: React.FC = () => {
                 }),
               });
             } catch {}
-            dismiss();
+            advanceToTools();
           }
         };
         window.addEventListener('message', msgHandler);
@@ -192,8 +207,78 @@ const OnboardingModal: React.FC = () => {
     }
   };
 
-  const handleApiKey = () => dismiss();
-  const handleSkip = () => dismiss();
+  const advanceToTools = () => {
+    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+    if (msgHandlerRef.current) { window.removeEventListener('message', msgHandlerRef.current); msgHandlerRef.current = null; }
+    setConnecting(null);
+    setStep('tools');
+  };
+
+  const handleToolConnect = async (integration: typeof ONBOARDING_TOOL_INTEGRATIONS[0]) => {
+    setConnecting(integration.name);
+    try {
+      // Create the tool
+      const createRes = await fetch(`${API_BASE}/tools/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: integration.name,
+          description: integration.desc,
+          mcp_config: integration.mcp_config,
+          auth_type: 'oauth2',
+          auth_status: 'configured',
+          oauth_provider: integration.oauthProvider,
+        }),
+      });
+      if (!createRes.ok) { setConnecting(null); return; }
+      const { tool } = await createRes.json();
+
+      // Start OAuth
+      const oauthRes = await fetch(`${API_BASE}/tools/${tool.id}/oauth/start`, { method: 'POST' });
+      if (!oauthRes.ok) { setConnecting(null); return; }
+      const { auth_url } = await oauthRes.json();
+
+      // Open popup
+      const popup = window.open(auth_url, 'oauth', 'width=500,height=700,left=200,top=100');
+
+      // Listen for completion
+      const onMsg = (event: MessageEvent) => {
+        if (event.data?.type === 'oauth_complete' && event.data?.tool_id === tool.id) {
+          window.removeEventListener('message', onMsg);
+          setConnectedTools((prev) => new Set(prev).add(integration.name));
+          setConnecting(null);
+          // Trigger discovery in background
+          fetch(`${API_BASE}/tools/${tool.id}/discover`, { method: 'POST' }).catch(() => {});
+        }
+      };
+      window.addEventListener('message', onMsg);
+
+      // Fallback: poll for popup close
+      const poller = setInterval(() => {
+        if (popup && popup.closed) {
+          clearInterval(poller);
+          window.removeEventListener('message', onMsg);
+          // Check if connected
+          fetch(`${API_BASE}/tools/${tool.id}`)
+            .then(r => r.json())
+            .then(data => {
+              if (data.tool?.auth_status === 'connected') {
+                setConnectedTools((prev) => new Set(prev).add(integration.name));
+                fetch(`${API_BASE}/tools/${tool.id}/discover`, { method: 'POST' }).catch(() => {});
+              }
+            })
+            .catch(() => {});
+          setConnecting(null);
+        }
+      }, 1000);
+      setTimeout(() => { clearInterval(poller); setConnecting(null); }, 60000);
+    } catch {
+      setConnecting(null);
+    }
+  };
+
+  const handleApiKey = () => advanceToTools();
+  const handleSkip = () => step === 'tools' ? dismiss() : dismiss();
 
   if (!open) return null;
 
@@ -204,6 +289,68 @@ const OnboardingModal: React.FC = () => {
         border: `1px solid ${c.border.subtle}`, p: 3.5, outline: 'none',
         boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
       }}>
+        {step === 'tools' ? (
+          <>
+            <Typography sx={{ fontSize: '1.3rem', fontWeight: 700, color: c.text.primary, mb: 0.5, textAlign: 'center' }}>
+              Connect Your Accounts
+            </Typography>
+            <Typography sx={{ fontSize: '0.78rem', color: c.text.muted, mb: 0.5, textAlign: 'center' }}>
+              10+ tools already active with no setup needed
+            </Typography>
+            <Typography sx={{ fontSize: '0.68rem', color: c.text.ghost, mb: 3, textAlign: 'center' }}>
+              Connect services below for even more capabilities
+            </Typography>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 2.5 }}>
+              {ONBOARDING_TOOL_INTEGRATIONS.map((ig) => {
+                const isConnected = connectedTools.has(ig.name);
+                const isConnecting = connecting === ig.name;
+                return (
+                  <Box
+                    key={ig.name}
+                    onClick={() => !isConnected && !isConnecting && !connecting && handleToolConnect(ig)}
+                    sx={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      p: 1.5, borderRadius: `${c.radius.md}px`,
+                      border: `1px solid ${isConnected ? `${ig.color}40` : c.border.subtle}`,
+                      cursor: isConnected ? 'default' : connecting ? 'wait' : 'pointer',
+                      bgcolor: isConnected ? `${ig.color}08` : 'transparent',
+                      transition: 'border-color 0.15s, background 0.15s',
+                      ...(!isConnected && !connecting && { '&:hover': { borderColor: ig.color, bgcolor: `${ig.color}05` } }),
+                    }}
+                  >
+                    <Box>
+                      <Typography sx={{ fontSize: '0.82rem', fontWeight: 600, color: c.text.primary }}>{ig.name}</Typography>
+                      <Typography sx={{ fontSize: '0.65rem', color: c.text.muted }}>{ig.desc}</Typography>
+                    </Box>
+                    {isConnected ? (
+                      <CheckCircleIcon sx={{ fontSize: 18, color: ig.color }} />
+                    ) : (
+                      <Typography sx={{ fontSize: '0.68rem', color: isConnecting ? ig.color : c.text.tertiary }}>
+                        {isConnecting ? 'Connecting...' : 'Connect \u2192'}
+                      </Typography>
+                    )}
+                  </Box>
+                );
+              })}
+            </Box>
+
+            <Button
+              onClick={dismiss}
+              fullWidth
+              variant={connectedTools.size > 0 ? 'contained' : 'text'}
+              sx={{
+                textTransform: 'none', fontSize: '0.78rem', borderRadius: `${c.radius.md}px`,
+                ...(connectedTools.size > 0
+                  ? { bgcolor: c.accent.primary, color: '#fff', '&:hover': { bgcolor: c.accent.hover } }
+                  : { color: c.text.ghost, '&:hover': { bgcolor: 'transparent', color: c.text.muted } }),
+              }}
+            >
+              {connectedTools.size > 0 ? 'Done' : 'Skip for now'}
+            </Button>
+          </>
+        ) : (
+          <>
         <Typography sx={{ fontSize: '1.3rem', fontWeight: 700, color: c.text.primary, mb: 0.5, textAlign: 'center' }}>
           Welcome to OpenSwarm
         </Typography>
@@ -268,6 +415,8 @@ const OnboardingModal: React.FC = () => {
         >
           Skip for now
         </Button>
+          </>
+        )}
       </Box>
     </Modal>
   );

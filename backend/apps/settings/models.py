@@ -38,7 +38,7 @@ class AppSettings(BaseModel):
     custom_providers: list["CustomProvider"] = Field(default_factory=list)
     # Dashboard / UI preferences
     auto_select_mode_on_new_agent: bool = False
-    expand_new_chats_in_dashboard: bool = False
+    expand_new_chats_in_dashboard: bool = True
     auto_reveal_sub_agents: bool = True
     dev_mode: bool = False
     # Subscription tokens (from CLI tools — alternative to API keys)

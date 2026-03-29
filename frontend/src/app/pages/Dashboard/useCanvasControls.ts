@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo, RefObject } from 'react';
 
-const MIN_ZOOM = 0.15;
+const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3.0;
 const ZOOM_IN_FACTOR = 1.1;
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
-const FIT_PADDING = 200;
+const FIT_PADDING = 80;
 
 // Maps the 1–100 user setting to an internal multiplier.
 // 50 (default) → 0.004, 1 → 0.0004, 100 → 0.008
@@ -80,7 +80,11 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
         setState((prev) => {
           const delta = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
           const factor = Math.pow(2, -delta * sensitivityToMultiplier(sensitivityRef.current));
-          const newZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+          let newZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+          // Snap to 100% when crossing through the 0.97–1.03 band (trackpad only)
+          if (newZoom > 0.97 && newZoom < 1.03 && (prev.zoom <= 0.97 || prev.zoom >= 1.03)) {
+            newZoom = 1.0;
+          }
           const ratio = newZoom / prev.zoom;
           return {
             panX: cx - (cx - prev.panX) * ratio,
