@@ -4,6 +4,7 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import { AssistantRuntimeProvider, useAui, Tools } from '@assistant-ui/react';
 import { AgentMessage, editMessage, switchBranch, duplicateSession, setActiveSession } from '@/shared/state/agentsSlice';
 import MessageBubble from './MessageBubble';
 import MessageActionBar from './MessageActionBar';
@@ -16,6 +17,8 @@ import MessageQueue from './MessageQueue';
 import StreamingSection from './StreamingSection';
 import { useAgentChat } from './hooks/useAgentChat';
 import { useMessageRendering } from './hooks/useMessageRendering';
+import { useOpenSwarmRuntime } from './runtime/useOpenSwarmRuntime';
+import { toolkit } from './toolkit';
 import { ContextPath } from '@/app/components/DirectoryBrowser';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
@@ -42,6 +45,9 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
     handleApprove, handleDeny, handleStop, handleResume,
     handleSaveEdit, handleCancelEdit, setEditingMessageId,
   } = useAgentChat({ sessionId, initialContextPaths });
+
+  const runtime = useOpenSwarmRuntime(id);
+  const aui = useAui({ tools: Tools({ toolkit }) });
 
   const { activeBranchMessages, renderItems, lastAssistantIdsInTurn, getSiblingBranches, contextEstimate } = useMessageRendering(session, model, id, isDraft);
 
@@ -81,6 +87,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
   const sessionRunning = session.status === 'running' || session.status === 'waiting_approval';
 
   return (
+    <AssistantRuntimeProvider runtime={runtime} aui={aui}>
     <Box sx={{ display: 'flex', height: '100%' }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, overflow: 'hidden' }}>
         {!embedded && <ChatHeader session={session} isDraft={isDraft} id={id} onClose={onClose} />}
@@ -201,6 +208,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
         )}
       </Box>
     </Box>
+    </AssistantRuntimeProvider>
   );
 };
 

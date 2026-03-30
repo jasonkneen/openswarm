@@ -1,0 +1,26 @@
+[project]
+name = "openswarm-backend"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic",
+    "claude-agent-sdk",
+    "fastapi[standard]",
+    "httpx>=0.27.0",
+    "jsonschema",
+    "pillow",
+    "posthog",
+    "pydantic==2.10.5",
+    "watchfiles",
+]
+
+[dependency-groups]
+dev = [
+    "pyright",
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.2",
+    "typeguard==4.4.2",
+]
+
+[tool.uv]
+package = false

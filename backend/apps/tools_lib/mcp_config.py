@@ -12,8 +12,8 @@ from backend.apps.tools_lib.oauth_providers import OAUTH_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
-_TOOLS_LIB_DIR = os.path.dirname(os.path.abspath(__file__))
-_UV_BIN_DIR = os.path.join(_TOOLS_LIB_DIR, "uv-bin")
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UV_BIN_DIR = os.path.join(_BACKEND_DIR, "uv-bin")
 
 
 def _extra_bin_dirs() -> list[str]:

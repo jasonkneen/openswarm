@@ -73,16 +73,11 @@ fi
 echo "Python binary: $PYTHON_BIN"
 "$PYTHON_BIN" --version
 
-# Install pip (standalone builds may not include it)
-if ! "$PYTHON_BIN" -m pip --version &>/dev/null; then
-    echo "Installing pip..."
-    "$PYTHON_BIN" -m ensurepip --upgrade
-fi
-
-# Install backend dependencies
+# Install backend dependencies using bundled uv
+UV_BIN="$PROJECT_ROOT/backend/uv-bin/uv"
 echo "Installing backend dependencies..."
-"$PYTHON_BIN" -m pip install --upgrade pip
-"$PYTHON_BIN" -m pip install -r "$PROJECT_ROOT/backend/requirements.txt"
+"$UV_BIN" export --project "$PROJECT_ROOT/backend" --frozen --no-hashes --no-dev -q | \
+    "$UV_BIN" pip install --python "$PYTHON_BIN" -r -
 
 # Verify claude-agent-sdk and its bundled binary
 echo "Verifying claude-agent-sdk..."

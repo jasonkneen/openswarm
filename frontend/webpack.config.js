@@ -34,6 +34,10 @@ module.exports = (env, argv) => {
           }
         },
         {
+          test: /\.css$/,
+          use: ['style-loader', 'css-loader', 'postcss-loader']
+        },
+        {
           test: /\.module\.(scss|sass)$/,
           use: [
             'style-loader',

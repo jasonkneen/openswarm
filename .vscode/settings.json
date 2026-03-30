@@ -1,9 +1,10 @@
 {
+  "python.defaultInterpreterPath": "backend/.venv/bin/python",
   "python.analysis.typeCheckingMode": "strict",
   "python.analysis.include": ["backend"],
   "python.analysis.exclude": [
     "backend/.venv",
-    "backend/apps/tools_lib/uv-bin",
+    "backend/uv-bin",
     "backend/data",
     "backend/tests"
   ],
