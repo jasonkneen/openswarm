@@ -421,7 +421,7 @@ app.on('web-contents-created', (_event, contents) => {
       childWindow.setParentWindow(mainWindow);
     }
 
-    const interceptOAuthCallback = (event, url) => {
+    const rerouteModelSubscriptionOAuthCallback = (event, url) => {
       if (!backendPort) return;
       if (!url.includes('/callback') || !url.includes('code=')) return;
       if (url.includes(`localhost:${backendPort}`)) return;
@@ -439,8 +439,8 @@ app.on('web-contents-created', (_event, contents) => {
         console.error('[oauth] intercept error:', e.message);
       }
     };
-    childWindow.webContents.on('will-redirect', interceptOAuthCallback);
-    childWindow.webContents.on('will-navigate', interceptOAuthCallback);
+    childWindow.webContents.on('will-redirect', rerouteModelSubscriptionOAuthCallback);
+    childWindow.webContents.on('will-navigate', rerouteModelSubscriptionOAuthCallback);
   });
 
   if (contents.getType() === 'webview') {
