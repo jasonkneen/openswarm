@@ -19,7 +19,8 @@ def _check_9router() -> bool:
     """Check if 9Router is running locally."""
     try:
         import httpx
-        r = httpx.get("http://localhost:20128/v1/models", timeout=2.0)
+        from backend.ports import NINE_ROUTER_PORT
+        r = httpx.get(f"http://localhost:{NINE_ROUTER_PORT}/v1/models", timeout=2.0)
         return r.status_code == 200
     except Exception:
         return False
@@ -146,9 +147,10 @@ def get_anthropic_client(settings: AppSettings) -> anthropic.AsyncAnthropic:
 
     # Fall back to 9Router subscription (free for users with Claude/ChatGPT/Gemini subscriptions)
     if _check_9router():
+        from backend.ports import NINE_ROUTER_PORT
         return anthropic.AsyncAnthropic(
             api_key="9router",
-            base_url="http://localhost:20128",
+            base_url=f"http://localhost:{NINE_ROUTER_PORT}",
         )
 
     raise ValueError("No AI provider configured. Set an API key or connect a subscription.")

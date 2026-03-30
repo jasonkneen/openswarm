@@ -52,7 +52,7 @@ For other integrations, edit `backend/.env`:
 
 | Variable | Purpose |
 |----------|---------|
-| `BACKEND_PORT` | Backend server port (default: `8324`) |
+| `BACKEND_PORT` | Backend server port (default: `8325` for dev; prod uses `8324`) |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google Workspace integration (Gmail, Calendar, Drive) |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google Workspace integration |
 | `APPLE_ID` | macOS code signing & notarization (release builds only) |
@@ -70,14 +70,14 @@ For other integrations, edit `backend/.env`:
 bash run/local.sh
 ```
 
-This starts the backend (port 8324), frontend (port 3000), and Electron shell together. The script handles virtual environments and dependency installation automatically.
+This starts the backend (port 8325), frontend (port 3000), and Electron shell together. The script handles virtual environments and dependency installation automatically.
 
 ### Option B: Run services individually
 
 **Backend** (in one terminal):
 
 ```bash
-bash backend/run.sh     # API at http://localhost:8324 — docs at /docs
+bash backend/run.sh     # API at http://localhost:8325 — docs at /docs
 ```
 
 **Frontend** (in another terminal):
@@ -94,7 +94,7 @@ bash frontend/run.sh    # App at http://localhost:3000
 cd backend
 source .venv/bin/activate
 cd ..
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8324 --reload --reload-dir backend
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8325 --reload --reload-dir backend
 ```
 
 **Terminal 2 — Frontend dev server:**
@@ -113,8 +113,8 @@ Once everything is running:
 | Service | URL |
 |---------|-----|
 | **Frontend (UI)** | [http://localhost:3000](http://localhost:3000) |
-| **Backend API** | [http://localhost:8324](http://localhost:8324) |
-| **API Docs (Swagger)** | [http://localhost:8324/docs](http://localhost:8324/docs) |
+| **Backend API** | [http://localhost:8325](http://localhost:8325) |
+| **API Docs (Swagger)** | [http://localhost:8325/docs](http://localhost:8325/docs) |
 
 ---
 
@@ -144,7 +144,7 @@ To use Google Calendar, Gmail, Drive, and other Google tools from your agents, y
    - Add your Google account as a test user (required while the app is in "Testing" status)
 4. Back on the credentials page, create an **OAuth client ID**:
    - Application type: **Web application**
-   - Authorized redirect URIs: `http://localhost:8324/api/tools/oauth/callback`
+   - Authorized redirect URIs: `http://localhost:8325/api/tools/oauth/callback`
 5. Copy the **Client ID** and **Client Secret**
 
 ### c. Add credentials to your `.env`
@@ -239,11 +239,11 @@ Please open an issue first for larger changes so we can discuss the approach.
 Make sure you're running from the **project root** (not from `backend/`):
 ```bash
 cd openswarm
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8324 --reload
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8325 --reload
 ```
 
 ### Frontend proxy errors / API calls failing
-The frontend dev server proxies `/api` requests to `http://localhost:8324`. Make sure the backend is running first.
+The frontend dev server proxies `/api` requests to `http://localhost:8325`. Make sure the backend is running first.
 
 ### Mock mode vs real mode
 If you see mock responses, either:

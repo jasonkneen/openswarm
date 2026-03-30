@@ -22,7 +22,7 @@ except ImportError:
 
 from browser_agent_mcp_schemas import TOOLS  # noqa: E402  (sibling script import)
 
-BACKEND_PORT = os.environ.get("OPENSWARM_PORT", "8324")
+BACKEND_PORT = os.environ.get("OPENSWARM_PORT", "8325")
 BACKEND_URL = f"http://127.0.0.1:{BACKEND_PORT}/api/agents/browser-agent/run"
 MODEL = os.environ.get("OPENSWARM_AGENT_MODEL", "sonnet")
 DASHBOARD_ID = os.environ.get("OPENSWARM_DASHBOARD_ID", "")

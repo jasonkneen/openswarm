@@ -2,6 +2,8 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 
+const portsConfig = require('../ports.config.json');
+
 module.exports = (env, argv) => {
   const isDevelopment = argv.mode === 'development';
 
@@ -79,13 +81,13 @@ module.exports = (env, argv) => {
     devServer: {
       static: { directory: path.join(__dirname, 'public') },
       compress: true,
-      port: 3000,
+      port: portsConfig.frontend.dev,
       hot: true,
       open: false,
       historyApiFallback: true,
       proxy: {
         '/api': {
-          target: 'http://localhost:8324',
+          target: `http://localhost:${portsConfig.backend.dev}`,
           changeOrigin: true,
         },
       },

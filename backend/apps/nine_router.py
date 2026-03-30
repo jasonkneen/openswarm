@@ -17,7 +17,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-NINE_ROUTER_PORT = 20128
+from backend.ports import NINE_ROUTER_PORT
 NINE_ROUTER_URL = f"http://localhost:{NINE_ROUTER_PORT}"
 NINE_ROUTER_API = f"{NINE_ROUTER_URL}/api"
 NINE_ROUTER_V1 = f"{NINE_ROUTER_URL}/v1"

@@ -55,31 +55,44 @@ function CallbackContent() {
     }
 
     // Method 4: Direct exchange via OpenSwarm backend (works even when postMessage fails)
-    // Fetch pending OAuth data from OpenSwarm, then call 9Router's exchange endpoint
+    // The backend port is dynamic (8325 dev, 8324+ prod), so try known ports and
+    // use whichever has a matching pending state entry.
     if (code && state) {
       (async () => {
-        try {
-          const pendingRes = await fetch(`http://localhost:8324/api/subscriptions/pending/${encodeURIComponent(state)}`);
-          if (pendingRes.ok) {
-            const pending = await pendingRes.json();
-            if (pending.provider && pending.code_verifier) {
-              const exchangeRes = await fetch(`/api/oauth/${pending.provider}/exchange`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  code,
-                  redirectUri: pending.redirect_uri,
-                  codeVerifier: pending.code_verifier,
-                  state,
-                }),
-              });
-              if (exchangeRes.ok) {
-                console.log("Direct exchange successful");
-              }
+        const portsToTry = [8325, 8324];
+        let pending = null;
+        for (const port of portsToTry) {
+          try {
+            const res = await fetch(
+              `http://localhost:${port}/api/subscriptions/pending/${encodeURIComponent(state)}`,
+              { signal: AbortSignal.timeout(1000) },
+            );
+            if (res.ok) {
+              pending = await res.json();
+              break;
             }
+          } catch {
+            /* port not reachable, try next */
           }
-        } catch (e) {
-          console.log("Direct exchange fallback failed:", e);
+        }
+        if (pending?.provider && pending?.code_verifier) {
+          try {
+            const exchangeRes = await fetch(`/api/oauth/${pending.provider}/exchange`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                code,
+                redirectUri: pending.redirect_uri,
+                codeVerifier: pending.code_verifier,
+                state,
+              }),
+            });
+            if (exchangeRes.ok) {
+              console.log("Direct exchange successful");
+            }
+          } catch (e) {
+            console.log("Direct exchange failed:", e);
+          }
         }
       })();
     }

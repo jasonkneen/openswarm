@@ -13,6 +13,8 @@ from typing import Any, Optional
 from urllib.parse import urlencode
 
 import httpx
+
+from backend.ports import BACKEND_DEV_PORT
 from fastapi import HTTPException, Query
 from fastapi.responses import HTMLResponse
 
@@ -43,7 +45,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query("")):
 
     client_id = os.environ.get(provider.client_id_env, "")
     client_secret = os.environ.get(provider.client_secret_env, "")
-    _port = os.environ.get("OPENSWARM_PORT", "8324")
+    _port = os.environ.get("OPENSWARM_PORT", str(BACKEND_DEV_PORT))
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
 
     token_data: dict[str, str] = {
@@ -166,7 +168,7 @@ async def oauth_start(tool_id: str):
     if not client_id:
         raise HTTPException(status_code=400, detail=f"{provider.client_id_env} not set in backend .env")
 
-    _port = os.environ.get("OPENSWARM_PORT", "8324")
+    _port = os.environ.get("OPENSWARM_PORT", str(BACKEND_DEV_PORT))
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
     provider_key = tool.oauth_provider or "google"
     state = f"{provider_key}:{tool_id}"

@@ -118,6 +118,8 @@ STAGING_DIR="$PROJECT_ROOT/electron/build-staging"
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
+cp "$PROJECT_ROOT/ports.config.json" "$STAGING_DIR/ports.config.json"
+
 rsync -a \
     --exclude='__pycache__' --exclude='**/__pycache__' \
     --exclude='*.pyc' --exclude='.venv' \

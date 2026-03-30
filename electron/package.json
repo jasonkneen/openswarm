@@ -60,6 +60,10 @@
     },
     "extraResources": [
       {
+        "from": "build-staging/ports.config.json",
+        "to": "ports.config.json"
+      },
+      {
         "from": "build-staging/frontend",
         "to": "frontend",
         "filter": [

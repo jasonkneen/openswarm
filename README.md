@@ -89,7 +89,7 @@ cd openswarm
 bash run/local.sh
 ```
 
-This starts the backend (port 8324), frontend (port 3000), and Electron shell together. Once running, set your Anthropic API key in the in-app Settings page.
+This starts the backend (port 8325), frontend (port 3000), and Electron shell together. Once running, set your Anthropic API key in the in-app Settings page.
 
 See the **[Contributing Guide](CONTRIBUTING.md)** for detailed setup options, environment configuration, Google Workspace integration, and troubleshooting.
 
@@ -101,7 +101,7 @@ See the **[Contributing Guide](CONTRIBUTING.md)** for detailed setup options, en
 Electron Shell (desktop wrapper, auto-updater)
 ├─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
-│   Frontend (React/TypeScript :3000)       Backend (FastAPI :8324)   │
+│   Frontend (React/TypeScript :3000)       Backend (FastAPI :8325)   │
 │   ┌───────────────────────────────┐      ┌───────────────────────┐  │
 │   │  Spatial Dashboard Canvas     │◄────►│  REST API  (/api/*)   │  │
 │   │  Agent Chat (streaming)       │      │  WebSocket (/ws/*)    │  │

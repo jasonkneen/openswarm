@@ -26,6 +26,7 @@ from backend.apps.tools_lib.tools_lib import (
     load_builtin_permissions,
 )
 from backend.apps.common.mcp_utils import sanitize_server_name as _sanitize_server_name
+from backend.ports import BACKEND_DEV_PORT, NINE_ROUTER_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ async def build_agent_options(
 
     if not _browser_all_denied:
         browser_agent_server_path = os.path.join(os.path.dirname(__file__), "browser_agent_mcp_server.py")
-        backend_port = os.environ.get("OPENSWARM_PORT", "8324")
+        backend_port = os.environ.get("OPENSWARM_PORT", str(BACKEND_DEV_PORT))
         pre_selected_bids = get_pre_selected_browser_ids(session.dashboard_id)
         mcp_servers["openswarm-browser-agent"] = {
             "command": sys.executable,
@@ -91,7 +92,7 @@ async def build_agent_options(
 
     if not _invoke_all_denied:
         invoke_agent_server_path = os.path.join(os.path.dirname(__file__), "invoke_agent_mcp_server.py")
-        backend_port = os.environ.get("OPENSWARM_PORT", "8324")
+        backend_port = os.environ.get("OPENSWARM_PORT", str(BACKEND_DEV_PORT))
         mcp_servers["openswarm-invoke-agent"] = {
             "command": sys.executable,
             "args": [invoke_agent_server_path],
@@ -128,7 +129,7 @@ async def build_agent_options(
     elif _9r_running():
         options_kwargs["env"] = {
             "ANTHROPIC_API_KEY": "9router",
-            "ANTHROPIC_BASE_URL": "http://localhost:20128",
+            "ANTHROPIC_BASE_URL": f"http://localhost:{NINE_ROUTER_PORT}",
         }
         options_kwargs["extra_args"] = {"bare": None}
         logger.info("[MCP-DEBUG] Using 9Router (bare mode)")

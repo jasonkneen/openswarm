@@ -1,0 +1,10 @@
+{
+  "backend": {
+    "dev": 8325,
+    "prod": { "start": 8326, "end": 8424 }
+  },
+  "frontend": {
+    "dev": 3000
+  },
+  "nineRouter": 20128
+}

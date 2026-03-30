@@ -68,9 +68,12 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
+# --- Read dev port from ports.config.json ---
+BACKEND_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT_ABSPATH/ports.config.json'))['backend']['dev'])")
+
 # --- Start the backend server ---
-echo "Starting backend server on http://0.0.0.0:8324 ..."
+echo "Starting backend server on http://0.0.0.0:${BACKEND_PORT} ..."
 cd "$PROJECT_ROOT_ABSPATH"
-python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8324 --reload \
+python3 -m uvicorn backend.main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload \
     --reload-dir "$BACKEND_DIR_ABSPATH" \
     --reload-exclude '*.pyc'

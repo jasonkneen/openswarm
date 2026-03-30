@@ -8,6 +8,15 @@ const fs = require('fs');
 const getPort = require('get-port');
 const http = require('http');
 
+const portsConfig = JSON.parse(
+  fs.readFileSync(
+    app.isPackaged
+      ? path.join(process.resourcesPath, 'ports.config.json')
+      : path.join(__dirname, '..', 'ports.config.json'),
+    'utf8',
+  )
+);
+
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -139,7 +148,7 @@ function waitForBackend(port, timeoutMs = 60000) {
 }
 
 async function startBackend() {
-  backendPort = await getPort({ port: getPort.makeRange(8324, 8424) });
+  backendPort = await getPort({ port: getPort.makeRange(portsConfig.backend.prod.start, portsConfig.backend.prod.end) });
 
   const pythonPath = getPythonPath();
   const backendDir = getResourcePath('backend');
@@ -368,7 +377,7 @@ app.whenReady().then(async () => {
 
   try {
     if (isDev) {
-      backendPort = parseInt(process.env.OPENSWARM_PORT || '8324', 10);
+      backendPort = parseInt(process.env.OPENSWARM_PORT || String(portsConfig.backend.dev), 10);
       console.log(`Dev mode: using existing backend on port ${backendPort}`);
     } else {
       await startBackend();

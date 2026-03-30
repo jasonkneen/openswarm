@@ -1,5 +1,6 @@
 import os
 
+from backend.ports import BACKEND_DEV_PORT
 from fastapi import FastAPI, APIRouter
 # import debug
 from uuid import uuid4
@@ -32,7 +33,7 @@ class MainApp:
                 for sub_app in sub_apps:
                     # debug(sub_app.name)
                     await stack.enter_async_context(sub_app.lifespan())
-                _port = os.environ.get("OPENSWARM_PORT", "8324")
+                _port = os.environ.get("OPENSWARM_PORT", str(BACKEND_DEV_PORT))
                 print(f"\nCheck out the API docs at: http://127.0.0.1:{_port}/docs\n")
                 yield
                 

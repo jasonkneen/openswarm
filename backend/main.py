@@ -1,6 +1,8 @@
 import logging
 import os
 
+from backend.ports import get_backend_port
+
 logger = logging.getLogger(__name__)
 
 from backend.config.Apps import MainApp
@@ -68,7 +70,7 @@ if __name__ == "__main__":
     import uvicorn
 
     parser = argparse.ArgumentParser(description="OpenSwarm backend server")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("OPENSWARM_PORT", "8324")))
+    parser.add_argument("--port", type=int, default=get_backend_port())
     parser.add_argument("--host", default=os.environ.get("OPENSWARM_HOST", "127.0.0.1"))
     parser.add_argument("--reload", action="store_true", default=False)
     args = parser.parse_args()

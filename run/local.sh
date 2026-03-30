@@ -85,6 +85,10 @@ if [ ! -f "$UV_BIN_DIR/uvx" ]; then
     rm -rf /tmp/uv-*-apple-darwin
 fi
 
+# --- Read ports from config ---
+BACKEND_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/ports.config.json'))['backend']['dev'])")
+FRONTEND_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/ports.config.json'))['frontend']['dev'])")
+
 # --- Start backend ---
 echo -e "${BLUE}${BOLD}[backend]${RESET}  Starting backend server..."
 bash "$PROJECT_ROOT/backend/run.sh" > >(
@@ -95,11 +99,11 @@ bash "$PROJECT_ROOT/backend/run.sh" > >(
 BACKEND_PID=$!
 
 # --- Wait for backend to become healthy ---
-echo -e "${YELLOW}${BOLD}Waiting for backend (http://localhost:8324) to be ready...${RESET}"
+echo -e "${YELLOW}${BOLD}Waiting for backend (http://localhost:${BACKEND_PORT}) to be ready...${RESET}"
 MAX_WAIT=120
 elapsed=0
 while (( elapsed < MAX_WAIT )); do
-    if curl -s -o /dev/null --connect-timeout 1 http://localhost:8324/ 2>/dev/null; then
+    if curl -s -o /dev/null --connect-timeout 1 "http://localhost:${BACKEND_PORT}/" 2>/dev/null; then
         echo -e "${GREEN}${BOLD}Backend is ready!${RESET}"
         break
     fi
@@ -126,11 +130,11 @@ bash "$PROJECT_ROOT/frontend/run.sh" > >(
 FRONTEND_PID=$!
 
 # --- Wait for frontend dev server to become available ---
-echo -e "${YELLOW}${BOLD}Waiting for frontend (http://localhost:3000) to be ready...${RESET}"
+echo -e "${YELLOW}${BOLD}Waiting for frontend (http://localhost:${FRONTEND_PORT}) to be ready...${RESET}"
 FRONTEND_MAX_WAIT=60
 frontend_elapsed=0
 while (( frontend_elapsed < FRONTEND_MAX_WAIT )); do
-    if curl -s -o /dev/null --connect-timeout 1 http://localhost:3000/ 2>/dev/null; then
+    if curl -s -o /dev/null --connect-timeout 1 "http://localhost:${FRONTEND_PORT}/" 2>/dev/null; then
         echo -e "${GREEN}${BOLD}Frontend is ready!${RESET}"
         break
     fi
@@ -175,8 +179,8 @@ ELECTRON_PID=$!
 
 echo ""
 echo -e "${BOLD}All services are running. Press Ctrl+C to stop.${RESET}"
-echo -e "  Backend:  ${BLUE}http://localhost:8324${RESET}"
-echo -e "  Frontend: ${GREEN}http://localhost:3000${RESET}"
+echo -e "  Backend:  ${BLUE}http://localhost:${BACKEND_PORT}${RESET}"
+echo -e "  Frontend: ${GREEN}http://localhost:${FRONTEND_PORT}${RESET}"
 echo -e "  Electron: ${MAGENTA}dev shell (pid $ELECTRON_PID)${RESET}"
 echo ""
 

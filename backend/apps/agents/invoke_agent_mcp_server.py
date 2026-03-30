@@ -13,7 +13,7 @@ import os
 import urllib.request
 import urllib.error
 
-BACKEND_PORT = os.environ.get("OPENSWARM_PORT", "8324")
+BACKEND_PORT = os.environ.get("OPENSWARM_PORT", "8325")
 BACKEND_URL = f"http://127.0.0.1:{BACKEND_PORT}/api/agents/invoke-agent/run"
 PARENT_SESSION_ID = os.environ.get("OPENSWARM_PARENT_SESSION_ID", "")
 DASHBOARD_ID = os.environ.get("OPENSWARM_DASHBOARD_ID", "")
