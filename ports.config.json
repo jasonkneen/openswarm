@@ -1,7 +1,7 @@
 {
   "backend": {
-    "dev": 8325,
-    "prod": { "start": 8326, "end": 8424 }
+    "dev": 8324,
+    "prod": 8325
   },
   "frontend": {
     "dev": 3000

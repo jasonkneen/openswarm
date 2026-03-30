@@ -148,7 +148,7 @@ function waitForBackend(port, timeoutMs = 60000) {
 }
 
 async function startBackend() {
-  backendPort = await getPort({ port: getPort.makeRange(portsConfig.backend.prod.start, portsConfig.backend.prod.end) });
+  backendPort = await getPort({ port: portsConfig.backend.prod });
 
   const pythonPath = getPythonPath();
   const backendDir = getResourcePath('backend');

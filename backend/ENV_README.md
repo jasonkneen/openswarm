@@ -66,9 +66,9 @@ These let users sign in with their Google account.
 5. **Name**: `OpenSwarm` (or anything you want).
 6. Under **Authorized redirect URIs**, click **+ Add URI** and add:
    ```
-   http://localhost:8324/api/auth/google/callback
+   http://localhost:8325/api/tools/oauth/callback
    ```
-   (Replace `8324` with your `BACKEND_PORT` if you changed it.)
+   (Replace `8325` with your `OPENSWARM_PORT` if you changed it.)
 7. Click **Create**.
 
 ### Step 6 — Copy the values

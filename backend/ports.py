@@ -12,8 +12,7 @@ with open(_config_path) as _f:
     _cfg = json.load(_f)
 
 BACKEND_DEV_PORT: int = _cfg["backend"]["dev"]
-BACKEND_PROD_PORT_START: int = _cfg["backend"]["prod"]["start"]
-BACKEND_PROD_PORT_END: int = _cfg["backend"]["prod"]["end"]
+BACKEND_PROD_PORT: int = _cfg["backend"]["prod"]
 FRONTEND_DEV_PORT: int = _cfg["frontend"]["dev"]
 NINE_ROUTER_DEV_PORT: int = _cfg["nineRouter"]["dev"]
 NINE_ROUTER_PROD_PORT: int = _cfg["nineRouter"]["prod"]
