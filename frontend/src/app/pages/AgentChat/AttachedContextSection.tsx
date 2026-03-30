@@ -13,7 +13,12 @@ import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import { AgentMessage } from '@/shared/state/agentsSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { SKILL_COLOR } from '@/app/components/richEditorUtils';
-import { ParsedElement } from './messageBubbleUtils';
+
+interface ParsedElement {
+  label: string;
+  selector: string;
+  isSemantic?: boolean;
+}
 
 interface ContextGroup {
   key: string;
