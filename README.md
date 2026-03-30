@@ -7,7 +7,7 @@
 <p align="center">
   <strong>An Army of AI Agents at Your Fingertips</strong>
   <br>
-  A locally-running orchestrator for managing multiple agents in parallel.
+  An open-source locally-running orchestrator for managing multiple agents in parallel.
   <br>
   Launch, monitor, and coordinate entire swarms of coding agents from a single interface.
 </p>
