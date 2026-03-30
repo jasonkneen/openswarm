@@ -5,6 +5,7 @@ Moved from agents.py and main.py to a dedicated sub-app.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -16,12 +17,16 @@ from backend.config.Apps import SubApp
 logger = logging.getLogger(__name__)
 
 _pending_oauth: dict[str, dict] = {}
+_ensure_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def subscriptions_lifespan():
     logger.info("Subscriptions sub-app starting")
     yield
+    global _ensure_task
+    if _ensure_task and not _ensure_task.done():
+        _ensure_task.cancel()
     logger.info("Subscriptions sub-app shutting down")
 
 
@@ -31,8 +36,11 @@ subscriptions = SubApp("subscriptions", subscriptions_lifespan)
 @subscriptions.router.get("/status")
 async def subscriptions_status():
     """Check if 9Router is running and list connected providers."""
-    from backend.apps.nine_router import is_running, get_providers, get_models
+    global _ensure_task
+    from backend.apps.nine_router import is_running, ensure_running, get_providers, get_models
     if not is_running():
+        if _ensure_task is None or _ensure_task.done():
+            _ensure_task = asyncio.create_task(ensure_running())
         return {"running": False, "providers": [], "models": []}
     providers = await get_providers()
     models = await get_models()

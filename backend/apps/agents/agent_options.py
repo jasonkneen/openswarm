@@ -11,9 +11,10 @@ import os
 import sys
 
 from backend.apps.agents.models import AgentSession
-from backend.apps.agents.prompt_builder import (
-    resolve_mode, compose_system_prompt, build_connected_tools_context,
-    build_outputs_context, build_browser_context, get_pre_selected_browser_ids,
+from backend.apps.agents.prompt_builder import resolve_mode, compose_system_prompt
+from backend.apps.agents.prompt_context import (
+    build_connected_tools_context, build_outputs_context,
+    build_browser_context, get_pre_selected_browser_ids,
 )
 from backend.apps.agents.mcp_builder import (
     FULL_TOOLS, build_mcp_servers, get_all_tool_names,

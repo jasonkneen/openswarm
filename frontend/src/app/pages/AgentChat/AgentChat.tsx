@@ -4,7 +4,6 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { AgentMessage, editMessage, switchBranch, duplicateSession, setActiveSession } from '@/shared/state/agentsSlice';
 import MessageBubble from './MessageBubble';
 import MessageActionBar from './MessageActionBar';
@@ -12,9 +11,9 @@ import ToolCallBubble from './ToolCallBubble';
 import ToolGroupBubble, { isToolGroup, isToolPair } from './ToolGroupBubble';
 import ApprovalBar, { BatchApprovalBar } from './ApprovalBar';
 import ChatInput from './ChatInput';
-import ThinkingBubble from './ThinkingBubble';
 import ChatHeader from './ChatHeader';
 import MessageQueue from './MessageQueue';
+import StreamingSection from './StreamingSection';
 import { useAgentChat } from './hooks/useAgentChat';
 import { useMessageRendering } from './hooks/useMessageRendering';
 import { ContextPath } from '@/app/components/DirectoryBrowser';
@@ -136,49 +135,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
                 </Box>
               );
             })}
-            {session.streamingMessage && (
-              session.streamingMessage.role === 'tool_call' ? (
-                <ToolCallBubble
-                  key={`streaming-${session.streamingMessage.id}`}
-                  isStreaming
-                  isPending
-                  sessionId={session.id}
-                  call={{
-                    id: session.streamingMessage.id, role: 'tool_call',
-                    content: { tool: session.streamingMessage.tool_name || '', input: session.streamingMessage.content },
-                    timestamp: new Date().toISOString(), branch_id: session.active_branch_id || 'main', parent_id: null,
-                  }}
-                />
-              ) : (
-                <MessageBubble
-                  key={`streaming-${session.streamingMessage.id}`}
-                  isStreaming
-                  message={{
-                    id: session.streamingMessage.id, role: session.streamingMessage.role,
-                    content: session.streamingMessage.content, timestamp: new Date().toISOString(),
-                    branch_id: session.active_branch_id || 'main', parent_id: null,
-                  }}
-                />
-              )
-            )}
-            {(awaitingResponse || (session.status === 'running' && !session.streamingMessage)) && <ThinkingBubble />}
-            {showResumeBubble && session.status === 'stopped' && (
-              <Box sx={{ display: 'flex', justifyContent: 'flex-start', my: 0.75 }}>
-                <Box
-                  onClick={handleResume}
-                  sx={{
-                    display: 'inline-flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.75,
-                    borderRadius: '12px', cursor: 'pointer',
-                    bgcolor: `${c.accent.primary}10`, border: `1px solid ${c.accent.primary}30`,
-                    transition: 'all 0.15s',
-                    '&:hover': { bgcolor: `${c.accent.primary}1a`, border: `1px solid ${c.accent.primary}50` },
-                  }}
-                >
-                  <PlayArrowIcon sx={{ fontSize: 14, color: c.accent.primary }} />
-                  <Typography sx={{ fontSize: '0.78rem', fontWeight: 500, color: c.accent.primary }}>Resume Agent Response</Typography>
-                </Box>
-              </Box>
-            )}
+            <StreamingSection session={session} awaitingResponse={awaitingResponse} showResumeBubble={showResumeBubble} handleResume={handleResume} />
           </Box>
           {showScrollButton && (
             <Tooltip title="Scroll to bottom">
