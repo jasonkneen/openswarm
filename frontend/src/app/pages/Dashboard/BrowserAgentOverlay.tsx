@@ -9,9 +9,11 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import { AgentSession, AgentMessage, stopAgent } from '@/shared/state/agentsSlice';
+import { AgentSession, stopAgent } from '@/shared/state/agentsSlice';
 import { useAppDispatch } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
+import { summarizeMessage } from './browserAgentOverlayUtils';
+import OverlayActionLog from './OverlayActionLog';
 
 interface Props {
   session: AgentSession;
@@ -19,42 +21,9 @@ interface Props {
   browserHeight: number;
 }
 
-function summarizeMessage(msg: AgentMessage): { type: 'thought' | 'action' | 'result' | 'skip'; text: string } {
-  if (msg.role === 'assistant' && typeof msg.content === 'string') {
-    const trimmed = msg.content.trim();
-    if (!trimmed) return { type: 'skip', text: '' };
-    return { type: 'thought', text: trimmed };
-  }
-
-  if (msg.role === 'tool_call') {
-    const content = typeof msg.content === 'string' ? (() => { try { return JSON.parse(msg.content); } catch { return {}; } })() : msg.content;
-    const tool = content?.tool || content?.name || '?';
-    const input = content?.input || {};
-    let brief = '';
-    switch (tool) {
-      case 'BrowserNavigate': brief = `Navigate → ${input.url || '...'}`; break;
-      case 'BrowserClick': brief = `Click ${input.selector || '...'}`; break;
-      case 'BrowserType': brief = `Type "${(input.text || '').slice(0, 30)}${(input.text || '').length > 30 ? '…' : ''}" into ${input.selector || '...'}`; break;
-      case 'BrowserScreenshot': brief = 'Screenshot'; break;
-      case 'BrowserGetText': brief = 'Read page text'; break;
-      case 'BrowserGetElements': brief = `Inspect elements${input.selector ? ` (${input.selector})` : ''}`; break;
-      case 'BrowserEvaluate': brief = `Evaluate JS`; break;
-      default: brief = tool;
-    }
-    return { type: 'action', text: brief };
-  }
-
-  if (msg.role === 'tool_result') {
-    return { type: 'result', text: '' };
-  }
-
-  return { type: 'skip', text: '' };
-}
-
 const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHeight }) => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
-  const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
@@ -89,12 +58,6 @@ const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHe
     }
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [fadeOut]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [session.messages.length, session.streamingMessage]);
 
   const handleStop = useCallback(() => {
     if (!confirmStop) {
@@ -160,7 +123,6 @@ const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHe
         },
       }}
     >
-      {/* Header */}
       <Box
         sx={{
           display: 'flex',
@@ -253,92 +215,14 @@ const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHe
         )}
       </Box>
 
-      {/* Body — scrollable action log */}
-      <Box
-        ref={scrollRef}
-        sx={{
-          flex: 1,
-          overflowY: 'auto',
-          px: 1.25,
-          py: 0.75,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 0.5,
-          scrollbarWidth: 'thin',
-          scrollbarColor: 'rgba(255,255,255,0.12) transparent',
-          '&::-webkit-scrollbar': { width: 4 },
-          '&::-webkit-scrollbar-thumb': {
-            background: 'rgba(255,255,255,0.12)',
-            borderRadius: 2,
-          },
-        }}
-      >
-        {entries.length === 0 && isRunning && (
-          <Typography sx={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.35)', fontStyle: 'italic' }}>
-            Starting...
-          </Typography>
-        )}
-
-        {entries.map((entry, i) => (
-          <Box key={i} sx={{ display: 'flex', gap: 0.5, alignItems: 'flex-start', minWidth: 0 }}>
-            {entry.type === 'thought' ? (
-              <>
-                <Box
-                  sx={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: '50%',
-                    bgcolor: 'rgba(255,255,255,0.25)',
-                    flexShrink: 0,
-                    mt: '5px',
-                  }}
-                />
-                <Typography
-                  sx={{
-                    fontSize: '0.68rem',
-                    color: 'rgba(255,255,255,0.6)',
-                    lineHeight: 1.4,
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitLineClamp: expanded ? 6 : 2,
-                    WebkitBoxOrient: 'vertical',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {entry.text}
-                </Typography>
-              </>
-            ) : (
-              <>
-                <Box
-                  sx={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: '1px',
-                    bgcolor: accentColor,
-                    flexShrink: 0,
-                    mt: '5px',
-                    transform: 'rotate(45deg)',
-                  }}
-                />
-                <Typography
-                  sx={{
-                    fontSize: '0.68rem',
-                    fontFamily: c.font.mono,
-                    color: accentColor,
-                    lineHeight: 1.4,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {entry.text}
-                </Typography>
-              </>
-            )}
-          </Box>
-        ))}
-      </Box>
+      <OverlayActionLog
+        entries={entries}
+        expanded={expanded}
+        isRunning={isRunning}
+        accentColor={accentColor}
+        messageCount={session.messages.length}
+        streamingContent={streamingMsg?.content}
+      />
     </Box>
   );
 };

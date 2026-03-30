@@ -1,0 +1,222 @@
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
+import { useAppDispatch, useAppSelector } from '@/shared/hooks';
+import {
+  sendMessage as sendMessageThunk,
+  launchAndSendFirstMessage,
+  generateTitle,
+  stopAgent,
+  handleApproval,
+  editMessage,
+  updateSessionModel,
+  updateSessionMode,
+  fetchSession,
+} from '@/shared/state/agentsSlice';
+import { fetchModes } from '@/shared/state/modesSlice';
+import { createSessionWs } from '@/shared/ws/WebSocketManager';
+import type { ChatInputHandle } from '../ChatInput';
+import type { ContextPath } from '@/app/components/DirectoryBrowser';
+import { setGlowingBrowserCards, fadeGlowingBrowserCards, clearGlowingBrowserCards } from '@/shared/state/dashboardLayoutSlice';
+
+export interface QueuedMessage {
+  prompt: string;
+  images?: Array<{ data: string; media_type: string }>;
+  contextPaths?: Array<{ path: string; type: 'file' | 'directory' }>;
+  forcedTools?: string[];
+  attachedSkills?: Array<{ id: string; name: string; content: string }>;
+  selectedBrowserIds?: string[];
+}
+
+interface UseAgentChatParams {
+  sessionId?: string;
+  initialContextPaths?: ContextPath[];
+}
+
+export function useAgentChat({ sessionId: sessionIdProp, initialContextPaths }: UseAgentChatParams) {
+  const { id: routeId } = useParams<{ id: string }>();
+  const id = sessionIdProp || routeId;
+  const dispatch = useAppDispatch();
+  const session = useAppSelector((state) => (id ? state.agents.sessions[id] : undefined));
+  const modesMap = useAppSelector((state) => state.modes.items);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
+  const isAtBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showResumeBubble, setShowResumeBubble] = useState(false);
+  const [awaitingResponse, setAwaitingResponse] = useState(false);
+  const [mode, setMode] = useState('agent');
+  const [model, setModel] = useState('sonnet');
+  const wsRef = useRef<ReturnType<typeof createSessionWs> | null>(null);
+  const initialContextApplied = useRef(false);
+  const messageQueueRef = useRef<QueuedMessage[]>([]);
+  const [queueLength, setQueueLength] = useState(0);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+
+  const isDraft = session?.status === 'draft';
+
+  useEffect(() => {
+    if (!id || isDraft) return;
+    const ws = createSessionWs(id);
+    ws.connect();
+    wsRef.current = ws;
+    dispatch(fetchSession(id));
+    return () => { ws.disconnect(); wsRef.current = null; };
+  }, [id, isDraft, dispatch]);
+
+  useEffect(() => {
+    if (initialContextApplied.current || !initialContextPaths?.length) return;
+    const timer = setTimeout(() => {
+      chatInputRef.current?.setContent('', initialContextPaths);
+      initialContextApplied.current = true;
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initialContextPaths]);
+
+  useEffect(() => { if (session) setMode(session.mode); }, [session?.mode]);
+  useEffect(() => { if (session) setModel(session.model); }, [session?.model]);
+  useEffect(() => { if (Object.keys(modesMap).length === 0) dispatch(fetchModes()); }, [dispatch, modesMap]);
+
+  const dispatchMessage = useCallback((msg: QueuedMessage) => {
+    if (!id) return;
+    setShowResumeBubble(false);
+    setAwaitingResponse(true);
+    if (isDraft) {
+      const config: Record<string, any> = { model, mode };
+      if (session?.system_prompt) config.system_prompt = session.system_prompt;
+      if (session?.target_directory) config.target_directory = session.target_directory;
+      dispatch(
+        launchAndSendFirstMessage({ draftId: id, config, prompt: msg.prompt, mode, model, images: msg.images, contextPaths: msg.contextPaths, forcedTools: msg.forcedTools, attachedSkills: msg.attachedSkills, selectedBrowserIds: msg.selectedBrowserIds })
+      ).then((action) => {
+        if (launchAndSendFirstMessage.fulfilled.match(action)) {
+          const realId = action.payload.session.id;
+          dispatch(generateTitle({ sessionId: realId, prompt: msg.prompt }));
+          if (msg.selectedBrowserIds?.length) {
+            dispatch(setGlowingBrowserCards({ browserIds: msg.selectedBrowserIds, sessionId: realId, label: 'Use Browser' }));
+          }
+        }
+      });
+    } else {
+      if (msg.selectedBrowserIds?.length) {
+        dispatch(setGlowingBrowserCards({ browserIds: msg.selectedBrowserIds, sessionId: id, label: 'Use Browser' }));
+      }
+      dispatch(sendMessageThunk({ sessionId: id, prompt: msg.prompt, mode, model, images: msg.images, contextPaths: msg.contextPaths, forcedTools: msg.forcedTools, attachedSkills: msg.attachedSkills, selectedBrowserIds: msg.selectedBrowserIds }))
+        .then((action) => { if (sendMessageThunk.rejected.match(action)) setAwaitingResponse(false); });
+    }
+  }, [id, isDraft, mode, model, session?.system_prompt, session?.target_directory, dispatch]);
+
+  const agentBusy = awaitingResponse || (!isDraft && (session?.status === 'running' || session?.status === 'waiting_approval'));
+
+  const prevStatusRef = useRef(session?.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    const curr = session?.status;
+    prevStatusRef.current = curr;
+    let didDispatchQueued = false;
+    const wasActive = prev === 'running' || prev === 'waiting_approval';
+    const isTerminal = curr === 'completed' || curr === 'stopped' || curr === 'error';
+    if (wasActive && isTerminal) {
+      if (id) {
+        dispatch(fadeGlowingBrowserCards(id));
+        setTimeout(() => dispatch(clearGlowingBrowserCards(id)), 2800);
+      }
+      const nextQueued = messageQueueRef.current.shift();
+      if (nextQueued) {
+        setQueueLength(messageQueueRef.current.length);
+        dispatchMessage(nextQueued);
+        didDispatchQueued = true;
+      } else if (curr === 'stopped') {
+        setShowResumeBubble(true);
+      }
+      const currentMode = modesMap[mode];
+      if (currentMode?.default_next_mode && modesMap[currentMode.default_next_mode]) {
+        setMode(currentMode.default_next_mode);
+        if (id && !isDraft) dispatch(updateSessionMode({ sessionId: id, mode: currentMode.default_next_mode as any }));
+      }
+    }
+    if (curr === 'running') setShowResumeBubble(false);
+    if (curr !== 'draft' && !didDispatchQueued) setAwaitingResponse(false);
+  }, [session?.status, mode, modesMap, id, isDraft, dispatch, dispatchMessage]);
+
+  const SCROLL_THRESHOLD = 50;
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+    isAtBottomRef.current = atBottom;
+    setShowScrollButton(!atBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    isAtBottomRef.current = true;
+    setShowScrollButton(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (isAtBottomRef.current) {
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [session?.messages.length, session?.streamingMessage?.content]);
+
+  const handleSend = (prompt: string, images?: Array<{ data: string; media_type: string }>, contextPaths?: Array<{ path: string; type: 'file' | 'directory' }>, forcedTools?: string[], attachedSkills?: Array<{ id: string; name: string; content: string }>, selectedBrowserIds?: string[]) => {
+    if (!id) return;
+    const msg: QueuedMessage = { prompt, images, contextPaths, forcedTools, attachedSkills, selectedBrowserIds };
+    if (agentBusy) {
+      messageQueueRef.current.push(msg);
+      setQueueLength(messageQueueRef.current.length);
+      return;
+    }
+    dispatchMessage(msg);
+  };
+
+  const handleModeChange = useCallback((newMode: string) => {
+    setMode(newMode);
+    if (id && !isDraft) dispatch(updateSessionMode({ sessionId: id, mode: newMode }));
+  }, [id, isDraft, dispatch]);
+
+  const handleModelChange = useCallback((newModel: string) => {
+    setModel(newModel);
+    if (id && !isDraft) dispatch(updateSessionModel({ sessionId: id, model: newModel }));
+  }, [id, isDraft, dispatch]);
+
+  const handleApprove = (requestId: string, updatedInput?: Record<string, any>) => {
+    dispatch(handleApproval({ requestId, behavior: 'allow', updatedInput }));
+  };
+  const handleDeny = (requestId: string, message?: string) => {
+    dispatch(handleApproval({ requestId, behavior: 'deny', message }));
+  };
+  const handleStop = () => { if (id) dispatch(stopAgent({ sessionId: id })); };
+
+  const handleResume = useCallback(() => {
+    if (!id) return;
+    setShowResumeBubble(false);
+    dispatch(sendMessageThunk({
+      sessionId: id,
+      prompt: "Continue where you left off. Start you're response EXACTLY with 'Sorry, let me pick up where I left off",
+      mode, model, hidden: true,
+    }));
+  }, [id, mode, model, dispatch]);
+
+  const handleSaveEdit = useCallback(
+    (messageId: string, newContent: string) => {
+      if (!id) return;
+      dispatch(editMessage({ sessionId: id, messageId, content: newContent }));
+      setEditingMessageId(null);
+    }, [id, dispatch]
+  );
+  const handleCancelEdit = useCallback(() => { setEditingMessageId(null); }, []);
+
+  return {
+    id, session, isDraft, dispatch, mode, model,
+    scrollContainerRef, chatInputRef, messageQueueRef,
+    showScrollButton, showResumeBubble, awaitingResponse, editingMessageId,
+    queueLength, setQueueLength, agentBusy,
+    handleScroll, scrollToBottom, handleSend,
+    handleModeChange, handleModelChange,
+    handleApprove, handleDeny, handleStop, handleResume,
+    handleSaveEdit, handleCancelEdit, setEditingMessageId,
+  };
+}

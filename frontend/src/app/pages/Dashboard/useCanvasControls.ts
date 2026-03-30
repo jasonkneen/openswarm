@@ -1,216 +1,25 @@
-import { useState, useCallback, useRef, useEffect, useMemo, RefObject } from 'react';
-
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 3.0;
-const ZOOM_IN_FACTOR = 1.1;
-const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
-const FIT_PADDING = 80;
-
-// Maps the 1–100 user setting to an internal multiplier.
-// 50 (default) → 0.004, 1 → 0.0004, 100 → 0.008
-function sensitivityToMultiplier(setting: number): number {
-  return 0.00008 * setting;
-}
-
-interface CanvasState {
-  panX: number;
-  panY: number;
-  zoom: number;
-}
-
-function clamp(val: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, val));
-}
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import {
+  MIN_ZOOM, MAX_ZOOM, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, FIT_PADDING,
+  CanvasState, clamp, zoomAroundCenter,
+} from './canvasControlsUtils';
+import { useWheelZoom, useKeyboardControls, useMousePan } from './useCanvasInputs';
 
 export function useCanvasControls(zoomSensitivity: number = 50) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const [state, setState] = useState<CanvasState>({ panX: 0, panY: 0, zoom: 1 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [spaceHeld, setSpaceHeld] = useState(false);
-  const [cmdHeld, setCmdHeld] = useState(false);
 
-  const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const spaceRef = useRef(false);
-  const cmdRef = useRef(false);
   const sensitivityRef = useRef(zoomSensitivity);
   sensitivityRef.current = zoomSensitivity;
   const animFrameRef = useRef<number | null>(null);
 
-  // Wheel zoom centered on cursor
-  useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-
-    const onWheel = (e: WheelEvent) => {
-      // Pinch-to-zoom on trackpads sets ctrlKey; plain scroll does not
-      const isPinchZoom = e.ctrlKey || e.metaKey;
-
-      // Let scrollable children handle the event when appropriate
-      let target = e.target as HTMLElement | null;
-      while (target && target !== el) {
-        const style = getComputedStyle(target);
-        const overflowY = style.overflowY;
-        const overflowX = style.overflowX;
-
-        const canScrollY =
-          target.scrollHeight > target.clientHeight &&
-          (overflowY === 'auto' || overflowY === 'scroll');
-        const canScrollX =
-          target.scrollWidth > target.clientWidth &&
-          (overflowX === 'auto' || overflowX === 'scroll');
-
-        if ((canScrollY || canScrollX) && !isPinchZoom) {
-          return;
-        }
-        target = target.parentElement;
-      }
-
-      e.preventDefault();
-
-      if (isPinchZoom) {
-        // Pinch gesture → zoom centered on cursor
-        const rect = el.getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
-
-        setState((prev) => {
-          const delta = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
-          const factor = Math.pow(2, -delta * sensitivityToMultiplier(sensitivityRef.current));
-          let newZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-          // Snap to 100% when crossing through the 0.97–1.03 band (trackpad only)
-          if (newZoom > 0.97 && newZoom < 1.03 && (prev.zoom <= 0.97 || prev.zoom >= 1.03)) {
-            newZoom = 1.0;
-          }
-          const ratio = newZoom / prev.zoom;
-          return {
-            panX: cx - (cx - prev.panX) * ratio,
-            panY: cy - (cy - prev.panY) * ratio,
-            zoom: newZoom,
-          };
-        });
-      } else {
-        // Two-finger scroll → pan
-        const dx = e.deltaMode === 1 ? e.deltaX * 40 : e.deltaX;
-        const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
-
-        setState((prev) => ({
-          ...prev,
-          panX: prev.panX - dx,
-          panY: prev.panY - dy,
-        }));
-      }
-    };
-
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
-
-  // Space key tracking
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (e.code === 'Space' && !e.repeat && !(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable)) {
-        e.preventDefault();
-        spaceRef.current = true;
-        setSpaceHeld(true);
-      }
-      if ((e.key === 'Meta' || e.key === 'Control') && !e.repeat) {
-        cmdRef.current = true;
-        setCmdHeld(true);
-      }
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === '0') {
-          e.preventDefault();
-          setState({ panX: 0, panY: 0, zoom: 1 });
-        } else if (e.key === '=' || e.key === '+') {
-          e.preventDefault();
-          setState((prev) => {
-            const newZoom = clamp(prev.zoom * ZOOM_IN_FACTOR, MIN_ZOOM, MAX_ZOOM);
-            const el = viewportRef.current;
-            if (!el) return { ...prev, zoom: newZoom };
-            const rect = el.getBoundingClientRect();
-            const cx = rect.width / 2;
-            const cy = rect.height / 2;
-            const ratio = newZoom / prev.zoom;
-            return { panX: cx - (cx - prev.panX) * ratio, panY: cy - (cy - prev.panY) * ratio, zoom: newZoom };
-          });
-        } else if (e.key === '-') {
-          e.preventDefault();
-          setState((prev) => {
-            const newZoom = clamp(prev.zoom * ZOOM_OUT_FACTOR, MIN_ZOOM, MAX_ZOOM);
-            const el = viewportRef.current;
-            if (!el) return { ...prev, zoom: newZoom };
-            const rect = el.getBoundingClientRect();
-            const cx = rect.width / 2;
-            const cy = rect.height / 2;
-            const ratio = newZoom / prev.zoom;
-            return { panX: cx - (cx - prev.panX) * ratio, panY: cy - (cy - prev.panY) * ratio, zoom: newZoom };
-          });
-        }
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        spaceRef.current = false;
-        setSpaceHeld(false);
-      }
-      if (e.key === 'Meta' || e.key === 'Control') {
-        cmdRef.current = false;
-        setCmdHeld(false);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, []);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsPanning(true);
-    panStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      panX: stateRef.current.panX,
-      panY: stateRef.current.panY,
-    };
-  }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const start = panStartRef.current;
-    if (!start) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    setState((prev) => ({
-      ...prev,
-      panX: start.panX + dx,
-      panY: start.panY + dy,
-    }));
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    panStartRef.current = null;
-    setIsPanning(false);
-  }, []);
-
-  // Clean up panning if mouse leaves the window
-  useEffect(() => {
-    const onUp = () => {
-      if (panStartRef.current) {
-        panStartRef.current = null;
-        setIsPanning(false);
-      }
-    };
-    window.addEventListener('mouseup', onUp);
-    return () => window.removeEventListener('mouseup', onUp);
-  }, []);
+  useWheelZoom(viewportRef, sensitivityRef, setState);
+  const { spaceHeld, cmdHeld } = useKeyboardControls(viewportRef, setState);
+  const { isPanning, handlers } = useMousePan(stateRef, setState);
 
   useEffect(() => {
     return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
@@ -222,10 +31,7 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
       const el = viewportRef.current;
       if (!el) return { ...prev, zoom: newZoom };
       const rect = el.getBoundingClientRect();
-      const cx = rect.width / 2;
-      const cy = rect.height / 2;
-      const ratio = newZoom / prev.zoom;
-      return { panX: cx - (cx - prev.panX) * ratio, panY: cy - (cy - prev.panY) * ratio, zoom: newZoom };
+      return zoomAroundCenter(prev, newZoom, rect.width / 2, rect.height / 2);
     });
   }, []);
 
@@ -235,10 +41,7 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
       const el = viewportRef.current;
       if (!el) return { ...prev, zoom: newZoom };
       const rect = el.getBoundingClientRect();
-      const cx = rect.width / 2;
-      const cy = rect.height / 2;
-      const ratio = newZoom / prev.zoom;
-      return { panX: cx - (cx - prev.panX) * ratio, panY: cy - (cy - prev.panY) * ratio, zoom: newZoom };
+      return zoomAroundCenter(prev, newZoom, rect.width / 2, rect.height / 2);
     });
   }, []);
 
@@ -277,7 +80,9 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
       const contentHeight = maxY - minY;
       const availW = vRect.width - FIT_PADDING * 2;
       const availH = vRect.height - FIT_PADDING * 2;
-      const newZoom = clamp(Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, MAX_ZOOM);
+      const newZoom = clamp(
+        Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, MAX_ZOOM,
+      );
       const newPanX = (vRect.width - contentWidth * newZoom) / 2 - minX * newZoom;
       const newPanY = (vRect.height - contentHeight * newZoom) / 2 - minY * newZoom;
 
@@ -285,7 +90,11 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     });
   }, []);
 
-  const fitToCards = useCallback((cardRects: Array<{ x: number; y: number; width: number; height: number }>, maxZoom?: number, animate?: boolean) => {
+  const fitToCards = useCallback((
+    cardRects: Array<{ x: number; y: number; width: number; height: number }>,
+    maxZoom?: number,
+    animate?: boolean,
+  ) => {
     if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
 
     const viewport = viewportRef.current;
@@ -314,7 +123,9 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     const availW = vRect.width - FIT_PADDING * 2;
     const availH = vRect.height - FIT_PADDING * 2;
     const ceiling = maxZoom ?? MAX_ZOOM;
-    const targetZoom = clamp(Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, ceiling);
+    const targetZoom = clamp(
+      Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, ceiling,
+    );
     const targetPanX = (vRect.width - contentWidth * targetZoom) / 2 - minX * targetZoom;
     const targetPanY = (vRect.height - contentHeight * targetZoom) / 2 - minY * targetZoom;
 
@@ -343,12 +154,6 @@ export function useCanvasControls(zoomSensitivity: number = 50) {
     };
     animFrameRef.current = requestAnimationFrame(step);
   }, []);
-
-  const handlers = useMemo(() => ({
-    onMouseDown: handleMouseDown,
-    onMouseMove: handleMouseMove,
-    onMouseUp: handleMouseUp,
-  }), [handleMouseDown, handleMouseMove, handleMouseUp]);
 
   const actions = useMemo(() => ({
     zoomIn, zoomOut, resetZoom, fitToView, fitToCards,

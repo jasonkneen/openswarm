@@ -1,112 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { SelectedElement, useElementSelection } from './ElementSelectionContext';
+import { useElementSelection } from './ElementSelectionContext';
+import {
+  type OverlayState, type DragRect, type DragPreviewElement, type DomSelectorState,
+  EMPTY_OVERLAY, EMPTY_DRAG, DRAG_THRESHOLD,
+  SELECT_ATTR, SELECT_ID_ATTR, SELECT_META_ATTR,
+  findSelectableAncestor, buildSemanticLabel, buildSelectedElement,
+  computeDragPreview, processDragSelection,
+} from './domSelectorHelpers';
 
-const SELECT_ATTR = 'data-select-type';
-const SELECT_ID_ATTR = 'data-select-id';
-const SELECT_META_ATTR = 'data-select-meta';
-
-const DRAG_SELECT_TYPES = ['agent-card', 'view-card', 'browser-card'] as const;
-const DRAG_SELECTOR = DRAG_SELECT_TYPES.map((t) => `[${SELECT_ATTR}="${t}"]`).join(',');
-
-export interface OverlayState {
-  visible: boolean;
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-  label: string;
-}
-
-export interface DragRect {
-  visible: boolean;
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-const EMPTY_OVERLAY: OverlayState = { visible: false, top: 0, left: 0, width: 0, height: 0, label: '' };
-const EMPTY_DRAG: DragRect = { visible: false, top: 0, left: 0, width: 0, height: 0 };
-
-const SEMANTIC_LABELS: Record<string, string> = {
-  'agent-card': 'Agent',
-  'message': 'Message',
-  'tool-call': 'Tool Call',
-  'tool-group': 'Tool Group',
-  'view-card': 'View',
-  'browser-card': 'Browser',
-};
-
-function findSelectableAncestor(target: Element, excludeId?: string | null): Element | null {
-  let current: Element | null = target;
-  while (current) {
-    if (current.hasAttribute(SELECT_ATTR)) {
-      if (excludeId && current.getAttribute(SELECT_ID_ATTR) === excludeId) return null;
-      return current;
-    }
-    current = current.parentElement;
-  }
-  return null;
-}
-
-function buildSemanticLabel(type: string, meta: Record<string, any>): string {
-  const prefix = SEMANTIC_LABELS[type] || type;
-  if (meta.name) return `${prefix}: ${meta.name}`;
-  if (meta.role && meta.content) {
-    const truncated = String(meta.content).slice(0, 40);
-    return `${prefix} (${meta.role}): ${truncated}${String(meta.content).length > 40 ? '…' : ''}`;
-  }
-  if (meta.label) return `${prefix}: ${meta.label}`;
-  if (meta.tool) return `${prefix}: ${meta.tool}`;
-  return prefix;
-}
-
-function rectsIntersect(
-  a: { top: number; left: number; bottom: number; right: number },
-  b: { top: number; left: number; bottom: number; right: number },
-): boolean {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-}
-
-function buildSelectedElement(el: Element): SelectedElement {
-  const type = el.getAttribute(SELECT_ATTR) || '';
-  const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
-  let meta: Record<string, any> = {};
-  try { meta = JSON.parse(el.getAttribute(SELECT_META_ATTR) || '{}'); } catch {}
-  const rect = el.getBoundingClientRect();
-  const semanticLabel = buildSemanticLabel(type, meta);
-
-  return {
-    id: `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    selectorPath: `[${SELECT_ATTR}="${type}"][${SELECT_ID_ATTR}="${selectId}"]`,
-    tagName: el.tagName,
-    className: '',
-    outerHTML: '',
-    computedStyles: {},
-    boundingRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-    semanticType: type as SelectedElement['semanticType'],
-    semanticLabel,
-    semanticData: { ...meta, selectId },
-  };
-}
-
-export interface DragPreviewElement {
-  selectId: string;
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-  label: string;
-  action: 'add' | 'remove';
-}
-
-const DRAG_THRESHOLD = 5;
-
-export interface DomSelectorState {
-  overlay: OverlayState;
-  dragRect: DragRect;
-  dragPreview: DragPreviewElement[];
-}
+export type { OverlayState, DragRect, DragPreviewElement, DomSelectorState } from './domSelectorHelpers';
 
 export function useDomElementSelector(): DomSelectorState {
   const ctx = useElementSelection();
@@ -139,7 +41,6 @@ export function useDomElementSelector(): DomSelectorState {
   }, [ctx?.selectedElements]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    // If we're drawing a drag rectangle, update it instead of hover overlay
     if (dragOriginRef.current) {
       const origin = dragOriginRef.current;
       const dx = e.clientX - origin.x;
@@ -171,45 +72,14 @@ export function useDomElementSelector(): DomSelectorState {
         dragPreviewRafRef.current = requestAnimationFrame(() => {
           const b = dragBoundsRef.current;
           if (!b) return;
-          const allSelectables = document.querySelectorAll(DRAG_SELECTOR);
-          const preview: DragPreviewElement[] = [];
-          const seen = new Set<string>();
-          const excId = excludeIdRef.current;
-          allSelectables.forEach((el) => {
-            const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
-            if (excId && selectId === excId) return;
-            const rect = el.getBoundingClientRect();
-            if (rectsIntersect(b, { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })) {
-              if (seen.has(selectId)) return;
-              seen.add(selectId);
-              const type = el.getAttribute(SELECT_ATTR) || '';
-              let meta: Record<string, any> = {};
-              try { meta = JSON.parse(el.getAttribute(SELECT_META_ATTR) || '{}'); } catch {}
-              preview.push({
-                selectId,
-                top: rect.top,
-                left: rect.left,
-                width: rect.width,
-                height: rect.height,
-                label: buildSemanticLabel(type, meta),
-                action: selectedIdsRef.current.has(selectId) ? 'remove' : 'add',
-              });
-            }
-          });
-          setDragPreview(preview);
+          setDragPreview(computeDragPreview(b, excludeIdRef.current, selectedIdsRef.current));
         });
       }
       return;
     }
 
     const target = e.target as Element;
-    if (!target) {
-      setOverlay(EMPTY_OVERLAY);
-      hoveredRef.current = null;
-      return;
-    }
-
-    if (target.tagName === 'IFRAME') {
+    if (!target || target.tagName === 'IFRAME') {
       setOverlay(EMPTY_OVERLAY);
       hoveredRef.current = null;
       return;
@@ -265,34 +135,13 @@ export function useDomElementSelector(): DomSelectorState {
         right: Math.max(dragOriginRef.current.x, e.clientX),
         bottom: Math.max(dragOriginRef.current.y, e.clientY),
       };
-
-      const allSelectables = document.querySelectorAll(DRAG_SELECTOR);
-      const processed = new Set<string>();
-
-      const excId = excludeIdRef.current;
-      allSelectables.forEach((el) => {
-        const selectId = el.getAttribute(SELECT_ID_ATTR) || '';
-        if (excId && selectId === excId) return;
-        const rect = el.getBoundingClientRect();
-        const elRect = {
-          left: rect.left,
-          top: rect.top,
-          right: rect.right,
-          bottom: rect.bottom,
-        };
-
-        if (rectsIntersect(dr, elRect)) {
-          if (processed.has(selectId)) return;
-          processed.add(selectId);
-
-          const existingId = selectedIdsRef.current.get(selectId);
-          if (existingId) {
-            ctx.removeSelectedElement(existingId);
-          } else {
-            ctx.addSelectedElement(buildSelectedElement(el));
-          }
-        }
-      });
+      processDragSelection(
+        dr,
+        excludeIdRef.current,
+        selectedIdsRef.current,
+        ctx.addSelectedElement,
+        ctx.removeSelectedElement,
+      );
     }
 
     const wasDragging = isDraggingRef.current;
