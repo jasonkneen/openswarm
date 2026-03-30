@@ -1,12 +1,37 @@
-import React, { useMemo } from 'react';
-import { useAppSelector } from '@/shared/hooks';
-import { ToolDefinition } from '@/shared/state/toolsSlice';
+import React from 'react';
+import type { ReactNode } from 'react';
+import type { MetadataItem } from '@/components/tool-ui/approval-card';
+import {
+  Terminal, FileText, FilePen, Search,
+  MessageCircleQuestion, Wrench,
+} from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface IntegrationMeta {
   label: string;
   color: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }
+
+export interface ParsedTool {
+  isMcp: boolean;
+  serverSlug: string;
+  actionName: string;
+  displayName: string;
+}
+
+export interface McpToolMeta {
+  integration: IntegrationMeta | null;
+  description: string;
+  serverLabel: string;
+}
+
+// ---------------------------------------------------------------------------
+// Integration metadata (ported from approvalUtils.tsx)
+// ---------------------------------------------------------------------------
 
 const GoogleIcon = (
   <svg viewBox="0 0 24 24" width="16" height="16">
@@ -30,12 +55,9 @@ export const INTEGRATION_META: Record<string, IntegrationMeta> = {
   'Reddit': { label: 'Reddit', color: '#FF4500', icon: RedditIcon },
 };
 
-export interface ParsedTool {
-  isMcp: boolean;
-  serverSlug: string;
-  actionName: string;
-  displayName: string;
-}
+// ---------------------------------------------------------------------------
+// Parse / sanitize
+// ---------------------------------------------------------------------------
 
 export function parseMcpToolName(rawName: string): ParsedTool {
   const m = rawName.match(/^mcp__([^_]+(?:-[^_]+)*)__(.+)$/);
@@ -54,35 +76,9 @@ export function sanitizeServerName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-export interface McpToolMeta {
-  integration: IntegrationMeta | null;
-  description: string;
-  serverLabel: string;
-}
-
-export function useMcpToolMeta(parsed: ParsedTool): McpToolMeta {
-  const toolItems = useAppSelector((s) => s.tools.items);
-
-  return useMemo(() => {
-    if (!parsed.isMcp) {
-      return { integration: null, description: '', serverLabel: '' };
-    }
-
-    const toolDef: ToolDefinition | undefined = Object.values(toolItems).find(
-      (t) => t.mcp_config && Object.keys(t.mcp_config).length > 0 && sanitizeServerName(t.name) === parsed.serverSlug
-    );
-
-    if (!toolDef) {
-      return { integration: null, description: '', serverLabel: parsed.serverSlug };
-    }
-
-    const description = toolDef.tool_permissions?._tool_descriptions?.[parsed.actionName] || '';
-    const integration = INTEGRATION_META[toolDef.name] || null;
-    const serverLabel = toolDef.name;
-
-    return { integration, description, serverLabel };
-  }, [parsed, toolItems]);
-}
+// ---------------------------------------------------------------------------
+// MCP input summary
+// ---------------------------------------------------------------------------
 
 export function getMcpInputSummary(actionName: string, toolInput: Record<string, any>): string {
   const lower = actionName.toLowerCase();
@@ -131,9 +127,66 @@ export function getMcpInputSummary(actionName: string, toolInput: Record<string,
     if (stringVals.length >= 2) break;
   }
   if (stringVals.length > 0) {
-    const joined = stringVals.join(' -- ');
+    const joined = stringVals.join(' — ');
     return joined.length > 100 ? joined.slice(0, 97) + '...' : joined;
   }
 
   return '';
+}
+
+// ---------------------------------------------------------------------------
+// Icon helpers
+// ---------------------------------------------------------------------------
+
+const TOOL_ICON_MAP: Record<string, string> = {
+  Bash: 'terminal',
+  Read: 'file-text',
+  Write: 'file-pen',
+  Edit: 'file-pen',
+  Grep: 'search',
+  Glob: 'search',
+  AskUserQuestion: 'message-circle-question',
+};
+
+export function getToolIconName(toolName: string): string {
+  return TOOL_ICON_MAP[toolName] ?? 'wrench';
+}
+
+/** Backward-compatible JSX icon for external consumers (DynamicIsland, etc.) */
+export function getToolIcon(toolName: string): ReactNode {
+  const size = 16;
+  switch (toolName) {
+    case 'Bash': return <Terminal size={size} />;
+    case 'Read': return <FileText size={size} />;
+    case 'Write': case 'Edit': return <FilePen size={size} />;
+    case 'Grep': case 'Glob': return <Search size={size} />;
+    case 'AskUserQuestion': return <MessageCircleQuestion size={size} />;
+    default: return <Wrench size={size} />;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Metadata / danger helpers
+// ---------------------------------------------------------------------------
+
+export function buildMetadata(toolInput: Record<string, any>): MetadataItem[] {
+  return Object.entries(toolInput)
+    .filter(([, v]) => v != null)
+    .slice(0, 5)
+    .map(([key, value]) => ({
+      key,
+      value: typeof value === 'string'
+        ? value.slice(0, 200)
+        : JSON.stringify(value).slice(0, 200),
+    }));
+}
+
+const DANGEROUS_PATTERNS = /\b(rm\s|rmdir|del\s|delete|drop\s|truncate|format)\b/i;
+
+export function isDangerous(toolName: string, toolInput: Record<string, any>): boolean {
+  if (toolName === 'Bash') {
+    const cmd = toolInput.command || '';
+    return DANGEROUS_PATTERNS.test(cmd);
+  }
+  return false;
 }
