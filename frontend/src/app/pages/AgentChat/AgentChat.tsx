@@ -1,16 +1,16 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import { AssistantRuntimeProvider, useAui, Tools } from '@assistant-ui/react';
-import ApprovalBar, { BatchApprovalBar } from './ApprovalBar';
-import ChatInput from './ChatInput';
+import { ApprovalRouter, BatchApprovalWrapper } from './toolkit/approval-tools';
 import ChatHeader from './ChatHeader';
 import MessageQueue from './MessageQueue';
 import OpenSwarmThread from './thread/OpenSwarmThread';
+import OpenSwarmComposer from './composer/OpenSwarmComposer';
 import { useAgentChat } from './hooks/useAgentChat';
-import { useOpenSwarmRuntime } from './runtime/useOpenSwarmRuntime';
+import { useOpenSwarmRuntime, type ComposerExtras, type DispatchableMessage } from './runtime/useOpenSwarmRuntime';
 import { toolkit } from './toolkit';
-import { ContextPath } from '@/app/components/DirectoryBrowser';
+import type { ContextPath } from '@/app/components/DirectoryBrowser';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 interface AgentChatProps {
@@ -27,17 +27,22 @@ interface AgentChatProps {
 const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, autoFocus, isGlowing, onDismissGlow, initialContextPaths, onBranch }) => {
   const c = useClaudeTokens();
   const {
-    id, session, isDraft, dispatch, mode, model,
-    scrollContainerRef, chatInputRef, messageQueueRef,
-    showScrollButton, showResumeBubble, awaitingResponse, editingMessageId,
+    id, session, isDraft, mode, model,
+    messageQueueRef, showResumeBubble,
     queueLength, setQueueLength, agentBusy,
-    handleScroll, scrollToBottom, handleSend,
-    handleModeChange, handleModelChange,
+    handleSend, handleModeChange, handleModelChange,
     handleApprove, handleDeny, handleStop, handleResume,
-    handleSaveEdit, handleCancelEdit, setEditingMessageId,
-  } = useAgentChat({ sessionId, initialContextPaths });
+  } = useAgentChat({ sessionId });
 
-  const runtime = useOpenSwarmRuntime(id);
+  const composerExtrasRef = useRef<ComposerExtras>({});
+  const dispatchForRuntime = useCallback((msg: DispatchableMessage) => {
+    handleSend(msg.prompt, msg.images, msg.contextPaths, msg.forcedTools, msg.attachedSkills, msg.selectedBrowserIds);
+  }, [handleSend]);
+
+  const runtime = useOpenSwarmRuntime(id, {
+    composerExtrasRef,
+    dispatchMessage: dispatchForRuntime,
+  });
   const aui = useAui({ tools: Tools({ toolkit }) });
 
   const contextEstimate = { used: 0, limit: 200_000 };
@@ -57,13 +62,31 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <OpenSwarmThread sessionId={id} onBranchChat={onBranch} />
         </Box>
+
         {session.pending_approvals.length > 1 ? (
-          <BatchApprovalBar requests={session.pending_approvals} onApprove={handleApprove} onDeny={handleDeny} />
+          <BatchApprovalWrapper requests={session.pending_approvals} onApprove={handleApprove} onDeny={handleDeny} />
         ) : (
           session.pending_approvals.map((req) => (
-            <ApprovalBar key={req.id} request={req} onApprove={handleApprove} onDeny={handleDeny} />
+            <ApprovalRouter key={req.id} request={req} onApprove={handleApprove} onDeny={handleDeny} />
           ))
         )}
+
+        {showResumeBubble && session.status === 'stopped' && (
+          <Box
+            onClick={handleResume}
+            sx={{
+              mx: 1.5, mb: 1.5, py: 1.25, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: 2.5, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+              color: c.accent.primary, border: `1.5px solid ${c.accent.primary}`,
+              background: `${c.accent.primary}08`,
+              transition: 'background 0.15s, box-shadow 0.15s',
+              '&:hover': { background: `${c.accent.primary}14` },
+            }}
+          >
+            Resume
+          </Box>
+        )}
+
         {isGlowing ? (
           <Box
             onClick={(e) => { e.stopPropagation(); onDismissGlow?.(); }}
@@ -86,10 +109,8 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
           </Box>
         ) : (
           <MessageQueue messageQueueRef={messageQueueRef} queueLength={queueLength} setQueueLength={setQueueLength}>
-            <ChatInput
-              ref={chatInputRef}
-              onSend={handleSend}
-              disabled={false}
+            <OpenSwarmComposer
+              composerExtrasRef={composerExtrasRef}
               mode={mode}
               onModeChange={handleModeChange}
               model={model}
@@ -100,6 +121,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId, onClose, embedded, aut
               contextEstimate={contextEstimate}
               sessionId={id}
               autoFocus={autoFocus}
+              initialContextPaths={initialContextPaths}
             />
           </MessageQueue>
         )}

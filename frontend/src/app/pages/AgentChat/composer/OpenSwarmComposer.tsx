@@ -5,6 +5,7 @@ import type { Unstable_MentionItem } from '@assistant-ui/core';
 import { useAppSelector } from '@/shared/hooks';
 import type { PromptTemplate } from '@/shared/state/templatesSlice';
 import type { ComposerExtras } from '../runtime/useOpenSwarmRuntime';
+import type { ContextPath } from '@/app/components/DirectoryBrowser';
 import { useOpenSwarmMentionAdapter, type MentionItemMetadata } from './OpenSwarmMentionAdapter';
 import { useComposerAttachments } from './useComposerAttachments';
 import { MentionSelectOverride, MentionPopover, ComposerAttachmentChips } from './ComposerParts';
@@ -23,11 +24,13 @@ export interface OpenSwarmComposerProps {
   queueLength?: number;
   contextEstimate?: { used: number; limit: number };
   autoFocus?: boolean;
+  initialContextPaths?: ContextPath[];
 }
 
 const OpenSwarmComposer: FC<OpenSwarmComposerProps> = ({
   composerExtrasRef, mode, onModeChange, model, onModelChange,
   isRunning, onStop, sessionId, queueLength, contextEstimate, autoFocus,
+  initialContextPaths,
 }) => {
   const aui = useAui();
   const mentionAdapter = useOpenSwarmMentionAdapter();
@@ -36,8 +39,15 @@ const OpenSwarmComposer: FC<OpenSwarmComposerProps> = ({
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [hasContent, setHasContent] = useState(false);
 
+  const initialContextApplied = useRef(false);
   const templates = useAppSelector((s) => s.templates.items);
   const skills = useAppSelector((s) => s.skills.items);
+
+  useEffect(() => {
+    if (initialContextApplied.current || !initialContextPaths?.length) return;
+    att.setContextPaths(initialContextPaths);
+    initialContextApplied.current = true;
+  }, [initialContextPaths, att]);
 
   const syncExtras = useCallback(() => {
     const allForcedTools = att.forcedTools.flatMap((ft) => ft.tools);

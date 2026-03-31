@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import {
@@ -14,8 +14,6 @@ import {
 } from '@/shared/state/agentsSlice';
 import { fetchModes } from '@/shared/state/modesSlice';
 import { createSessionWs } from '@/shared/ws/WebSocketManager';
-import type { ChatInputHandle } from '../ChatInput';
-import type { ContextPath } from '@/app/components/DirectoryBrowser';
 import { setGlowingBrowserCards, fadeGlowingBrowserCards, clearGlowingBrowserCards } from '@/shared/state/dashboardLayoutSlice';
 
 export interface QueuedMessage {
@@ -29,25 +27,19 @@ export interface QueuedMessage {
 
 interface UseAgentChatParams {
   sessionId?: string;
-  initialContextPaths?: ContextPath[];
 }
 
-export function useAgentChat({ sessionId: sessionIdProp, initialContextPaths }: UseAgentChatParams) {
+export function useAgentChat({ sessionId: sessionIdProp }: UseAgentChatParams) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = sessionIdProp || routeId;
   const dispatch = useAppDispatch();
   const session = useAppSelector((state) => (id ? state.agents.sessions[id] : undefined));
   const modesMap = useAppSelector((state) => state.modes.items);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const chatInputRef = useRef<ChatInputHandle>(null);
-  const isAtBottomRef = useRef(true);
-  const [showScrollButton, setShowScrollButton] = useState(false);
   const [showResumeBubble, setShowResumeBubble] = useState(false);
   const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [mode, setMode] = useState('agent');
   const [model, setModel] = useState('sonnet');
   const wsRef = useRef<ReturnType<typeof createSessionWs> | null>(null);
-  const initialContextApplied = useRef(false);
   const messageQueueRef = useRef<QueuedMessage[]>([]);
   const [queueLength, setQueueLength] = useState(0);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -62,15 +54,6 @@ export function useAgentChat({ sessionId: sessionIdProp, initialContextPaths }: 
     dispatch(fetchSession(id));
     return () => { ws.disconnect(); wsRef.current = null; };
   }, [id, isDraft, dispatch]);
-
-  useEffect(() => {
-    if (initialContextApplied.current || !initialContextPaths?.length) return;
-    const timer = setTimeout(() => {
-      chatInputRef.current?.setContent('', initialContextPaths);
-      initialContextApplied.current = true;
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [initialContextPaths]);
 
   useEffect(() => { if (session) setMode(session.mode); }, [session?.mode]);
   useEffect(() => { if (session) setModel(session.model); }, [session?.model]);
@@ -137,30 +120,6 @@ export function useAgentChat({ sessionId: sessionIdProp, initialContextPaths }: 
     if (curr !== 'draft' && !didDispatchQueued) setAwaitingResponse(false);
   }, [session?.status, mode, modesMap, id, isDraft, dispatch, dispatchMessage]);
 
-  const SCROLL_THRESHOLD = 50;
-  const handleScroll = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
-    isAtBottomRef.current = atBottom;
-    setShowScrollButton(!atBottom);
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    isAtBottomRef.current = true;
-    setShowScrollButton(false);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (isAtBottomRef.current) {
-      const el = scrollContainerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    }
-  }, [session?.messages.length, session?.streamingMessage?.content]);
-
   const handleSend = (prompt: string, images?: Array<{ data: string; media_type: string }>, contextPaths?: Array<{ path: string; type: 'file' | 'directory' }>, forcedTools?: string[], attachedSkills?: Array<{ id: string; name: string; content: string }>, selectedBrowserIds?: string[]) => {
     if (!id) return;
     const msg: QueuedMessage = { prompt, images, contextPaths, forcedTools, attachedSkills, selectedBrowserIds };
@@ -211,11 +170,9 @@ export function useAgentChat({ sessionId: sessionIdProp, initialContextPaths }: 
 
   return {
     id, session, isDraft, dispatch, mode, model,
-    scrollContainerRef, chatInputRef, messageQueueRef,
-    showScrollButton, showResumeBubble, awaitingResponse, editingMessageId,
+    messageQueueRef, showResumeBubble, awaitingResponse, editingMessageId,
     queueLength, setQueueLength, agentBusy,
-    handleScroll, scrollToBottom, handleSend,
-    handleModeChange, handleModelChange,
+    handleSend, handleModeChange, handleModelChange,
     handleApprove, handleDeny, handleStop, handleResume,
     handleSaveEdit, handleCancelEdit, setEditingMessageId,
   };

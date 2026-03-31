@@ -11,7 +11,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import { AgentSession, handleApproval } from '@/shared/state/agentsSlice';
 import { useAppDispatch } from '@/shared/hooks';
-import { QuestionForm } from '@/app/pages/AgentChat/ApprovalBar';
+import { ToolQuestion as QuestionForm } from '@/app/pages/AgentChat/toolkit/approval-tools';
 import { parseMcpToolName } from '@/app/pages/AgentChat/ToolCallBubble';
 import GoogleServiceIcon from '@/app/components/GoogleServiceIcon';
 import { summarizeToolInput, getToolDisplayName } from './agentCardUtils';
