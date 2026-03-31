@@ -14,14 +14,14 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
-export interface FileTreeNode {
+interface FileTreeNode {
   name: string;
   path: string;
   isDir: boolean;
   children?: FileTreeNode[];
 }
 
-export function getFileIcon(filename: string): React.ReactNode {
+function getFileIcon(filename: string): React.ReactNode {
   const ext = filename.split('.').pop()?.toLowerCase();
   const size = 15;
   switch (ext) {
@@ -74,7 +74,7 @@ export function buildFileTree(filePaths: string[]): FileTreeNode[] {
   return root;
 }
 
-export interface FileTreeItemProps {
+interface FileTreeItemProps {
   node: FileTreeNode;
   depth: number;
   activeFile: string;
@@ -83,7 +83,7 @@ export interface FileTreeItemProps {
   c: ReturnType<typeof useClaudeTokens>;
 }
 
-export const PROTECTED_FILES = new Set(['index.html', 'schema.json', 'meta.json', 'SKILL.md']);
+const PROTECTED_FILES = new Set(['index.html', 'schema.json', 'meta.json', 'SKILL.md']);
 
 export const FileTreeItem: React.FC<FileTreeItemProps> = ({ node, depth, activeFile, onSelect, onDelete, c }) => {
   const [open, setOpen] = useState(true);

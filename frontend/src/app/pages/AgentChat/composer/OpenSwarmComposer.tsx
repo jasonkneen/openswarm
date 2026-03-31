@@ -10,7 +10,7 @@ import { useComposerAttachments } from './useComposerAttachments';
 import { MentionSelectOverride, MentionPopover, ComposerAttachmentChips } from './ComposerParts';
 import ModelModeSelector from '../ModelModeSelector';
 
-export interface OpenSwarmComposerProps {
+interface OpenSwarmComposerProps {
   composerExtrasRef: MutableRefObject<ComposerExtras>;
   mode: string;
   onModeChange: (mode: string) => void;

@@ -69,7 +69,7 @@ export function sortData<T, K extends Extract<keyof T, string>>(
  * Accepts any JSON-serializable primitive or array of primitives.
  * Arrays are converted to comma-separated strings.
  */
-export function getRowIdentifier(
+function getRowIdentifier(
   row: Record<
     string,
     string | number | boolean | null | (string | number | boolean | null)[]
@@ -210,7 +210,7 @@ export function getDataTableMobileDescriptionId(surfaceId: string): string {
  * parseNumericLike("50%") // 50
  * parseNumericLike("(1234)") // -1234
  */
-export function parseNumericLike(input: string): number | null {
+function parseNumericLike(input: string): number | null {
   // Normalize whitespace (spaces, NBSPs, thin spaces)
   let s = input.replace(/[\u00A0\u202F\s]/g, "").trim();
   if (!s) return null;

@@ -35,7 +35,7 @@ import type {
 } from "./types";
 import type { FormatConfig } from "./formatters";
 
-export const DEFAULT_LOCALE = "en-US" as const;
+const DEFAULT_LOCALE = "en-US" as const;
 
 function isNumericFormat(format?: FormatConfig): boolean {
   const kind = format?.kind;
@@ -60,8 +60,8 @@ const DataTableContext = React.createContext<
   DataTableContextValue<any> | undefined
 >(undefined);
 
-export function useDataTable<T extends object = RowData>() {
-  const context = React.use(DataTableContext) as
+function useDataTable<T extends object = RowData>() {
+  const context = React.useContext(DataTableContext) as
     | DataTableContextValue<T>
     | undefined;
   if (!context) {

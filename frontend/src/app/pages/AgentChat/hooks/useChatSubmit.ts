@@ -12,7 +12,7 @@ import {
 import type { AttachedImage } from '../ImageAttachments';
 import type { ForcedToolGroup } from '../AttachmentChips';
 
-export interface ChatSubmitParams {
+interface ChatSubmitParams {
   editorRef: React.RefObject<HTMLDivElement | null>; attachedSkillsRef: React.MutableRefObject<Record<string, AttachedSkill>>;
   generalFileInputRef: React.RefObject<HTMLInputElement | null>;
   disabled?: boolean; autoRunMode?: boolean; images: AttachedImage[]; contextPaths: ContextPath[];

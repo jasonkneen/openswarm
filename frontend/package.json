@@ -12,6 +12,9 @@
     "knip": "knip"
   },
   "dependencies": {
+    "@assistant-ui/core": "^0.1.9",
+    "@assistant-ui/core": "^0.1.9",
+    "@assistant-ui/core": "^0.1.9",
     "@assistant-ui/react": "^0.12.21",
     "@assistant-ui/react-lexical": "^0.0.3",
     "@assistant-ui/react-markdown": "^0.12.7",

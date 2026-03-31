@@ -20,7 +20,7 @@ const BranchChatContext = createContext<
 >(undefined);
 export const useBranchChatCallback = () => useContext(BranchChatContext);
 
-export interface OpenSwarmThreadProps {
+interface OpenSwarmThreadProps {
   sessionId?: string;
   onBranchChat?: (newSessionId: string) => void;
   children?: ReactNode;

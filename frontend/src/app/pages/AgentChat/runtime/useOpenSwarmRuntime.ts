@@ -30,7 +30,7 @@ export interface DispatchableMessage {
   selectedBrowserIds?: string[];
 }
 
-export interface RuntimeOptions {
+interface RuntimeOptions {
   composerExtrasRef?: MutableRefObject<ComposerExtras>;
   dispatchMessage?: (msg: DispatchableMessage) => void;
 }

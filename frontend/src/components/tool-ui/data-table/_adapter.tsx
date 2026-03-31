@@ -1,12 +1,6 @@
 export { cn } from "@/lib/utils";
 export { Button } from "@/components/ui/button";
 export {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-export {
   Accordion,
   AccordionContent,
   AccordionItem,

@@ -2,7 +2,48 @@
 
 import * as React from "react";
 import { cn, Badge, Tooltip, TooltipContent, TooltipTrigger } from "./_adapter";
-import { resolveSafeNavigationHref } from "../shared/media";
+
+function sanitizeHref(href?: string): string | undefined {
+  if (!href) return undefined;
+  const candidate = href.trim();
+  if (!candidate) return undefined;
+
+  if (
+    candidate.startsWith("/") ||
+    candidate.startsWith("./") ||
+    candidate.startsWith("../") ||
+    candidate.startsWith("?") ||
+    candidate.startsWith("#")
+  ) {
+    if (candidate.startsWith("//")) return undefined;
+    // eslint-disable-next-line no-control-regex -- intentionally matching control characters
+    if (/[\u0000-\u001F\u007F]/.test(candidate)) return undefined;
+    return candidate;
+  }
+
+  try {
+    const url = new URL(candidate);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.toString();
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function resolveSafeNavigationHref(
+  ...candidates: Array<string | null | undefined>
+): string | undefined {
+  for (const candidate of candidates) {
+    const safeHref = sanitizeHref(candidate ?? undefined);
+    if (safeHref) {
+      return safeHref;
+    }
+  }
+
+  return undefined;
+}
 
 type Tone = "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -44,7 +85,7 @@ interface DeltaValueProps {
   locale?: string;
 }
 
-export function DeltaValue({ value, options, locale }: DeltaValueProps) {
+function DeltaValue({ value, options, locale }: DeltaValueProps) {
   const decimals = options?.decimals ?? 2;
   const upIsPositive = options?.upIsPositive ?? true;
   const showSign = options?.showSign ?? true;
@@ -90,7 +131,7 @@ interface StatusBadgeProps {
   options?: Extract<FormatConfig, { kind: "status" }>;
 }
 
-export function StatusBadge({ value, options }: StatusBadgeProps) {
+function StatusBadge({ value, options }: StatusBadgeProps) {
   const config = options?.statusMap?.[value] ?? {
     tone: "neutral" as Tone,
     label: value,
@@ -130,7 +171,7 @@ interface CurrencyValueProps {
   locale?: string;
 }
 
-export function CurrencyValue({ value, options, locale }: CurrencyValueProps) {
+function CurrencyValue({ value, options, locale }: CurrencyValueProps) {
   const currency = options?.currency ?? "USD";
   const decimals = options?.decimals ?? 2;
 
@@ -150,7 +191,7 @@ interface PercentValueProps {
   locale?: string;
 }
 
-export function PercentValue({ value, options, locale }: PercentValueProps) {
+function PercentValue({ value, options, locale }: PercentValueProps) {
   const decimals = options?.decimals ?? 2;
   const showSign = options?.showSign ?? false;
   const basis = options?.basis ?? "fraction";
@@ -173,7 +214,7 @@ interface DateValueProps {
   locale?: string;
 }
 
-export function DateValue({ value, options, locale }: DateValueProps) {
+function DateValue({ value, options, locale }: DateValueProps) {
   const dateFormat = options?.dateFormat ?? "short";
   const date = new Date(value);
 
@@ -248,7 +289,7 @@ interface BooleanValueProps {
   options?: Extract<FormatConfig, { kind: "boolean" }>;
 }
 
-export function BooleanValue({ value, options }: BooleanValueProps) {
+function BooleanValue({ value, options }: BooleanValueProps) {
   const labels = options?.labels ?? { true: "Yes", false: "No" };
   const label = value ? labels.true : labels.false;
   const variant = value ? "secondary" : "outline";
@@ -265,7 +306,7 @@ interface LinkValueProps {
   >;
 }
 
-export function LinkValue({ value, options, row }: LinkValueProps) {
+function LinkValue({ value, options, row }: LinkValueProps) {
   const rawHref =
     options?.hrefKey && row ? String(row[options.hrefKey] ?? "") : value;
   const href = resolveSafeNavigationHref(rawHref);
@@ -300,7 +341,7 @@ interface NumberValueProps {
   locale?: string;
 }
 
-export function NumberValue({ value, options, locale }: NumberValueProps) {
+function NumberValue({ value, options, locale }: NumberValueProps) {
   const decimals = options?.decimals ?? 0;
   const unit = options?.unit ?? "";
   const compact = options?.compact ?? false;
@@ -327,7 +368,7 @@ interface BadgeValueProps {
   options?: Extract<FormatConfig, { kind: "badge" }>;
 }
 
-export function BadgeValue({ value, options }: BadgeValueProps) {
+function BadgeValue({ value, options }: BadgeValueProps) {
   const tone = options?.colorMap?.[value] ?? "neutral";
 
   const variant =
@@ -362,7 +403,7 @@ interface ArrayValueProps {
   options?: Extract<FormatConfig, { kind: "array" }>;
 }
 
-export function ArrayValue({ value, options }: ArrayValueProps) {
+function ArrayValue({ value, options }: ArrayValueProps) {
   const maxVisible = options?.maxVisible ?? 3;
   const items: (string | number | boolean | null)[] = Array.isArray(value)
     ? value

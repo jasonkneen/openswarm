@@ -2,19 +2,19 @@ import { useState, useCallback, useRef } from 'react';
 import { API_BASE } from '@/shared/config';
 import type { ContextPath } from '@/app/components/DirectoryBrowser';
 
-export interface AttachedImage {
+interface AttachedImage {
   data: string;
   media_type: string;
   preview: string;
 }
 
-export interface ForcedToolGroup {
+interface ForcedToolGroup {
   label: string;
   tools: string[];
   iconKey?: string;
 }
 
-export interface AttachedSkill {
+interface AttachedSkill {
   id: string;
   name: string;
   content: string;

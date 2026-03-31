@@ -1,54 +1,16 @@
 import type { ReactNode } from 'react';
 import type { Toolkit } from '@assistant-ui/react';
 import { MessageDraft } from '@/components/tool-ui/message-draft';
-import { DataTable } from '@/components/tool-ui/data-table';
+import { DataTable } from '@/components/tool-ui/data-table/data-table';
 import {
-  parseMcpToolName, getGmailHeader, formatTimestamp, stripHtml,
+  getGmailHeader, formatTimestamp, stripHtml,
 } from '../toolCallUtils';
 
 export { BrowserFeedTracker } from './mcp-browser-feed';
 
 // -- Helpers ----------------------------------------------------------------
 
-/** Unwrap MCP result (string / content-block array / object) into data. */
-export function extractMcpData(result: unknown): Record<string, any> {
-  if (result == null) return {};
-
-  let text: string | undefined;
-
-  if (typeof result === 'string') {
-    text = result;
-  } else if (typeof result === 'object') {
-    const r = result as Record<string, unknown>;
-    for (const k of ['text', 'output', 'content', 'result']) {
-      if (typeof r[k] === 'string') { text = r[k] as string; break; }
-    }
-    if (text === undefined) return result as Record<string, any>;
-  } else {
-    return {};
-  }
-
-  if (!text) return {};
-
-  try {
-    let parsed = JSON.parse(text);
-    if (
-      Array.isArray(parsed) &&
-      parsed.some((b: any) => b?.type === 'text' && typeof b?.text === 'string')
-    ) {
-      const joined = parsed
-        .filter((b: any) => b?.type === 'text')
-        .map((b: any) => b.text)
-        .join('\n');
-      try { parsed = JSON.parse(joined); } catch { return {}; }
-    }
-    if (typeof parsed === 'object' && parsed !== null) return parsed;
-  } catch { /* not JSON */ }
-
-  return {};
-}
-
-export function extractEmailFields(msg: any) {
+function extractEmailFields(msg: any) {
   const subject = msg.subject || getGmailHeader(msg, 'Subject') || '(no subject)';
   const from = msg.from || msg.sender || getGmailHeader(msg, 'From') || '';
   const to = msg.to || msg.recipient || getGmailHeader(msg, 'To') || '';
@@ -208,15 +170,6 @@ export function renderParsedMcpData(
     default:
       return Object.keys(data).length > 0 ? renderGenericMcp(data, toolCallId) : null;
   }
-}
-
-/** Full MCP dispatch — parses raw tool name + result, routes to renderer. */
-export function renderMcpResult(
-  toolName: string, result: unknown, toolCallId: string,
-): ReactNode | null {
-  const mcpInfo = parseMcpToolName(toolName);
-  const data = extractMcpData(result);
-  return renderParsedMcpData(mcpInfo.service, mcpInfo.action, data, toolCallId);
 }
 
 // -- Exported toolkit (empty — MCP tool names are dynamic; Agent 7 wires) ---
