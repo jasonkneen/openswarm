@@ -20,6 +20,13 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+class CustomProvider(BaseModel):
+    name: str
+    base_url: str
+    api_key: str = ""
+    models: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AppSettings(BaseModel):
     default_system_prompt: Optional[str] = DEFAULT_SYSTEM_PROMPT
     default_folder: Optional[str] = None
@@ -35,7 +42,7 @@ class AppSettings(BaseModel):
     openai_api_key: Optional[str] = None
     google_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
-    custom_providers: list["CustomProvider"] = Field(default_factory=list)
+    custom_providers: list[CustomProvider] = Field(default_factory=list)
     # Dashboard / UI preferences
     auto_select_mode_on_new_agent: bool = False
     expand_new_chats_in_dashboard: bool = True
@@ -53,10 +60,3 @@ class AppSettings(BaseModel):
     analytics_opt_in: bool = True
     installation_id: Optional[str] = None
     first_opened_at: Optional[str] = None  # ISO timestamp of first app open
-
-
-class CustomProvider(BaseModel):
-    name: str
-    base_url: str
-    api_key: str = ""
-    models: list[dict[str, Any]] = Field(default_factory=list)

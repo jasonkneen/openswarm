@@ -169,12 +169,3 @@ class WorkspaceSeedRequest(BaseModel):
     @classmethod
     def _migrate_flat_fields(cls, data: Any) -> Any:
         return _migrate_legacy_files(data, allow_schema_json=True)
-
-
-class VibeCodeRequest(BaseModel):
-    prompt: str
-    current_frontend_code: str = ""
-    current_backend_code: str = ""
-    current_schema: str = ""
-    name: str = ""
-    description: str = ""

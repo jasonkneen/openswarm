@@ -9,7 +9,7 @@ from backend.apps.outputs.helpers import _validate_against_schema
 from backend.apps.outputs.executor import execute_backend_code
 from backend.apps.common.model_registry import resolve_model_id as _resolve_model
 from backend.apps.outputs.models import (
-    VibeCodeRequest, AutoRunRequest, AutoRunAgentRequest,
+    AutoRunRequest, AutoRunAgentRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,92 +19,6 @@ def _get_anthropic_client():
     from backend.apps.settings.credentials import get_anthropic_client
     from backend.apps.settings.settings import load_settings
     return get_anthropic_client(load_settings())
-
-
-VIBE_CODE_SYSTEM_PROMPT = """\
-You are an expert at building self-contained HTML/JS/CSS applications that run in an iframe.
-
-The user will describe what they want, and you will generate:
-1. **frontend_code**: A complete HTML document. React 18 is available via esm.sh CDN.
-   - Use: <script type="importmap">{"imports":{"react":"https://esm.sh/react@18","react-dom/client":"https://esm.sh/react-dom@18/client"}}</script>
-   - Input data is at window.OUTPUT_INPUT (object), backend result at window.OUTPUT_BACKEND_RESULT.
-2. **input_schema**: A JSON Schema object defining the structured input.
-3. **backend_code** (optional): Python code where input_data is a global dict and result is a global dict to assign to.
-4. **name**: A short name for the view.
-5. **description**: A one-sentence description.
-6. **message**: A brief explanation of what you did/changed.
-
-Return ONLY valid JSON with these keys. No markdown fences, no extra text.\
-"""
-
-
-async def vibe_code(body: VibeCodeRequest):
-    from backend.apps.analytics.collector import record as _analytics
-    _analytics("feature.used", {"feature": "vibe_code.used"})
-    try:
-        import anthropic
-    except ImportError:
-        return {
-            "message": "anthropic SDK not installed. Install with: pip install anthropic",
-            "frontend_code": body.current_frontend_code,
-            "backend_code": body.current_backend_code,
-            "input_schema": body.current_schema,
-        }
-
-    context_parts = []
-    if body.current_frontend_code:
-        context_parts.append(f"Current frontend code:\n```html\n{body.current_frontend_code}\n```")
-    if body.current_backend_code:
-        context_parts.append(f"Current backend code:\n```python\n{body.current_backend_code}\n```")
-    if body.current_schema:
-        context_parts.append(f"Current input schema:\n```json\n{body.current_schema}\n```")
-    if body.name:
-        context_parts.append(f"Current name: {body.name}")
-    if body.description:
-        context_parts.append(f"Current description: {body.description}")
-
-    user_message = body.prompt
-    if context_parts:
-        user_message = "\n\n".join(context_parts) + "\n\nUser request: " + body.prompt
-
-    client = _get_anthropic_client()
-    from backend.apps.common.llm_helpers import _resolve_model as _resolve_9r
-    from backend.apps.settings.settings import load_settings as _ls
-    try:
-        resp = await client.messages.create(
-            model=_resolve_9r("claude-sonnet-4-20250514", _ls()), max_tokens=8000,
-            system=VIBE_CODE_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-        )
-        raw = resp.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-        result = json.loads(raw)
-        return {
-            "message": result.get("message", "View updated."),
-            "frontend_code": result.get("frontend_code", body.current_frontend_code),
-            "backend_code": result.get("backend_code", body.current_backend_code),
-            "input_schema": result.get("input_schema", body.current_schema),
-            "name": result.get("name", body.name),
-            "description": result.get("description", body.description),
-        }
-    except json.JSONDecodeError:
-        return {
-            "message": "I generated code but couldn't parse the response. Please try again.",
-            "frontend_code": body.current_frontend_code,
-            "backend_code": body.current_backend_code,
-            "input_schema": body.current_schema,
-        }
-    except Exception as e:
-        logger.exception("Vibe code generation failed")
-        return {
-            "message": f"Error: {str(e)}",
-            "frontend_code": body.current_frontend_code,
-            "backend_code": body.current_backend_code,
-            "input_schema": body.current_schema,
-        }
 
 
 AUTO_RUN_SYSTEM_PROMPT = """\

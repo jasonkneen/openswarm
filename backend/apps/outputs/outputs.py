@@ -42,7 +42,6 @@ _store = JsonStore(Output, DATA_DIR, not_found_detail="Output not found")
 _load_all = _store.load_all
 _save = _store.save
 _load = _store.load
-load_output = _store.load_or_none
 
 
 # -- File serving --

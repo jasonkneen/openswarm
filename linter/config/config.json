@@ -6,7 +6,8 @@
     "vulture": true,
     "eslint": false,
     "knip": false,
-    "endpoints": true
+    "endpoints": true,
+    "classes": true
   },
   "rules": {
     "max-file-lines": 250,
@@ -41,6 +42,7 @@
     ],
     "no-nested-imports": ["linter/lint.py"],
     "vulture": [],
-    "endpoints": ["backend/apps/health/*"]
+    "endpoints": ["backend/apps/health/*"],
+    "classes": []
   }
 }
