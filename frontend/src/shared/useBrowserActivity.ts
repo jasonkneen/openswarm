@@ -6,7 +6,7 @@ import {
   type BrowserAction,
 } from './browserCommandHandler';
 
-export interface BrowserActivityState {
+interface BrowserActivityState {
   active: boolean;
   action: BrowserAction | null;
   detail: string | null;

@@ -5,7 +5,7 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DifferenceIcon from '@mui/icons-material/Difference';
-import { CodeDiff } from '@/components/tool-ui/code-diff';
+import { CodeDiff } from '@/components/tool-ui/code-diff/code-diff';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { API_BASE } from '@/shared/config';
 

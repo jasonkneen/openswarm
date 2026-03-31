@@ -12,7 +12,7 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import { AgentSession, handleApproval } from '@/shared/state/agentsSlice';
 import { useAppDispatch } from '@/shared/hooks';
 import { ToolQuestion as QuestionForm } from '@/app/pages/AgentChat/toolkit/approval-tools';
-import { parseMcpToolName } from '@/app/pages/AgentChat/ToolCallBubble';
+import { parseMcpToolName } from '@/app/pages/AgentChat/toolkit/approval-utils';
 import GoogleServiceIcon from '@/app/components/GoogleServiceIcon';
 import { summarizeToolInput, getToolDisplayName } from './agentCardUtils';
 

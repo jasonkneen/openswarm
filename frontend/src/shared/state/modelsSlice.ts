@@ -3,7 +3,7 @@ import { API_BASE } from '@/shared/config';
 
 const AGENTS_API = `${API_BASE}/agents`;
 
-export interface ModelOption {
+interface ModelOption {
   value: string;
   label: string;
   version?: string;

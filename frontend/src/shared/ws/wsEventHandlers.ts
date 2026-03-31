@@ -22,7 +22,7 @@ export type WSEvent = {
   data: Record<string, any>;
 };
 
-export interface WsDeltaCallbacks {
+interface WsDeltaCallbacks {
   bufferDelta: (sessionId: string, messageId: string, delta: string) => void;
   flushDeltas: () => void;
   hasPendingDeltas: () => boolean;

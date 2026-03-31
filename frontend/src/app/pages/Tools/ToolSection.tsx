@@ -20,7 +20,7 @@ import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { CATEGORY_ORDER } from './integrations';
 import { PermToggle } from './PermToggle';
 
-export interface ToolSectionProps {
+interface ToolSectionProps {
   label: string;
   icon: React.ReactElement;
   count: number;
@@ -42,7 +42,7 @@ export interface ToolSectionProps {
 export const ToolSection: React.FC<ToolSectionProps> = ({
   label, icon, count, open, onToggle,
   grouped, collapsedCategories, toggleCategory,
-  expandedBuiltin, toggleBuiltinExpand, deferred,
+  deferred,
   builtinPermissions, onPermissionChange, onCategoryPermissionChange,
   enabled, onEnabledChange,
 }) => {
@@ -66,8 +66,6 @@ export const ToolSection: React.FC<ToolSectionProps> = ({
     return 'mixed';
   };
 
-  const allSectionTools = CATEGORY_ORDER.filter((cat) => grouped[cat]).flatMap((cat) => grouped[cat]);
-  const categoryCount = CATEGORY_ORDER.filter((cat) => grouped[cat]).length;
   const sectionDescription = deferred
     ? 'On-demand actions loaded via ToolSearch for planning, scheduling, and extended operations'
     : 'Built-in Claude Agent SDK actions for file operations, shell commands, and search';

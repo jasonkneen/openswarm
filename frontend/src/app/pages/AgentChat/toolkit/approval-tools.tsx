@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback } from 'react';
 import type { Toolkit } from '@assistant-ui/react';
-import { ApprovalCard } from '@/components/tool-ui/approval-card';
+import { ApprovalCard } from '@/components/tool-ui/approval-card/approval-card';
 import type { ApprovalRequest } from '@/shared/state/agentsSlice';
 import { useAppSelector } from '@/shared/hooks';
 import type { ToolDefinition } from '@/shared/state/toolsSlice';
@@ -14,15 +14,10 @@ import { ToolQuestion } from './approval-question';
 
 // Re-exports so external consumers can import everything from this file
 export {
-  parseMcpToolName, sanitizeServerName, getMcpInputSummary,
-  getToolIcon, getToolIconName, buildMetadata, isDangerous,
-  INTEGRATION_META,
-} from './approval-utils';
-export type {
-  IntegrationMeta, ParsedTool, McpToolMeta,
+  parseMcpToolName,
+  getToolIcon,
 } from './approval-utils';
 export { ToolQuestion } from './approval-question';
-export type { ToolQuestionProps } from './approval-question';
 
 // ---------------------------------------------------------------------------
 // useMcpToolMeta (React hook — lives here alongside other component code)
@@ -57,13 +52,13 @@ export function useMcpToolMeta(parsed: ParsedTool): McpToolMeta {
 // ToolApproval
 // ---------------------------------------------------------------------------
 
-export interface ToolApprovalProps {
+interface ToolApprovalProps {
   request: ApprovalRequest;
   onApprove: (requestId: string, updatedInput?: Record<string, any>) => void;
   onDeny: (requestId: string, message?: string) => void;
 }
 
-export const ToolApproval: React.FC<ToolApprovalProps> = ({ request, onApprove, onDeny }) => {
+const ToolApproval: React.FC<ToolApprovalProps> = ({ request, onApprove, onDeny }) => {
   const parsed = useMemo(() => parseMcpToolName(request.tool_name), [request.tool_name]);
   const meta = useMcpToolMeta(parsed);
   const summary = parsed.isMcp
@@ -90,7 +85,7 @@ export const ToolApproval: React.FC<ToolApprovalProps> = ({ request, onApprove, 
 // BatchApprovalWrapper
 // ---------------------------------------------------------------------------
 
-export interface BatchApprovalWrapperProps {
+interface BatchApprovalWrapperProps {
   requests: ApprovalRequest[];
   onApprove: (requestId: string, updatedInput?: Record<string, any>) => void;
   onDeny: (requestId: string, message?: string) => void;

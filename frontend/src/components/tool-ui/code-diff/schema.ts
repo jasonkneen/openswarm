@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { defineToolUiContract } from "../shared/contract";
 import {
   ToolUIIdSchema,
   ToolUIReceiptSchema,
@@ -50,22 +49,3 @@ export const CodeDiffPropsSchema = CodeDiffPropsSchemaBase.superRefine(
 );
 
 export type CodeDiffProps = z.infer<typeof CodeDiffPropsSchema>;
-
-export const SerializableCodeDiffSchema = CodeDiffPropsSchemaBase.omit({
-  className: true,
-}).superRefine(validateCodeDiffInputMode);
-
-export type SerializableCodeDiff = z.infer<typeof SerializableCodeDiffSchema>;
-
-const SerializableCodeDiffSchemaContract = defineToolUiContract(
-  "CodeDiff",
-  SerializableCodeDiffSchema,
-);
-
-export const parseSerializableCodeDiff: (
-  input: unknown,
-) => SerializableCodeDiff = SerializableCodeDiffSchemaContract.parse;
-
-export const safeParseSerializableCodeDiff: (
-  input: unknown,
-) => SerializableCodeDiff | null = SerializableCodeDiffSchemaContract.safeParse;

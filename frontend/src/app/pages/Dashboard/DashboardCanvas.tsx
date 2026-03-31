@@ -16,7 +16,7 @@ import type { CanvasActions } from './useCanvasControls';
 
 const TETHER_FADE_MS = 2500;
 
-export interface DashboardCanvasProps {
+interface DashboardCanvasProps {
   panX: number; panY: number; zoom: number;
   isPanning: boolean; spaceHeld: boolean; cmdHeld: boolean;
   viewportRef: React.RefObject<HTMLDivElement>; contentRef: React.RefObject<HTMLDivElement>;

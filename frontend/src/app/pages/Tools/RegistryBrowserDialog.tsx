@@ -32,7 +32,7 @@ import { ToolDefinition } from '@/shared/state/toolsSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { cleanServerName } from './toolUtils';
 
-export interface RegistryBrowserDialogProps {
+interface RegistryBrowserDialogProps {
   open: boolean;
   onClose: () => void;
   regQuery: string;

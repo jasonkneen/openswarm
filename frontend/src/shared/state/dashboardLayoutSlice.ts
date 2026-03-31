@@ -53,15 +53,15 @@ const dashboardLayoutSlice = createSlice({
 
 export const {
   setCardPosition, placeCard, setCardSize, removeCard, bringToFront,
-  reconcileSessions, replaceDraftId, tidyLayout,
+  reconcileSessions, tidyLayout,
   addViewCard, setViewCardPosition, setViewCardSize, removeViewCard,
   addBrowserCard, addBrowserCardFromBackend, setBrowserCardPosition,
   setBrowserCardSize, removeBrowserCard, pasteBrowserCard,
-  updateBrowserCardUrl, addBrowserTab, removeBrowserTab,
+  addBrowserTab, removeBrowserTab,
   setActiveBrowserTab, updateBrowserTabUrl, updateBrowserTabTitle,
   updateBrowserTabFavicon, reorderBrowserTab, moveCards,
   setGlowingBrowserCards, fadeGlowingBrowserCards,
-  clearGlowingBrowserCards, clearAllGlowingBrowserCards,
+  clearGlowingBrowserCards,
   setGlowingAgentCard, fadeGlowingAgentCard, clearGlowingAgentCard,
   resetLayout,
 } = dashboardLayoutSlice.actions;

@@ -9,7 +9,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import { Dashboard } from '@/shared/state/dashboardsSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
-export function formatRelativeTime(dateStr: string | null): string {
+function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return '';
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
   if (seconds < 60) return 'just now';

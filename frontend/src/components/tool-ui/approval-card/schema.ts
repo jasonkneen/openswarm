@@ -1,13 +1,10 @@
 import { z } from "zod";
 import { ToolUIIdSchema, ToolUIRoleSchema } from "../shared/schema";
-import { defineToolUiContract } from "../shared/contract";
 
-export const MetadataItemSchema = z.object({
+const MetadataItemSchema = z.object({
   key: z.string().min(1),
   value: z.string(),
 });
-
-export type MetadataItem = z.infer<typeof MetadataItemSchema>;
 
 export const ApprovalDecisionSchema = z.enum(["approved", "denied"]);
 
@@ -34,19 +31,6 @@ export type SerializableApprovalCard = z.infer<
   typeof SerializableApprovalCardSchema
 >;
 
-const SerializableApprovalCardSchemaContract = defineToolUiContract(
-  "ApprovalCard",
-  SerializableApprovalCardSchema,
-);
-
-export const parseSerializableApprovalCard: (
-  input: unknown,
-) => SerializableApprovalCard = SerializableApprovalCardSchemaContract.parse;
-
-export const safeParseSerializableApprovalCard: (
-  input: unknown,
-) => SerializableApprovalCard | null =
-  SerializableApprovalCardSchemaContract.safeParse;
 export interface ApprovalCardProps extends SerializableApprovalCard {
   className?: string;
   onConfirm?: () => void | Promise<void>;

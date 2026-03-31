@@ -1,16 +1,18 @@
 import { AgentMessage } from '@/shared/state/agentsSlice';
 
-export interface ToolPair { type: 'tool_pair'; id: string; call: AgentMessage; result: AgentMessage | null; }
-export interface McpToolInfo { isMcp: boolean; serverSlug: string; action: string; service: string; displayName: string; }
-export interface ParsedBashResult { type: 'bash'; stdout: string; stderr: string; exitCode: number | null; }
-export interface ParsedTextResult { type: 'text'; content: string; isError?: boolean; }
-export interface ParsedMcpResult { type: 'mcp'; service: string; action: string; data: Record<string, any>; rawText: string; }
-export type ParsedResult = ParsedBashResult | ParsedTextResult | ParsedMcpResult;
 export interface ToolCallBubbleProps {
   call: AgentMessage; result?: AgentMessage | null; isPending?: boolean;
   isStreaming?: boolean; mcpCompact?: boolean; sessionId?: string;
 }
-export interface InvokeAgentParsed { agentName: string; sessionId: string | null; cost: string | null; response: string; }
+
+interface McpToolInfo { isMcp: boolean; serverSlug: string; action: string; service: string; displayName: string; }
+interface ParsedBashResult { type: 'bash'; stdout: string; stderr: string; exitCode: number | null; }
+interface ParsedTextResult { type: 'text'; content: string; isError?: boolean; }
+interface ParsedMcpResult { type: 'mcp'; service: string; action: string; data: Record<string, any>; rawText: string; }
+type ParsedResult = ParsedBashResult | ParsedTextResult | ParsedMcpResult;
+
+
+interface InvokeAgentParsed { agentName: string; sessionId: string | null; cost: string | null; response: string; }
 
 let toolCallKeyframesInjected = false;
 export function ensureToolCallKeyframes() {
@@ -32,9 +34,9 @@ export function getToolData(call: AgentMessage) {
   const content = typeof call.content === 'object' ? call.content : {};
   return { toolName: content.tool || 'Unknown', input: content.input || {}, isDenied: content.approved === false, toolId: content.id };
 }
-export function isBashTool(name: string) { return name === 'Bash' || name === 'bash'; }
+function isBashTool(name: string) { return name === 'Bash' || name === 'bash'; }
 
-export function parseMcpToolName(rawName: string): McpToolInfo {
+function parseMcpToolName(rawName: string): McpToolInfo {
   const m = rawName.match(/^mcp__([^_]+(?:-[^_]+)*)__(.+)$/);
   if (!m) return { isMcp: false, serverSlug: '', action: '', service: '', displayName: rawName };
   const serverSlug = m[1], action = m[2];
@@ -50,77 +52,6 @@ export function parseMcpToolName(rawName: string): McpToolInfo {
   return { isMcp: true, serverSlug, action, service, displayName: display };
 }
 
-export function getInputSummary(toolName: string, input: any): string {
-  try {
-    const mcp = parseMcpToolName(toolName);
-    if (mcp.isMcp) {
-      if (!input || typeof input !== 'object') return '';
-      const keys = Object.keys(input);
-      if (keys.length === 0) return '';
-      if (keys.length === 1) { const v = input[keys[0]], s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > 60 ? s.slice(0, 60) + '…' : s; }
-      return keys.slice(0, 3).map((k) => { const v = input[k], s = typeof v === 'string' ? v : JSON.stringify(v); return `${k}: ${s.length > 30 ? s.slice(0, 30) + '…' : s}`; }).join('  ');
-    }
-    const n = toolName.toLowerCase();
-    if (isBashTool(toolName)) { const cmd = input.command || ''; return `$ ${cmd.slice(0, 80)}${cmd.length > 80 ? '…' : ''}`; }
-    if (n === 'read' || n === 'write') return input.file_path || input.path || '';
-    if (n === 'edit' || n === 'multiedit' || n === 'strreplace') return input.file_path || input.path || '';
-    if (n === 'glob') return input.pattern || input.glob || input.glob_pattern || '';
-    if (n === 'grep' || n === 'ripgrep') {
-      const pat = input.pattern || input.regex || '', path = input.path || input.directory || '';
-      return path ? `/${pat}/ in ${path}` : `/${pat}/`;
-    }
-    if (n === 'websearch') return input.query || input.search_term || '';
-    if (n === 'webfetch') return input.url || '';
-    if (n === 'todoread' || n === 'todowrite') return 'todos';
-    if (n === 'ls') return input.path || '.';
-    return '';
-  } catch { return ''; }
-}
-export function formatInputDisplay(toolName: string, input: any): string {
-  try {
-    const mcp = parseMcpToolName(toolName);
-    if (mcp.isMcp) {
-      if (!input || typeof input !== 'object') return String(input ?? '');
-      return Object.entries(input).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v, null, 2)}`).join('\n');
-    }
-    const n = toolName.toLowerCase();
-    if (isBashTool(toolName)) return input.command || '';
-    if (n === 'read') {
-      const p = input.file_path || input.path || '', parts = [p];
-      if (input.offset) parts.push(`offset: ${input.offset}`);
-      if (input.limit) parts.push(`limit: ${input.limit}`);
-      return parts.join('  ');
-    }
-    if (n === 'write') {
-      const p = input.file_path || input.path || '', c = input.content || '';
-      return `${p}\n\n${c.length > 300 ? c.slice(0, 300) + '\n…' : c}`;
-    }
-    if (n === 'edit' || n === 'strreplace') {
-      const p = input.file_path || input.path || '', old = input.old_string || input.old_text || '', nw = input.new_string || input.new_text || '';
-      const lines = [p, ''];
-      if (old) { const o = old.length > 200 ? old.slice(0, 200) + '…' : old; lines.push(`- ${o.split('\n').join('\n- ')}`); }
-      if (nw) { const n2 = nw.length > 200 ? nw.slice(0, 200) + '…' : nw; lines.push(`+ ${n2.split('\n').join('\n+ ')}`); }
-      return lines.join('\n');
-    }
-    if (n === 'multiedit') {
-      const edits = input.edits || [], lines = [input.file_path || input.path || ''];
-      for (const e of edits.slice(0, 3)) lines.push(`  - ${(e.old_string || e.old_text || '').split('\n')[0].slice(0, 60)}…`);
-      if (edits.length > 3) lines.push(`  … +${edits.length - 3} more edits`);
-      return lines.join('\n');
-    }
-    if (n === 'glob') return input.pattern || input.glob || input.glob_pattern || '';
-    if (n === 'grep' || n === 'ripgrep') {
-      const pat = input.pattern || input.regex || '', path = input.path || input.directory || '';
-      const parts = [`pattern: ${pat}`];
-      if (path) parts.push(`path: ${path}`);
-      if (input.include) parts.push(`include: ${input.include}`);
-      return parts.join('\n');
-    }
-    if (n === 'websearch') return input.query || input.search_term || '';
-    if (n === 'webfetch') return input.url || '';
-  } catch {}
-  return typeof input === 'string' ? input : JSON.stringify(input, null, 2);
-}
 export function parseToolResult(toolName: string, rawText: string): ParsedResult {
   if (isBashTool(toolName)) {
     try {
@@ -155,13 +86,14 @@ export function parseToolResult(toolName: string, rawText: string): ParsedResult
   } catch {}
   return { type: 'text', content: rawText };
 }
-export function getMcpShortAction(mcpInfo: McpToolInfo): string {
-  let short = mcpInfo.action;
-  if (mcpInfo.service && short.toLowerCase().startsWith(mcpInfo.service.toLowerCase() + '_')) short = short.slice(mcpInfo.service.length + 1);
-  return short.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+
+interface GmailHeaderSource {
+  payload?: { headers?: Array<{ name: string; value: string }> };
+  headers?: Record<string, string>;
+  [key: string]: unknown;
 }
-export function getGmailHeader(msg: any, name: string): string {
-  if (msg.payload?.headers && Array.isArray(msg.payload.headers)) { const h = msg.payload.headers.find((hdr: any) => (hdr.name || '').toLowerCase() === name.toLowerCase()); if (h) return h.value || ''; }
+function getGmailHeader(msg: GmailHeaderSource, name: string): string {
+  if (msg.payload?.headers && Array.isArray(msg.payload.headers)) { const h = msg.payload.headers.find((hdr) => (hdr.name || '').toLowerCase() === name.toLowerCase()); if (h) return h.value || ''; }
   if (msg.headers && typeof msg.headers === 'object' && !Array.isArray(msg.headers)) return msg.headers[name] || msg.headers[name.toLowerCase()] || '';
   return '';
 }
@@ -194,31 +126,7 @@ export function getResultSummary(toolName: string, rawText: string): string {
   } catch {}
   return `${lc} line${lc !== 1 ? 's' : ''}`;
 }
-export function getPromptPrefix(toolName: string): string {
-  if (isBashTool(toolName)) return '$ ';
-  const mcp = parseMcpToolName(toolName);
-  return mcp.isMcp ? `❯ ${mcp.displayName} ` : `❯ ${toolName} `;
-}
-export function formatTimestamp(ts: string | number | undefined): string {
-  if (!ts) return '';
-  try {
-    const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
-    if (isNaN(d.getTime())) return String(ts);
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return String(ts); }
-}
-export function stripHtml(html: string): string {
-  const tmp = document.createElement('div'); tmp.innerHTML = html; return tmp.textContent || tmp.innerText || '';
-}
-export function isBrowserAgentTool(name: string): boolean {
-  if (name === 'CreateBrowserAgent' || name === 'BrowserAgent' || name === 'BrowserAgents') return true;
-  const m = parseMcpToolName(name); return m.isMcp && m.serverSlug === 'openswarm-browser-agent';
-}
-export function isInvokeAgentTool(name: string): boolean {
-  if (name === 'InvokeAgent') return true;
-  const m = parseMcpToolName(name); return m.isMcp && m.serverSlug === 'openswarm-invoke-agent';
-}
-export function isCreateAgentTool(name: string): boolean { return name === 'Agent'; }
+
 export function parseInvokedSessionId(rawText: string): string | null { return rawText.match(/\(forked session:\s*([a-f0-9]+)\)/)?.[1] || null; }
 export function parseCreateAgentResult(rawText: string): string {
   if (!rawText) return '';

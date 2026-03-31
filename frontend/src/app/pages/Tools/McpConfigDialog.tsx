@@ -17,7 +17,7 @@ import { McpServer } from '@/shared/state/mcpRegistrySlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { cleanServerName } from './toolUtils';
 
-export interface McpConfigDialogProps {
+interface McpConfigDialogProps {
   open: boolean;
   onClose: () => void;
   mcpConfigServer: McpServer | null;

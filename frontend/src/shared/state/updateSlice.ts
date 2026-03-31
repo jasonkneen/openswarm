@@ -1,6 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
-export type UpdateStatus =
+type UpdateStatus =
   | 'idle'
   | 'checking'
   | 'available'

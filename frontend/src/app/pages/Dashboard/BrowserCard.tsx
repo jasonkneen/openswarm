@@ -15,7 +15,6 @@ import BrowserTabBar from './BrowserTabBar';
 import BrowserNavBar from './BrowserNavBar';
 import BrowserActionOverlay from './BrowserActionOverlay';
 
-export type { TabLocalState, WebviewElement };
 const MIN_W = 400, MIN_H = 300;
 
 interface Props {

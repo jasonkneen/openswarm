@@ -4,7 +4,7 @@ import type { Action } from "./schema";
 import { cn, Button } from "./_adapter";
 import { useActionButtons } from "./use-action-buttons";
 
-export interface ActionButtonsProps {
+interface ActionButtonsProps {
   actions: Action[];
   onAction: (actionId: string) => void | Promise<void>;
   onBeforeAction?: (actionId: string) => boolean | Promise<boolean>;

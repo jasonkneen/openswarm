@@ -4,13 +4,11 @@ import type { ActionsProp } from "../shared/actions-config";
 import type { EmbeddedActionsProps } from "../shared/embedded-actions";
 import {
   ActionSchema,
-  SerializableActionSchema,
   SerializableActionsConfigSchema,
   ToolUIIdSchema,
   ToolUIReceiptSchema,
   ToolUIRoleSchema,
 } from "../shared/schema";
-import { defineToolUiContract } from "../shared/contract";
 
 export const OptionListOptionSchema = z.object({
   id: z.string().min(1),
@@ -174,37 +172,3 @@ export type OptionListProps = Omit<
   onBeforeAction?: EmbeddedActionsProps<OptionListSelection>["onBeforeAction"];
   className?: string;
 };
-
-export const SerializableOptionListSchema = OptionListPropsSchemaBase.omit({
-  // Exclude controlled selection from tool/LLM payloads.
-  value: true,
-})
-  .extend({
-    options: z.array(OptionListOptionSchema.omit({ icon: true })),
-    actions: z
-      .union([
-        z.array(SerializableActionSchema),
-        SerializableActionsConfigSchema,
-      ])
-      .optional(),
-  })
-  .strict()
-  .superRefine(validateOptionListInvariants);
-
-export type SerializableOptionList = z.infer<
-  typeof SerializableOptionListSchema
->;
-
-const SerializableOptionListSchemaContract = defineToolUiContract(
-  "OptionList",
-  SerializableOptionListSchema,
-);
-
-export const parseSerializableOptionList: (
-  input: unknown,
-) => SerializableOptionList = SerializableOptionListSchemaContract.parse;
-
-export const safeParseSerializableOptionList: (
-  input: unknown,
-) => SerializableOptionList | null =
-  SerializableOptionListSchemaContract.safeParse;

@@ -17,7 +17,7 @@ export interface McpServer {
   source: string;
 }
 
-export interface McpServerDetail extends McpServer {
+interface McpServerDetail extends McpServer {
   environmentVariables: { name: string; description: string; default?: string; format?: string }[];
   keywords: string[];
   license: string;

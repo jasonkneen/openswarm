@@ -111,15 +111,6 @@ export const resetSystemPrompt = createAsyncThunk(
   }
 );
 
-export const browseDirectories = createAsyncThunk(
-  'settings/browseDirectories',
-  async (path: string) => {
-    const res = await fetch(`${SETTINGS_API}/browse-directories?path=${encodeURIComponent(path)}`);
-    if (!res.ok) throw new Error((await res.json()).detail);
-    return (await res.json()) as BrowseResult;
-  }
-);
-
 const settingsSlice = createSlice({
   name: 'settings',
   initialState,

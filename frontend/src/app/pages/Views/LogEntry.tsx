@@ -7,7 +7,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { AgentMessage } from '@/shared/state/agentsSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
-export interface LogEntryProps {
+interface LogEntryProps {
   msg: AgentMessage;
   c: ReturnType<typeof useClaudeTokens>;
 }

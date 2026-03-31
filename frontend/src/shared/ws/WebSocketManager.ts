@@ -158,5 +158,3 @@ export const dashboardWs = new WebSocketManager(`${WS_BASE}/ws/dashboard`, { ski
 export function createSessionWs(sessionId: string): WebSocketManager {
   return new WebSocketManager(`${WS_BASE}/ws/agents/${sessionId}`);
 }
-
-export default WebSocketManager;

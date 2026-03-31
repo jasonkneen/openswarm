@@ -225,7 +225,7 @@ interface StepBodyData {
   selectedIds: Set<string>;
 }
 
-export function getQuestionFlowStepIds(id: string, stepKey: string) {
+function getQuestionFlowStepIds(id: string, stepKey: string) {
   const safeId = encodeURIComponent(id).replace(/%/g, "_");
   const safeStepKey = encodeURIComponent(stepKey).replace(/%/g, "_");
   return {

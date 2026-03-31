@@ -1,7 +1,7 @@
 export type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
-export const EDGE_THICKNESS = 6;
-export const CORNER_SIZE = 14;
+const EDGE_THICKNESS = 6;
+const CORNER_SIZE = 14;
 export const DRAG_THRESHOLD = 3;
 
 export const CURSOR_MAP: Record<ResizeDir, string> = {

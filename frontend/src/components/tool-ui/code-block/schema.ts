@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { defineToolUiContract } from "../shared/contract";
 import {
   ToolUIIdSchema,
   ToolUIReceiptSchema,
@@ -21,23 +20,3 @@ export const CodeBlockPropsSchema = z.object({
 
 export type CodeBlockProps = z.infer<typeof CodeBlockPropsSchema>;
 export type CodeBlockLineNumbersMode = CodeBlockProps["lineNumbers"];
-
-export const SerializableCodeBlockSchema = CodeBlockPropsSchema.omit({
-  className: true,
-});
-
-export type SerializableCodeBlock = z.infer<typeof SerializableCodeBlockSchema>;
-
-const SerializableCodeBlockSchemaContract = defineToolUiContract(
-  "CodeBlock",
-  SerializableCodeBlockSchema,
-);
-
-export const parseSerializableCodeBlock: (
-  input: unknown,
-) => SerializableCodeBlock = SerializableCodeBlockSchemaContract.parse;
-
-export const safeParseSerializableCodeBlock: (
-  input: unknown,
-) => SerializableCodeBlock | null =
-  SerializableCodeBlockSchemaContract.safeParse;

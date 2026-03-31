@@ -142,7 +142,7 @@ function useResolvedTheme(): "light" | "dark" {
   return theme;
 }
 
-export type CodeBlockRootProps = CodeBlockProps & {
+type CodeBlockRootProps = CodeBlockProps & {
   children: ReactNode;
   expanded?: boolean;
   defaultExpanded?: boolean;
@@ -348,7 +348,7 @@ function CodeBlockRoot({
   );
 }
 
-export type CodeBlockSectionProps = {
+type CodeBlockSectionProps = {
   className?: string;
 };
 
@@ -440,7 +440,7 @@ function CodeBlockCollapseToggle({ className }: CodeBlockSectionProps) {
   );
 }
 
-export type CodeBlockComposedProps = Omit<CodeBlockRootProps, "children">;
+type CodeBlockComposedProps = Omit<CodeBlockRootProps, "children">;
 
 function CodeBlockComposed(props: CodeBlockComposedProps) {
   return (

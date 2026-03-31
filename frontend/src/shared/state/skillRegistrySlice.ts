@@ -37,7 +37,7 @@ const initialState: SkillRegistryState = {
   detailLoading: false,
 };
 
-export const searchSkillRegistry = createAsyncThunk(
+const searchSkillRegistry = createAsyncThunk(
   'skillRegistry/search',
   async ({ q, limit = 20, offset = 0, sort = 'name', category = '' }: { q: string; limit?: number; offset?: number; sort?: string; category?: string }) => {
     const params = new URLSearchParams({ q, limit: String(limit), offset: String(offset), sort, category });
@@ -123,5 +123,4 @@ const skillRegistrySlice = createSlice({
   },
 });
 
-export const { clearSkillDetail } = skillRegistrySlice.actions;
 export default skillRegistrySlice.reducer;

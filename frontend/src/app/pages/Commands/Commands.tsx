@@ -20,5 +20,3 @@ export const CommandsContent: React.FC = () => {
     </Box>
   );
 };
-
-export default CommandsContent;

@@ -148,7 +148,7 @@ function useCodeDiff(): CodeDiffSharedState {
 
 /* ── Subcomponents ──────────────────────────────────────────────── */
 
-export type CodeDiffRootProps = CodeDiffProps & {
+type CodeDiffRootProps = CodeDiffProps & {
   children: ReactNode;
   expanded?: boolean;
   defaultExpanded?: boolean;
@@ -295,7 +295,7 @@ function CodeDiffRoot({
   );
 }
 
-export type CodeDiffSectionProps = {
+type CodeDiffSectionProps = {
   className?: string;
 };
 
@@ -434,7 +434,7 @@ function CodeDiffCollapseToggle({ className }: CodeDiffSectionProps) {
 
 /* ── Composed preset (callable as a flat component) ─────────────── */
 
-export type CodeDiffComposedProps = Omit<CodeDiffRootProps, "children">;
+type CodeDiffComposedProps = Omit<CodeDiffRootProps, "children">;
 
 function CodeDiffComposed(props: CodeDiffComposedProps) {
   return (

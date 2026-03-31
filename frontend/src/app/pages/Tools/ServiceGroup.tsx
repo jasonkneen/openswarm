@@ -9,7 +9,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { PermToggle } from './PermToggle';
 
-export function toDisplayName(name: string, serviceName?: string): string {
+function toDisplayName(name: string, serviceName?: string): string {
   let display = name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   if (serviceName) {
     const svcLower = serviceName.toLowerCase();
@@ -28,7 +28,7 @@ export function firstSentence(desc: string): string {
   return match ? match[1].trim() : desc.substring(0, 100);
 }
 
-export function getGroupPolicy(names: string[], perms: Record<string, string>): string {
+function getGroupPolicy(names: string[], perms: Record<string, string>): string {
   if (names.length === 0) return 'ask';
   const policies = names.map((n) => perms[n] || 'ask');
   if (policies.every((p) => p === 'always_allow')) return 'always_allow';
@@ -82,7 +82,7 @@ const ToolRow = ({ name, serviceName, desc, schema, schemaKey, perms, devMode, e
   );
 };
 
-const ToolGroup = ({ label, icon, iconColor, names, serviceName, descriptions, schemas, perms, devMode, expandedSchema, setExpandedSchema, toolId, onPermissionChange, onGroupPermissionChange, c }: any) => {
+const ToolGroup = ({ label, icon, names, serviceName, descriptions, schemas, perms, devMode, expandedSchema, setExpandedSchema, toolId, onPermissionChange, onGroupPermissionChange, c }: any) => {
   if (!names || names.length === 0) return null;
   const gp = getGroupPolicy(names, perms);
   return (

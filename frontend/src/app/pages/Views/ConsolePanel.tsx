@@ -16,7 +16,7 @@ export interface ConsoleEntry {
   running?: boolean;
 }
 
-export interface ConsolePanelProps {
+interface ConsolePanelProps {
   entry: ConsoleEntry | null;
   c: ReturnType<typeof useClaudeTokens>;
 }

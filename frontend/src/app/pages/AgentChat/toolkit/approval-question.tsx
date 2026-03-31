@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { OptionList } from '@/components/tool-ui/option-list';
-import type { OptionListSelection } from '@/components/tool-ui/option-list';
-import { QuestionFlow } from '@/components/tool-ui/question-flow';
+import { OptionList } from '@/components/tool-ui/option-list/option-list';
+import type { OptionListSelection } from '@/components/tool-ui/option-list/schema';
+import { QuestionFlow } from '@/components/tool-ui/question-flow/question-flow';
 import type { ApprovalRequest } from '@/shared/state/agentsSlice';
 
 function optionKey(opt: any): string {
@@ -71,7 +71,7 @@ const FreeTextQuestion: React.FC<{
 // ToolQuestion
 // ---------------------------------------------------------------------------
 
-export interface ToolQuestionProps {
+interface ToolQuestionProps {
   request: ApprovalRequest;
   onApprove: (requestId: string, updatedInput?: Record<string, any>) => void;
   onDeny: (requestId: string, message?: string) => void;

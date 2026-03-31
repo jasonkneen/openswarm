@@ -6,30 +6,6 @@ import { setChecking, setUpdateError } from '@/shared/state/updateSlice';
 import { fetchModes } from '@/shared/state/modesSlice';
 import { useClaudeTokens, useThemeMode } from '@/shared/styles/ThemeContext';
 
-export const API_KEY_STEPS = [
-  {
-    title: 'Open the Anthropic Console',
-    detail: 'Visit console.anthropic.com — create a free account if you don\'t have one yet.',
-    link: 'https://console.anthropic.com',
-  },
-  {
-    title: 'Navigate to API Keys',
-    detail: 'In the dashboard, click "Settings" in the left sidebar, then select "API Keys".',
-  },
-  {
-    title: 'Create a new key',
-    detail: 'Click the "Create Key" button. Name it anything you like (e.g. "OpenSwarm").',
-  },
-  {
-    title: 'Copy your key',
-    detail: 'Click the copy icon next to your new key. It will start with sk-ant-api03-…',
-  },
-  {
-    title: 'Paste it above & save',
-    detail: 'Paste the key into the field above, then hit Save. You\'re all set!',
-  },
-];
-
 export function useSettings() {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();

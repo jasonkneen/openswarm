@@ -3,12 +3,12 @@ import type { CardPosition, ViewCardPosition, BrowserCardPosition } from '@/shar
 
 export type CardType = 'agent' | 'view' | 'browser';
 
-export interface SelectedCard {
+interface SelectedCard {
   id: string;
   type: CardType;
 }
 
-export interface MarqueeRect {
+interface MarqueeRect {
   x: number;
   y: number;
   width: number;

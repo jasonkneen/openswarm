@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { ReactNode } from "react";
-import { defineToolUiContract } from "../shared/contract";
 import { ToolUIIdSchema, ToolUIRoleSchema } from "../shared/schema";
 
 export const QuestionFlowOptionSchema = z.object({
@@ -13,7 +12,7 @@ export const QuestionFlowOptionSchema = z.object({
 
 export type QuestionFlowOption = z.infer<typeof QuestionFlowOptionSchema>;
 
-export const QuestionFlowStepDefinitionSchema = z.object({
+const QuestionFlowStepDefinitionSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
@@ -21,32 +20,22 @@ export const QuestionFlowStepDefinitionSchema = z.object({
   selectionMode: z.enum(["single", "multi"]).optional(),
 });
 
-export type QuestionFlowStepDefinition = z.infer<
-  typeof QuestionFlowStepDefinitionSchema
->;
-
-export const QuestionFlowSummaryItemSchema = z.object({
+const QuestionFlowSummaryItemSchema = z.object({
   label: z.string().min(1),
   value: z.string().min(1),
 });
 
-export type QuestionFlowSummaryItem = z.infer<
-  typeof QuestionFlowSummaryItemSchema
->;
-
-export const QuestionFlowChoiceSchema = z.object({
+const QuestionFlowChoiceSchema = z.object({
   title: z.string().min(1),
   summary: z.array(QuestionFlowSummaryItemSchema).min(1),
 });
-
-export type QuestionFlowChoice = z.infer<typeof QuestionFlowChoiceSchema>;
 
 const BaseSchema = z.object({
   id: ToolUIIdSchema,
   role: ToolUIRoleSchema.optional(),
 });
 
-export const SerializableProgressiveModeSchema = BaseSchema.extend({
+const SerializableProgressiveModeSchema = BaseSchema.extend({
   step: z.number().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
@@ -54,7 +43,7 @@ export const SerializableProgressiveModeSchema = BaseSchema.extend({
   selectionMode: z.enum(["single", "multi"]).optional(),
 });
 
-export type SerializableProgressiveMode = z.infer<
+type SerializableProgressiveMode = z.infer<
   typeof SerializableProgressiveModeSchema
 >;
 
@@ -74,29 +63,6 @@ export type SerializableReceiptMode = z.infer<
   typeof SerializableReceiptModeSchema
 >;
 
-export const SerializableQuestionFlowSchema = z.union([
-  SerializableProgressiveModeSchema,
-  SerializableUpfrontModeSchema,
-  SerializableReceiptModeSchema,
-]);
-
-export type SerializableQuestionFlow = z.infer<
-  typeof SerializableQuestionFlowSchema
->;
-
-const SerializableQuestionFlowSchemaContract = defineToolUiContract(
-  "QuestionFlow",
-  SerializableQuestionFlowSchema,
-);
-
-export const parseSerializableQuestionFlow: (
-  input: unknown,
-) => SerializableQuestionFlow = SerializableQuestionFlowSchemaContract.parse;
-
-export const safeParseSerializableQuestionFlow: (
-  input: unknown,
-) => SerializableQuestionFlow | null =
-  SerializableQuestionFlowSchemaContract.safeParse;
 interface BaseRuntimeProps {
   className?: string;
 }

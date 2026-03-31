@@ -1,10 +1,9 @@
 "use client";
 
 import { PropsWithChildren, useEffect, useState, type FC } from "react";
-import { XIcon, PlusIcon, FileText } from "lucide-react";
+import { XIcon, FileText } from "lucide-react";
 import {
   AttachmentPrimitive,
-  ComposerPrimitive,
   MessagePrimitive,
   useAuiState,
   useAui,
@@ -192,32 +191,5 @@ export const UserMessageAttachments: FC = () => {
         {() => <AttachmentUI />}
       </MessagePrimitive.Attachments>
     </div>
-  );
-};
-
-export const ComposerAttachments: FC = () => {
-  return (
-    <div className="aui-composer-attachments flex w-full flex-row items-center gap-2 overflow-x-auto empty:hidden">
-      <ComposerPrimitive.Attachments>
-        {() => <AttachmentUI />}
-      </ComposerPrimitive.Attachments>
-    </div>
-  );
-};
-
-export const ComposerAddAttachment: FC = () => {
-  return (
-    <ComposerPrimitive.AddAttachment asChild>
-      <TooltipIconButton
-        tooltip="Add Attachment"
-        side="bottom"
-        variant="ghost"
-        size="icon"
-        className="aui-composer-add-attachment size-8 rounded-full p-1 font-semibold text-xs hover:bg-muted-foreground/15 dark:border-muted-foreground/15 dark:hover:bg-muted-foreground/30"
-        aria-label="Add Attachment"
-      >
-        <PlusIcon className="aui-attachment-add-icon size-5 stroke-[1.5px]" />
-      </TooltipIconButton>
-    </ComposerPrimitive.AddAttachment>
   );
 };

@@ -121,7 +121,7 @@ export const executeOutput = createAsyncThunk(
   }
 );
 
-export interface AutoRunResult {
+interface AutoRunResult {
   input_data: Record<string, any> | null;
   backend_result: Record<string, any> | null;
   stdout: string | null;
@@ -141,7 +141,7 @@ export const autoRunOutput = createAsyncThunk(
   }
 );
 
-export interface AutoRunAgentResult {
+interface AutoRunAgentResult {
   session_id: string;
 }
 

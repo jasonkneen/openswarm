@@ -9,7 +9,7 @@ export const SUBSCRIPTION_PROVIDERS = [
   { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models via your Copilot subscription', color: '#8B949E', preview: true },
 ];
 
-export type SubscriptionProvider = typeof SUBSCRIPTION_PROVIDERS[0];
+type SubscriptionProvider = typeof SUBSCRIPTION_PROVIDERS[0];
 
 interface SubscriptionCardProps {
   provider: SubscriptionProvider;

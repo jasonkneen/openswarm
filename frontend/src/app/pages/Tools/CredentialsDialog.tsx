@@ -12,7 +12,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { Integration } from './integrations';
 
-export interface CredentialsDialogProps {
+interface CredentialsDialogProps {
   open: boolean;
   onClose: () => void;
   integration: Integration | null;

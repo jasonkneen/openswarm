@@ -8,7 +8,7 @@ import { AgentMessage } from '@/shared/state/agentsSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { LogEntry } from './LogEntry';
 
-export interface AutoRunLogProps {
+interface AutoRunLogProps {
   messages: AgentMessage[];
   status: string | null;
   logEndRef: React.RefObject<HTMLDivElement | null>;

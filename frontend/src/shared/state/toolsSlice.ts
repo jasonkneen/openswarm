@@ -102,7 +102,7 @@ export const startOAuth = createAsyncThunk(
   }
 );
 
-export const disconnectOAuth = createAsyncThunk(
+const disconnectOAuth = createAsyncThunk(
   'tools/disconnectOAuth',
   async (toolId: string) => {
     const res = await fetch(`${TOOLS_API}/${toolId}/oauth/disconnect`, { method: 'POST' });

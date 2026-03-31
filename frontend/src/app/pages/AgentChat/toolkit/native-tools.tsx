@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import type { Toolkit } from '@assistant-ui/react';
-import { Terminal } from '@/components/tool-ui/terminal';
-import { CodeBlock } from '@/components/tool-ui/code-block';
-import { CodeDiff } from '@/components/tool-ui/code-diff';
+import { Terminal } from '@/components/tool-ui/terminal/terminal';
+import { CodeBlock } from '@/components/tool-ui/code-block/code-block';
+import { CodeDiff } from '@/components/tool-ui/code-diff/code-diff';
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -107,7 +107,7 @@ const readRenderer = be(({ args: raw, result, status, toolCallId }) => {
 
 // -- Write → CodeBlock (shows written content from args) --------------------
 
-const writeRenderer = be(({ args: raw, result, status, toolCallId }) => {
+const writeRenderer = be(({ args: raw, toolCallId }) => {
   const a = toArgs(raw);
   const filePath = s(a, 'file_path', 'path');
   return (
@@ -121,7 +121,7 @@ const writeRenderer = be(({ args: raw, result, status, toolCallId }) => {
 
 // -- Edit / StrReplace → CodeDiff -------------------------------------------
 
-const editRenderer = be(({ args: raw, result, status, toolCallId }) => {
+const editRenderer = be(({ args: raw, result, toolCallId }) => {
   const a = toArgs(raw);
   const filePath = s(a, 'file_path', 'path');
   const oldCode = s(a, 'old_string', 'old_text');
@@ -144,7 +144,7 @@ const editRenderer = be(({ args: raw, result, status, toolCallId }) => {
 
 // -- MultiEdit → CodeDiff (first edit) --------------------------------------
 
-const multiEditRenderer = be(({ args: raw, result, status, toolCallId }) => {
+const multiEditRenderer = be(({ args: raw, result, toolCallId }) => {
   const a = toArgs(raw);
   const filePath = s(a, 'file_path', 'path');
   const edits = Array.isArray(a.edits) ? a.edits : [];

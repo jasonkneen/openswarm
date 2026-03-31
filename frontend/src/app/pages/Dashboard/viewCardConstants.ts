@@ -2,8 +2,8 @@ import type { Output } from '@/shared/state/outputsSlice';
 
 export type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
-export const EDGE_THICKNESS = 6;
-export const CORNER_SIZE = 14;
+const EDGE_THICKNESS = 6;
+const CORNER_SIZE = 14;
 export const MIN_W = 320;
 export const MIN_H = 200;
 
