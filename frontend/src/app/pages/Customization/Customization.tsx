@@ -4,20 +4,12 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import BuildIcon from '@mui/icons-material/Build';
 import TuneIcon from '@mui/icons-material/Tune';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 const PANELS = [
-  {
-    label: 'Prompts',
-    path: '/templates',
-    icon: <DescriptionIcon />,
-    description:
-      'Create and manage reusable prompt templates with structured input fields that your agents can fill in.',
-  },
   {
     label: 'Skills',
     path: '/skills',

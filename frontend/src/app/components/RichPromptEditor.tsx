@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import CommandPicker from '@/app/components/CommandPicker';
-import TemplateInvokeModal from '@/app/pages/AgentChat/TemplateInvokeModal';
 import { RichPromptEditorProps, LINE_HEIGHT, FONT_SIZE } from './richPromptEditorTypes';
 import { useRichPromptEditor } from './useRichPromptEditor';
 
@@ -12,7 +11,6 @@ const RichPromptEditor: React.FC<RichPromptEditorProps> = (props) => {
   const {
     c, editorRef, wrapperRef, focused, setFocused,
     hasContent, picker, setPicker, pickerRect,
-    selectedTemplate, setSelectedTemplate,
     minHeight, maxHeight, isLabelFloating,
     handleInput, handleEditorClick, handlePickerSelect,
     handleKeyDown, handlePaste,
@@ -131,22 +129,6 @@ const RichPromptEditor: React.FC<RichPromptEditorProps> = (props) => {
         </Box>
       </Box>
 
-      {selectedTemplate && (
-        <TemplateInvokeModal
-          template={selectedTemplate}
-          open={!!selectedTemplate}
-          onClose={() => setSelectedTemplate(null)}
-          onApply={(rendered) => {
-            const editor = editorRef.current;
-            if (editor) {
-              document.execCommand('insertText', false, rendered);
-            }
-            setSelectedTemplate(null);
-            updateHasContent();
-            emitChange();
-          }}
-        />
-      )}
     </Box>
   );
 };

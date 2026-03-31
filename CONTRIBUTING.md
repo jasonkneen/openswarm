@@ -176,7 +176,6 @@ backend/
     agents/           Agent lifecycle, streaming, worktree management
     dashboards/       Dashboard CRUD and layout persistence
     dashboard_layout/ Card positions and spatial canvas state
-    templates/        Prompt template CRUD
     skills/           Skills CRUD (synced to ~/.claude/skills/)
     tools_lib/        MCP tool configuration and discovery
     modes/            Agent mode definitions
@@ -195,7 +194,6 @@ frontend/
       pages/
         Dashboard/    Spatial canvas with agent/view/browser cards
         AgentChat/    Streaming chat, HITL approvals, branching, diff viewer
-        Templates/    Template library with structured input fields
         Skills/       Skills library, skill builder, registry browser
         Tools/        Tool config, MCP discovery, OAuth, registry browser
         Modes/        Mode definitions with system prompts
@@ -203,7 +201,7 @@ frontend/
         Commands/     Keyboard shortcuts reference
         Settings/     App configuration
     shared/
-      state/          Redux slices (agents, dashboards, templates, skills, tools, modes, etc.)
+      state/          Redux slices (agents, dashboards, skills, tools, modes, etc.)
       ws/             WebSocket manager
       hooks/          Custom hooks
       styles/         Theme tokens, global styles

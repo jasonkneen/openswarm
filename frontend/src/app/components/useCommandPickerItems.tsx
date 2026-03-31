@@ -1,5 +1,4 @@
 import { useMemo, useEffect } from 'react';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
@@ -14,7 +13,6 @@ import { getToolGroupIcon } from './CommandPickerIcons';
 
 export function useCommandPickerItems(trigger: '/' | '@', filter: string) {
   const dispatch = useAppDispatch();
-  const templates = useAppSelector((s) => s.templates.items);
   const skills = useAppSelector((s) => s.skills.items);
   const modesMap = useAppSelector((s) => s.modes.items);
   const builtinTools = useAppSelector((s) => s.tools.builtinTools);
@@ -35,16 +33,6 @@ export function useCommandPickerItems(trigger: '/' | '@', filter: string) {
     let all: CommandPickerItem[] = [];
 
     if (trigger === '/') {
-      const templateItems: CommandPickerItem[] = Object.values(templates).map((t) => ({
-        id: t.id,
-        type: 'template' as const,
-        category: 'Templates',
-        name: t.name,
-        description: t.description || `Template with ${t.fields.length} fields`,
-        command: t.name.toLowerCase().replace(/\s+/g, '-'),
-        icon: <DescriptionIcon sx={{ fontSize: 15 }} />,
-      }));
-
       const skillItems: CommandPickerItem[] = Object.values(skills).map((s) => ({
         id: s.id,
         type: 'skill' as const,
@@ -68,7 +56,7 @@ export function useCommandPickerItems(trigger: '/' | '@', filter: string) {
         };
       });
 
-      all = [...templateItems, ...skillItems, ...modeItems];
+      all = [...skillItems, ...modeItems];
     } else {
       const atItems: CommandPickerItem[] = [
         {
@@ -209,7 +197,7 @@ export function useCommandPickerItems(trigger: '/' | '@', filter: string) {
         item.command.toLowerCase().includes(lower) ||
         item.description.toLowerCase().includes(lower),
     );
-  }, [trigger, templates, skills, modesMap, builtinTools, customTools, outputItems, filter]);
+  }, [trigger, skills, modesMap, builtinTools, customTools, outputItems, filter]);
 
   const flatItems = useMemo(() => {
     const result: { item: CommandPickerItem; isGroupStart: boolean; category: string }[] = [];

@@ -7,7 +7,6 @@ import CommandPicker from '@/app/components/CommandPicker';
 import { useElementSelection } from '@/app/components/ElementSelectionContext';
 import type { ContextPath } from '@/app/components/DirectoryBrowser';
 import { type AttachedSkill, type TriggerState, EMPTY_TRIGGER, serializeEditorContent } from '@/app/components/richEditorUtils';
-import TemplateInvokeModal from './TemplateInvokeModal';
 import { useAppSelector } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import type { AttachedImage } from './ImageAttachments';
@@ -59,8 +58,6 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({
   const attachedSkillsRef = useRef(attachedSkills);
   attachedSkillsRef.current = attachedSkills;
   const [picker, setPicker] = useState<TriggerState>(EMPTY_TRIGGER);
-  const [selectedTemplate, setSelectedTemplate] = useState<import('@/shared/state/templatesSlice').PromptTemplate | null>(null);
-  const templates = useAppSelector((state) => state.templates.items);
   const skills = useAppSelector((state) => state.skills.items);
   const modesMap = useAppSelector((state) => state.modes.items);
 
@@ -92,10 +89,10 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({
     addImageFiles, uploadAndAttachFiles, removeImage,
   } = useChatSubmit({
     editorRef, attachedSkillsRef, generalFileInputRef, disabled, autoRunMode,
-    images, contextPaths, forcedTools, picker, templates, skills, ownerId,
+    images, contextPaths, forcedTools, picker, skills, ownerId,
     elementSelection, onSend, onModeChange, setImages, setContextPaths,
     setForcedTools, setPicker, setHasContent, setAttachedSkills,
-    setIsUploading, setIsDragOver, setSelectedTemplate, c,
+    setIsUploading, setIsDragOver, c,
   });
 
   const handleCopyPath = (idx: number) => {
@@ -179,27 +176,6 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({
         isRunning={isRunning} disabled={disabled} onSend={handleSend} onStop={onStop}
         addImageFiles={addImageFiles} uploadAndAttachFiles={uploadAndAttachFiles}
         generalFileInputRef={generalFileInputRef} queueLength={queueLength} />
-
-      {selectedTemplate && (
-        <TemplateInvokeModal template={selectedTemplate} open={!!selectedTemplate}
-          onClose={() => setSelectedTemplate(null)}
-          onApply={(rendered) => {
-            const editor = editorRef.current;
-            if (editor) {
-              editor.innerHTML = '';
-              editor.textContent = rendered;
-              const range = document.createRange();
-              range.selectNodeContents(editor);
-              range.collapse(false);
-              const sel = window.getSelection();
-              if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-            }
-            setSelectedTemplate(null);
-            setAttachedSkills({});
-            setHasContent(!!rendered);
-          }}
-        />
-      )}
     </Box>
   );
 });

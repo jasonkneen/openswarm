@@ -3,13 +3,11 @@ import { ComposerPrimitive, useAui } from '@assistant-ui/react';
 import { LexicalComposerInput } from '@assistant-ui/react-lexical';
 import type { Unstable_MentionItem } from '@assistant-ui/core';
 import { useAppSelector } from '@/shared/hooks';
-import type { PromptTemplate } from '@/shared/state/templatesSlice';
 import type { ComposerExtras } from '../runtime/useOpenSwarmRuntime';
 import type { ContextPath } from '@/app/components/DirectoryBrowser';
 import { useOpenSwarmMentionAdapter, type MentionItemMetadata } from './OpenSwarmMentionAdapter';
 import { useComposerAttachments } from './useComposerAttachments';
 import { MentionSelectOverride, MentionPopover, ComposerAttachmentChips } from './ComposerParts';
-import TemplateInvokeModal from '../TemplateInvokeModal';
 import ModelModeSelector from '../ModelModeSelector';
 
 export interface OpenSwarmComposerProps {
@@ -36,11 +34,9 @@ const OpenSwarmComposer: FC<OpenSwarmComposerProps> = ({
   const mentionAdapter = useOpenSwarmMentionAdapter();
   const att = useComposerAttachments();
   const formRef = useRef<HTMLFormElement>(null);
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [hasContent, setHasContent] = useState(false);
 
   const initialContextApplied = useRef(false);
-  const templates = useAppSelector((s) => s.templates.items);
   const skills = useAppSelector((s) => s.skills.items);
 
   useEffect(() => {
@@ -83,16 +79,6 @@ const OpenSwarmComposer: FC<OpenSwarmComposerProps> = ({
       const meta = item.metadata as unknown as MentionItemMetadata | undefined;
       if (!meta) return false;
       switch (meta.itemType) {
-        case 'template': {
-          const tmpl = templates[item.id];
-          if (!tmpl) return true;
-          if (tmpl.fields.length === 0) {
-            aui.composer().setText(aui.composer().getState().text + tmpl.template);
-          } else {
-            setSelectedTemplate(tmpl);
-          }
-          return true;
-        }
         case 'skill': {
           const skill = skills[item.id];
           if (!skill) return true;
@@ -121,15 +107,7 @@ const OpenSwarmComposer: FC<OpenSwarmComposerProps> = ({
           return false;
       }
     },
-    [templates, skills, onModeChange, aui, att],
-  );
-
-  const handleTemplateApply = useCallback(
-    (rendered: string) => {
-      aui.composer().setText(aui.composer().getState().text + rendered);
-      setSelectedTemplate(null);
-    },
-    [aui],
+    [skills, onModeChange, aui, att],
   );
 
   const hasAttachments =
@@ -174,13 +152,6 @@ const OpenSwarmComposer: FC<OpenSwarmComposerProps> = ({
       </ComposerPrimitive.Unstable_MentionRoot>
 
       <input ref={att.generalFileInputRef} type="file" multiple className="hidden" onChange={att.handleFileInputChange} />
-
-      {selectedTemplate && (
-        <TemplateInvokeModal
-          template={selectedTemplate} open={!!selectedTemplate}
-          onClose={() => setSelectedTemplate(null)} onApply={handleTemplateApply}
-        />
-      )}
     </div>
   );
 };

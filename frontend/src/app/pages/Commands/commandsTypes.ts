@@ -2,7 +2,7 @@ import React from 'react';
 
 export interface SlashCommand {
   id: string;
-  type: 'template' | 'skill' | 'mode';
+  type: 'skill' | 'mode';
   name: string;
   description: string;
   command: string;
@@ -25,7 +25,6 @@ export interface Shortcut {
 
 export const SHORTCUTS: Shortcut[] = [
   { key: 'd', description: 'Go to Dashboard', category: 'navigation' },
-  { key: 't', description: 'Go to Templates', category: 'navigation' },
   { key: '1-9', description: 'Open agent by position', category: 'navigation' },
   { key: 'Shift+A', description: 'Approve all pending', category: 'action' },
   { key: 'Shift+D', description: 'Deny all pending', category: 'action' },

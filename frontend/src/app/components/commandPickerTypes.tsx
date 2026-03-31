@@ -7,7 +7,7 @@ import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 
 export interface CommandPickerItem {
   id: string;
-  type: 'template' | 'skill' | 'mode' | 'context';
+  type: 'skill' | 'mode' | 'context';
   category: string;
   name: string;
   description: string;

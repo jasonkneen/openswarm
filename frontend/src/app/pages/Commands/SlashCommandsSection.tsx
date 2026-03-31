@@ -2,7 +2,6 @@ import React from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -20,7 +19,7 @@ const SlashCommandsSection: React.FC<SlashCommandsSectionProps> = ({ slashComman
     <SectionHeader
       icon={<TerminalIcon sx={{ fontSize: 22 }} />}
       title="Slash Commands"
-      subtitle="Type / in chat to invoke templates, skills, and modes"
+      subtitle="Type / in chat to invoke skills and modes"
       count={slashCommands.length}
       c={c}
     />
@@ -38,7 +37,7 @@ const SlashCommandsSection: React.FC<SlashCommandsSectionProps> = ({ slashComman
       >
         <TerminalIcon sx={{ fontSize: 36, opacity: 0.3 }} />
         <Typography sx={{ fontSize: '0.85rem' }}>
-          No slash commands yet. Create templates, skills, or modes to see them here.
+          No slash commands yet. Create skills or modes to see them here.
         </Typography>
       </Box>
     ) : (
@@ -58,14 +57,11 @@ const SlashCommandsSection: React.FC<SlashCommandsSectionProps> = ({ slashComman
             }}
           >
             <Box sx={{
-              color: cmd.type === 'template' ? c.accent.primary
-                : cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
+              color: cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
                 : c.status.success,
               display: 'flex',
             }}>
-              {cmd.type === 'template' ? (
-                <DescriptionIcon sx={{ fontSize: 18 }} />
-              ) : cmd.type === 'mode' ? (
+              {cmd.type === 'mode' ? (
                 <SmartToyOutlinedIcon sx={{ fontSize: 18 }} />
               ) : (
                 <PsychologyIcon sx={{ fontSize: 18 }} />
@@ -90,11 +86,9 @@ const SlashCommandsSection: React.FC<SlashCommandsSectionProps> = ({ slashComman
                 fontSize: '0.65rem',
                 fontWeight: 600,
                 textTransform: 'uppercase',
-                bgcolor: cmd.type === 'template' ? `${c.accent.primary}12`
-                  : cmd.type === 'mode' ? `${modesMap[cmd.id]?.color || c.accent.primary}15`
+                bgcolor: cmd.type === 'mode' ? `${modesMap[cmd.id]?.color || c.accent.primary}15`
                   : `${c.status.success}15`,
-                color: cmd.type === 'template' ? c.accent.primary
-                  : cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
+                color: cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
                   : c.status.success,
               }}
             />

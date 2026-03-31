@@ -9,11 +9,10 @@ import { fetchBuiltinTools, fetchTools } from '@/shared/state/toolsSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
 
 export interface MentionItemMetadata {
-  itemType: 'template' | 'skill' | 'mode' | 'file' | 'tool-group' | 'output';
+  itemType: 'skill' | 'mode' | 'file' | 'tool-group' | 'output';
   toolNames?: string[];
   iconKey?: string;
   command?: string;
-  hasFields?: boolean;
 }
 
 function buildItem(
@@ -36,12 +35,11 @@ function matchesQuery(item: Unstable_MentionItem, lower: string): boolean {
 
 /**
  * Hook that builds an Unstable_MentionAdapter from Redux state.
- * Provides categories and items for templates, skills, modes, context tools,
+ * Provides categories and items for skills, modes, context tools,
  * MCP tool groups, and output apps.
  */
 export function useOpenSwarmMentionAdapter(): Unstable_MentionAdapter {
   const dispatch = useAppDispatch();
-  const templates = useAppSelector((s) => s.templates.items);
   const skills = useAppSelector((s) => s.skills.items);
   const modesMap = useAppSelector((s) => s.modes.items);
   const builtinTools = useAppSelector((s) => s.tools.builtinTools);
@@ -74,22 +72,6 @@ export function useOpenSwarmMentionAdapter(): Unstable_MentionAdapter {
       byCategory[catId]?.push(item);
       all.push(item);
     };
-
-    // --- Templates ---
-    const templateValues = Object.values(templates);
-    if (templateValues.length > 0) {
-      addCategory('templates', 'Templates');
-      for (const t of templateValues) {
-        addItem(
-          'templates',
-          buildItem(t.id, 'template', t.name, t.description || `Template with ${t.fields.length} fields`, {
-            itemType: 'template',
-            command: t.name.toLowerCase().replace(/\s+/g, '-'),
-            hasFields: t.fields.length > 0,
-          }),
-        );
-      }
-    }
 
     // --- Skills ---
     const skillValues = Object.values(skills);
@@ -202,7 +184,7 @@ export function useOpenSwarmMentionAdapter(): Unstable_MentionAdapter {
     }
 
     return { categories: cats, itemsByCategory: byCategory, allItems: all };
-  }, [templates, skills, modesMap, builtinTools, customTools, outputItems]);
+  }, [skills, modesMap, builtinTools, customTools, outputItems]);
 
   return useMemo<Unstable_MentionAdapter>(
     () => ({

@@ -9,7 +9,6 @@ import {
   SKILL_PILL_ATTR, type AttachedSkill, createSkillPillElement,
   serializeEditorContent, type TriggerState, detectEditorTrigger,
 } from '@/app/components/richEditorUtils';
-import type { PromptTemplate } from '@/shared/state/templatesSlice';
 import type { AttachedImage } from '../ImageAttachments';
 import type { ForcedToolGroup } from '../AttachmentChips';
 
@@ -17,7 +16,7 @@ export interface ChatSubmitParams {
   editorRef: React.RefObject<HTMLDivElement | null>; attachedSkillsRef: React.MutableRefObject<Record<string, AttachedSkill>>;
   generalFileInputRef: React.RefObject<HTMLInputElement | null>;
   disabled?: boolean; autoRunMode?: boolean; images: AttachedImage[]; contextPaths: ContextPath[];
-  forcedTools: ForcedToolGroup[]; picker: TriggerState; templates: Record<string, PromptTemplate>;
+  forcedTools: ForcedToolGroup[]; picker: TriggerState;
   skills: Record<string, { id: string; name: string; content: string }>; ownerId: string;
   elementSelection: ReturnType<typeof useElementSelection>;
   onSend: (msg: string, imgs?: Array<{ data: string; media_type: string }>, ctx?: ContextPath[], tools?: string[], skills?: Array<{ id: string; name: string; content: string }>, browserIds?: string[]) => void;
@@ -26,17 +25,16 @@ export interface ChatSubmitParams {
   setForcedTools: React.Dispatch<React.SetStateAction<ForcedToolGroup[]>>; setPicker: React.Dispatch<React.SetStateAction<TriggerState>>;
   setHasContent: React.Dispatch<React.SetStateAction<boolean>>; setAttachedSkills: React.Dispatch<React.SetStateAction<Record<string, AttachedSkill>>>;
   setIsUploading: React.Dispatch<React.SetStateAction<boolean>>; setIsDragOver: React.Dispatch<React.SetStateAction<boolean>>;
-  setSelectedTemplate: React.Dispatch<React.SetStateAction<PromptTemplate | null>>;
   c: { font: { mono: string }; status: { error: string } };
 }
 
 export function useChatSubmit(p: ChatSubmitParams) {
   const {
     editorRef, attachedSkillsRef, generalFileInputRef, disabled, autoRunMode,
-    images, contextPaths, forcedTools, picker, templates, skills, ownerId,
+    images, contextPaths, forcedTools, picker, skills, ownerId,
     elementSelection, onSend, onModeChange, setImages, setContextPaths,
     setForcedTools, setPicker, setHasContent, setAttachedSkills,
-    setIsUploading, setIsDragOver, setSelectedTemplate, c,
+    setIsUploading, setIsDragOver, c,
   } = p;
   const updateHasContent = useCallback(() => {
     const editor = editorRef.current;
@@ -159,12 +157,7 @@ export function useChatSubmit(p: ChatSubmitParams) {
       const sel = window.getSelection();
       if (sel) { sel.removeAllRanges(); sel.addRange(range); }
     }
-    if (item.type === 'template') {
-      const tmpl = templates[item.id];
-      if (!tmpl) return;
-      if (tmpl.fields.length === 0) document.execCommand('insertText', false, tmpl.template);
-      else setSelectedTemplate(tmpl);
-    } else if (item.type === 'skill') {
+    if (item.type === 'skill') {
       const skill = skills[item.id];
       if (!skill || editor.querySelector(`[${SKILL_PILL_ATTR}="${skill.id}"]`)) return;
       const pill = createSkillPillElement({ id: skill.id, name: skill.name, content: skill.content }, removeSkillPill, c.font.mono, c.status.error);

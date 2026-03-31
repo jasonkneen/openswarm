@@ -17,7 +17,6 @@ const CommandPicker: React.FC<CommandPickerProps> = ({ trigger, filter, onSelect
 
   const getIconColor = (item: CommandPickerItem): string => {
     switch (item.type) {
-      case 'template': return c.accent.primary;
       case 'skill': return c.status.success;
       case 'mode': {
         const mode = modesMap[item.id];

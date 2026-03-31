@@ -7,21 +7,18 @@ import { useAppSelector, useAppDispatch } from '@/shared/hooks';
 import { fetchBuiltinTools, fetchTools } from '@/shared/state/toolsSlice';
 import { getToolGroupIcon } from '@/app/components/CommandPicker';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
-import { fetchTemplates } from '@/shared/state/templatesSlice';
 import { fetchSkills } from '@/shared/state/skillsSlice';
 import { fetchModes } from '@/shared/state/modesSlice';
 import { SlashCommand, AtCommand, SHORTCUTS } from '../commandsTypes';
 
 export function useCommands() {
   const dispatch = useAppDispatch();
-  const templates = useAppSelector((state) => state.templates.items);
   const skills = useAppSelector((state) => state.skills.items);
   const modesMap = useAppSelector((state) => state.modes.items);
   const builtinTools = useAppSelector((state) => state.tools.builtinTools);
   const customTools = useAppSelector((state) => state.tools.items);
   const outputItems = useAppSelector((state) => state.outputs.items);
 
-  const templatesLoaded = useAppSelector((state) => state.templates.loaded);
   const skillsLoaded = useAppSelector((state) => state.skills.loaded);
   const modesLoaded = useAppSelector((state) => state.modes.loaded);
   const builtinLoaded = useAppSelector((state) => state.tools.builtinLoaded);
@@ -29,22 +26,14 @@ export function useCommands() {
   const outputsLoaded = useAppSelector((state) => state.outputs.loaded);
 
   useEffect(() => {
-    if (!templatesLoaded) dispatch(fetchTemplates());
     if (!skillsLoaded) dispatch(fetchSkills());
     if (!modesLoaded) dispatch(fetchModes());
     if (!builtinLoaded) dispatch(fetchBuiltinTools());
     if (!toolsLoaded) dispatch(fetchTools());
     if (!outputsLoaded) dispatch(fetchOutputs());
-  }, [dispatch, templatesLoaded, skillsLoaded, modesLoaded, builtinLoaded, toolsLoaded, outputsLoaded]);
+  }, [dispatch, skillsLoaded, modesLoaded, builtinLoaded, toolsLoaded, outputsLoaded]);
 
   const slashCommands: SlashCommand[] = useMemo(() => [
-    ...Object.values(templates).map((t) => ({
-      id: t.id,
-      type: 'template' as const,
-      name: t.name,
-      description: t.description || `Template with ${t.fields.length} fields`,
-      command: t.name.toLowerCase().replace(/\s+/g, '-'),
-    })),
     ...Object.values(skills).map((s) => ({
       id: s.id,
       type: 'skill' as const,
@@ -59,7 +48,7 @@ export function useCommands() {
       description: m.description || 'Switch to this mode',
       command: m.name.toLowerCase().replace(/\s+/g, '-'),
     })),
-  ], [templates, skills, modesMap]);
+  ], [skills, modesMap]);
 
   const atCommands: AtCommand[] = useMemo(() => {
     const items: AtCommand[] = [

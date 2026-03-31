@@ -10,7 +10,6 @@ from backend.apps.health.health import health
 from backend.apps.agents.agents import agents
 from backend.apps.agents.ws_manager import ws_manager
 from backend.apps.agents.ws_routes import handle_session_message, handle_dashboard_message
-from backend.apps.templates.templates import templates
 from backend.apps.skills.skills import skills
 from backend.apps.tools_lib.tools_lib import tools_lib
 from backend.apps.modes.modes import modes
@@ -27,7 +26,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import json
 
 main_app = MainApp([
-    health, agents, templates, skills, tools_lib, modes, settings,
+    health, agents, skills, tools_lib, modes, settings,
     mcp_registry, skill_registry, outputs, dashboards, nine_router, analytics,
     subscriptions,
 ])

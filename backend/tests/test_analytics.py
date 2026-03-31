@@ -498,8 +498,6 @@ class TestFeatureUsed:
         "mode.switched",
         "skill.used",
         "skill.created",
-        "template.created",
-        "template.used",
         "view.created",
         "vibe_code.used",
         "browser_agent.launched",

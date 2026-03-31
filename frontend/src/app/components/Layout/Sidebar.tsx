@@ -11,7 +11,6 @@ import Tooltip from '@mui/material/Tooltip';
 import Collapse from '@mui/material/Collapse';
 import InputBase from '@mui/material/InputBase';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import BuildIcon from '@mui/icons-material/Build';
 import TuneIcon from '@mui/icons-material/Tune';
@@ -25,7 +24,6 @@ import { createDashboard, renameDashboard } from '@/shared/state/dashboardsSlice
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 const CUSTOMIZATION_ITEMS = [
-  { label: 'Prompts', path: '/templates', icon: <DescriptionIcon /> },
   { label: 'Skills', path: '/skills', icon: <PsychologyIcon /> },
   { label: 'Actions', path: '/actions', icon: <BuildIcon /> },
   { label: 'Modes', path: '/modes', icon: <TuneIcon /> },

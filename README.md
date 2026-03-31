@@ -49,8 +49,6 @@ Running agents in a terminal works fine for one task. But when you're juggling f
 
 **Message Branching** — Edit any prior message to fork the conversation. Navigate freely between branches without losing context.
 
-**Prompt Templates** — Build reusable templates with structured input fields. Invoke them inline via `/` slash commands.
-
 **Skills Library** — Manage skills that sync directly to `~/.claude/skills/`. Browse and install from the official Anthropic skills marketplace.
 
 **Tools Library** — Configure MCP tool servers (stdio, HTTP, SSE) with automatic tool discovery. Browse the MCP registry and Google's catalog with GitHub star counts. Includes Google Workspace OAuth integration.
@@ -105,7 +103,7 @@ Electron Shell (desktop wrapper, auto-updater)
 │   ┌───────────────────────────────┐      ┌───────────────────────┐  │
 │   │  Spatial Dashboard Canvas     │◄────►│  REST API  (/api/*)   │  │
 │   │  Agent Chat (streaming)       │      │  WebSocket (/ws/*)    │  │
-│   │  Templates / Skills / Tools   │ WS   │  Agent Manager        │  │
+│   │  Skills / Tools / Modes       │ WS   │  Agent Manager        │  │
 │   │  Modes / Views / Commands     │◄────►│    └─ claude-agent-sdk│  │
 │   │  Settings                     │      │  MCP Tool Discovery   │  │
 │   │  Redux Toolkit (state)        │      │  JSON File Storage    │  │

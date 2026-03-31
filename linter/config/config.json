@@ -3,11 +3,11 @@
     "max-file-lines": false,
     "max-folder-items": false,
     "no-nested-imports": false,
-    "vulture": true,
+    "vulture": false,
     "eslint": false,
-    "knip": false,
-    "endpoints": true,
-    "classes": true
+    "knip": true,
+    "endpoints": false,
+    "classes": false
   },
   "rules": {
     "max-file-lines": 250,

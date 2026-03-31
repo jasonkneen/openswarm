@@ -11,7 +11,6 @@ import {
   EMPTY_TRIGGER,
 } from '@/app/components/richEditorUtils';
 import { useAppSelector } from '@/shared/hooks';
-import { PromptTemplate } from '@/shared/state/templatesSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { RichPromptEditorProps, LINE_HEIGHT, FONT_SIZE } from './richPromptEditorTypes';
 
@@ -32,8 +31,6 @@ export function useRichPromptEditor({
   const removeSkillPillRef = useRef<(id: string) => void>(() => {});
   const [picker, setPicker] = useState<TriggerState>(EMPTY_TRIGGER);
   const [pickerRect, setPickerRect] = useState<DOMRect | null>(null);
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
-  const templates = useAppSelector((state) => state.templates.items);
   const skills = useAppSelector((state) => state.skills.items);
 
   useEffect(() => {
@@ -162,15 +159,7 @@ export function useRichPromptEditor({
       if (sel) { sel.removeAllRanges(); sel.addRange(range); }
     }
 
-    if (item.type === 'template') {
-      const tmpl = templates[item.id];
-      if (!tmpl) return;
-      if (tmpl.fields.length === 0) {
-        document.execCommand('insertText', false, tmpl.template);
-      } else {
-        setSelectedTemplate(tmpl);
-      }
-    } else if (item.type === 'skill') {
+    if (item.type === 'skill') {
       const skill = skills[item.id];
       if (!skill) return;
       if (editor.querySelector(`[${SKILL_PILL_ATTR}="${skill.id}"]`)) return;
@@ -229,7 +218,7 @@ export function useRichPromptEditor({
 
   return {
     c, editorRef, wrapperRef, focused, setFocused, hasContent,
-    picker, setPicker, pickerRect, selectedTemplate, setSelectedTemplate,
+    picker, setPicker, pickerRect,
     minHeight, maxHeight, isLabelFloating,
     handleInput, handleEditorClick, handlePickerSelect,
     handleKeyDown, handlePaste, updateHasContent, emitChange,

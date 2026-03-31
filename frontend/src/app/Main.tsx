@@ -17,7 +17,6 @@ import {
 import AppShell from './components/Layout/AppShell';
 import Dashboard from './pages/Dashboard/Dashboard';
 import DashboardSelection from './pages/DashboardSelection/DashboardSelection';
-import Templates from './pages/Templates/Templates';
 import Skills from './pages/Skills/Skills';
 import Tools from './pages/Tools/Tools';
 import Modes from './pages/Modes/Modes';
@@ -105,7 +104,6 @@ const ThemedApp: React.FC = () => {
                   <Route path="/" element={<DashboardSelection />} />
                   <Route path="/dashboard/:id" element={<Dashboard />} />
                   <Route path="/customization" element={<Customization />} />
-                  <Route path="/templates" element={<Templates />} />
                   <Route path="/skills" element={<Skills />} />
                   <Route path="/actions" element={<Tools />} />
                   <Route path="/modes" element={<Modes />} />
