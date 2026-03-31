@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "structlint:watch",
+      "label": "lint:watch",
       "type": "shell",
       "command": "python3",
-      "args": ["${workspaceFolder}/linter/structlint.py", "--watch", "--root", "${workspaceFolder}"],
+      "args": ["${workspaceFolder}/linter/lint.py", "--watch", "--root", "${workspaceFolder}"],
       "isBackground": true,
       "runOptions": {
         "runOn": "folderOpen"
@@ -15,40 +15,128 @@
         "panel": "dedicated",
         "close": true
       },
-      "problemMatcher": {
-        "owner": "structlint",
-        "fileLocation": ["relative", "${workspaceFolder}"],
-        "pattern": {
-          "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
-          "file": 1,
-          "line": 2,
-          "column": 3,
-          "severity": 4,
-          "message": 5
+      "problemMatcher": [
+        {
+          "owner": "structural",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^structural: checking\\.\\.\\.$",
+            "endsPattern": "^structural: done\\."
+          }
         },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "^structlint: checking\\.\\.\\.$",
-          "endsPattern": "^structlint: done\\."
+        {
+          "owner": "vulture",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^vulture: checking\\.\\.\\.$",
+            "endsPattern": "^vulture: done\\."
+          }
+        },
+        {
+          "owner": "eslint-project",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^eslint: checking\\.\\.\\.$",
+            "endsPattern": "^eslint: done\\."
+          }
+        },
+        {
+          "owner": "knip",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^knip: checking\\.\\.\\.$",
+            "endsPattern": "^knip: done\\."
+          }
         }
-      }
+      ]
     },
     {
-      "label": "structlint:check",
+      "label": "lint:check",
       "type": "shell",
       "command": "python3",
-      "args": ["${workspaceFolder}/linter/structlint.py", "--root", "${workspaceFolder}"],
+      "args": ["${workspaceFolder}/linter/lint.py", "--root", "${workspaceFolder}"],
+      "problemMatcher": [
+        {
+          "owner": "structural",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          }
+        },
+        {
+          "owner": "eslint-project",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          }
+        }
+      ]
+    },
+    {
+      "label": "knip:check",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "knip"],
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
       "problemMatcher": {
-        "owner": "structlint",
-        "fileLocation": ["relative", "${workspaceFolder}"],
+        "owner": "knip",
+        "fileLocation": ["relative", "${workspaceFolder}/frontend"],
         "pattern": {
-          "regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.+)$",
+          "regexp": "^(.+):(\\d+):(\\d+)\\s+(.+)$",
           "file": 1,
           "line": 2,
           "column": 3,
-          "severity": 4,
-          "message": 5
-        }
+          "message": 4
+        },
+        "severity": "warning"
       }
     }
   ]

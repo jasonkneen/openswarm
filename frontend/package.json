@@ -6,7 +6,10 @@
     "build": "webpack --mode=production",
     "build:watch": "webpack --mode=development --watch",
     "dev": "webpack serve --mode=development",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "knip": "knip"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.12.21",
@@ -20,6 +23,7 @@
     "@codemirror/view": "^6.39.16",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "@eslint/js": "^9.39.4",
     "@mui/icons-material": "^7.3.9",
     "@mui/material": "^7.3.9",
     "@pierre/diffs": "^1.1.7",
@@ -56,7 +60,10 @@
     "copy-webpack-plugin": "^14.0.0",
     "css-loader": "^6.8.0",
     "css-modules-types-loader": "^0.6.10",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "html-webpack-plugin": "^5.5.0",
+    "knip": "^6.1.0",
     "postcss": "^8.5.8",
     "postcss-loader": "^8.2.1",
     "sass": "^1.89.2",
@@ -64,6 +71,7 @@
     "style-loader": "^3.3.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.0.0",
+    "typescript-eslint": "^8.58.0",
     "webpack": "^5.88.0",
     "webpack-cli": "^5.1.0",
     "webpack-dev-server": "^4.15.0"
