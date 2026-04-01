@@ -337,18 +337,33 @@ async def run_browser_agent(
         "message": user_msg.model_dump(mode="json"),
     })
 
+    async def _cancellable(coro):
+        """Race any awaitable against the cancel event. Returns None if cancelled."""
+        task = asyncio.ensure_future(coro)
+        cancel_wait = asyncio.ensure_future(cancel_event.wait())
+        done, pending = await asyncio.wait(
+            [task, cancel_wait], return_when=asyncio.FIRST_COMPLETED,
+        )
+        for p in pending:
+            p.cancel()
+        if cancel_event.is_set():
+            return None
+        return task.result()
+
     try:
         for turn in range(MAX_TURNS):
             if cancel_event.is_set():
                 break
 
-            response = await client.messages.create(
+            response = await _cancellable(client.messages.create(
                 model=api_model,
                 max_tokens=4096,
                 system=SYSTEM_PROMPT,
                 tools=BROWSER_TOOLS_SCHEMA,
                 messages=messages,
-            )
+            ))
+            if response is None:
+                break
 
             assistant_content = []
             text_parts = []
@@ -444,9 +459,12 @@ async def run_browser_agent(
                         continue
 
                 start = time.time()
-                result = await execute_browser_tool(
+                result = await _cancellable(execute_browser_tool(
                     tu.name, tu.input, browser_id, tab_id,
-                )
+                ))
+                if result is None:
+                    cancelled = True
+                    break
                 elapsed_ms = int((time.time() - start) * 1000)
 
                 action_log.append({

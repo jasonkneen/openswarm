@@ -1353,22 +1353,24 @@ class AgentManager:
 
     async def stop_agent(self, session_id: str):
         """Stop a running agent and all its browser-agent children."""
-        task = self.tasks.get(session_id)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        
+        # Stop children first so browser agents get cancelled before parent
+        children = [
+            s for s in self.sessions.values()
+            if s.parent_session_id == session_id and s.mode == "browser-agent"
+        ]
+        for child in children:
+            await self.stop_agent(child.id)
+
         session = self.sessions.get(session_id)
         if session:
+            # Set cancel event BEFORE cancelling the task so in-flight
+            # browser agent loops see it immediately
+            if hasattr(session, '_cancel_event'):
+                session._cancel_event.set()
+
             for req in list(session.pending_approvals):
                 ws_manager.resolve_approval(req.id, {"behavior": "deny", "message": "Agent stopped"})
             session.pending_approvals = []
-
-            if hasattr(session, '_cancel_event'):
-                session._cancel_event.set()
 
             session.status = "stopped"
             if not session.closed_at:
@@ -1379,12 +1381,13 @@ class AgentManager:
                 "session": session.model_dump(mode="json"),
             })
 
-        children = [
-            s for s in self.sessions.values()
-            if s.parent_session_id == session_id and s.mode == "browser-agent"
-        ]
-        for child in children:
-            await self.stop_agent(child.id)
+        task = self.tasks.get(session_id)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     def handle_approval(self, request_id: str, decision: dict):
         """Resolve a pending HITL approval."""

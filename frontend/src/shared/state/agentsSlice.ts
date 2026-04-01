@@ -536,6 +536,11 @@ const agentsSlice = createSlice({
         }
       }
       const existing = state.sessions[action.payload.id];
+      // Don't let a stale "running" message overwrite a terminal status
+      const terminal = ['stopped', 'error'] as const;
+      if (existing && terminal.includes(existing.status as any) && action.payload.status === 'running') {
+        return;
+      }
       // Preserve local pending_approvals if the server payload has none but
       // the frontend has some (avoids race where backend clears approvals
       // before the frontend processes the removal).
@@ -559,6 +564,10 @@ const agentsSlice = createSlice({
     ) {
       const session = state.sessions[action.payload.sessionId];
       if (session) {
+        const terminal = ['stopped', 'error'] as const;
+        if (terminal.includes(session.status as any) && action.payload.status === 'running') {
+          return;
+        }
         session.status = action.payload.status;
       }
       if (action.payload.status === 'running' && !state.trackedNotificationIds.includes(action.payload.sessionId)) {
