@@ -10,6 +10,14 @@ from backend.config.Apps import SubApp
 from backend.apps.analytics.collector import init as init_collector, shutdown as shutdown_collector, record, identify
 from backend.apps.analytics.usage_summary import load_all_sessions, compute_session_stats, enrich_with_nine_router
 
+from backend.apps.agents.manager.agent_manager import agent_manager
+from backend.apps.settings.settings import load_settings, _save_settings
+from backend.apps.agents.manager.agent_manager import agent_manager
+
+from backend.apps.nine_router import get_usage_stats, is_running as _9r_running
+
+
+
 logger = logging.getLogger(__name__)
 
 APP_VERSION = "1.0.20"
@@ -22,13 +30,11 @@ async def _heartbeat_loop():
     while True:
         await asyncio.sleep(60)
         try:
-            from backend.apps.agents.agent_manager import agent_manager
             props = {
                 "active_session_count": len(agent_manager.sessions),
             }
 
             try:
-                from backend.apps.nine_router import get_usage_stats, is_running as _9r_running
                 if _9r_running():
                     stats = await get_usage_stats()
                     if stats:
@@ -64,7 +70,6 @@ async def analytics_lifespan():
     logger.info("PostHog analytics initialised")
 
     try:
-        from backend.apps.settings.settings import load_settings, _save_settings
         settings = load_settings()
 
         is_first_open = settings.first_opened_at is None
@@ -132,8 +137,6 @@ analytics = SubApp("analytics", analytics_lifespan)
 @analytics.router.get("/usage-summary")
 async def usage_summary():
     """Compute usage stats from persisted sessions for the Settings page."""
-    from backend.apps.agents.agent_manager import agent_manager
-    from backend.apps.nine_router import get_usage_stats, is_running as _9r_running
 
     sessions = load_all_sessions()
     for s in agent_manager.get_all_sessions():

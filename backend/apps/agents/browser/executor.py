@@ -7,8 +7,8 @@ import logging
 from uuid import uuid4
 
 from backend.apps.agents.models import AgentSession
-from backend.apps.agents.ws_manager import ws_manager
-from backend.apps.agents.approval import request_approval
+from backend.apps.agents.manager.ws_manager import ws_manager
+from backend.apps.agents.execution.approval import request_approval
 from backend.apps.agents.browser.schemas import ACTION_MAP
 
 logger = logging.getLogger(__name__)

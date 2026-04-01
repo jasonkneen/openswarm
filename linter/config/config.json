@@ -1,13 +1,13 @@
 {
   "enabled": {
     "max-file-lines": false,
-    "max-folder-items": false,
-    "no-nested-imports": false,
-    "vulture": false,
+    "max-folder-items": true,
+    "no-nested-imports": true,
+    "vulture": true,
     "eslint": false,
     "knip": true,
-    "endpoints": false,
-    "classes": false
+    "endpoints": true,
+    "classes": true
   },
   "rules": {
     "max-file-lines": 250,

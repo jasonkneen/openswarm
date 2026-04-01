@@ -13,11 +13,10 @@
   },
   "dependencies": {
     "@assistant-ui/core": "^0.1.9",
-    "@assistant-ui/core": "^0.1.9",
-    "@assistant-ui/core": "^0.1.9",
     "@assistant-ui/react": "^0.12.21",
     "@assistant-ui/react-lexical": "^0.0.3",
     "@assistant-ui/react-markdown": "^0.12.7",
+    "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-html": "^6.4.11",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-python": "^6.2.1",

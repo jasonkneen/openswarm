@@ -14,10 +14,11 @@ from datetime import datetime
 from uuid import uuid4
 
 from backend.apps.agents.models import AgentSession, Message
-from backend.apps.agents.ws_manager import ws_manager
-from backend.apps.agents.approval import request_approval
-from backend.apps.agents.mcp_builder import get_effective_policy
+from backend.apps.agents.manager.ws_manager import ws_manager
+from backend.apps.agents.execution.approval import request_approval
+from backend.apps.agents.execution.mcp_builder import get_effective_policy
 from backend.apps.analytics.collector import record as _analytics
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def create_sdk_hooks(
         safe_input = tool_input if isinstance(tool_input, dict) else {}
         return await request_approval(session, tool_name, safe_input, track_analytics=True)
 
-    async def can_use_tool(tool_name, input_data, context):
+    async def can_use_tool(tool_name, input_data):
         if tool_name != "AskUserQuestion":
             policy = get_effective_policy(tool_name, builtin_perms)
             if policy == "always_allow":
@@ -50,7 +51,7 @@ def create_sdk_hooks(
             return PermissionResultAllow(updated_input=decision.get("updated_input", input_data))
         return PermissionResultDeny(message=decision.get("message", "User denied this action"))
 
-    async def pre_tool_hook(input_data, tool_use_id, context):
+    async def pre_tool_hook(input_data, tool_use_id):
         tool_name = input_data.get("tool_name", "")
         hook_event = input_data.get("hook_event_name", "PreToolUse")
         if tool_name and tool_name != "AskUserQuestion":
@@ -69,7 +70,7 @@ def create_sdk_hooks(
             tool_start_times[tool_use_id] = time.time()
         return {}
 
-    async def post_tool_hook(input_data, tool_use_id, context):
+    async def post_tool_hook(input_data, tool_use_id):
         elapsed_ms = None
         if tool_use_id and tool_use_id in tool_start_times:
             elapsed_ms = int((time.time() - tool_start_times.pop(tool_use_id)) * 1000)
@@ -176,6 +177,5 @@ def _build_sub_agent_session(
         dashboard_id=session.dashboard_id, parent_session_id=session_id,
     )
     sessions[sub_session_id] = sub_session
-    import asyncio
     asyncio.ensure_future(_broadcast_sub_session(sub_session))
     return sub_session_id

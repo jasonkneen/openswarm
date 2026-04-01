@@ -9,11 +9,14 @@ import asyncio
 import logging
 
 from backend.apps.agents.models import AgentSession, ToolGroupMeta
-from backend.apps.agents.ws_manager import ws_manager
-from backend.apps.agents.session_store import (
+from backend.apps.agents.manager.ws_manager import ws_manager
+from backend.apps.agents.manager.session_store import (
     save_session, delete_session_file, build_search_text,
 )
 from backend.apps.common.llm_helpers import quick_llm_call, quick_llm_json
+from backend.apps.agents.manager.session_store import load_all_session_data
+from backend.apps.agents.execution.agent_mock import fire_session_completed
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,6 @@ async def generate_group_meta_op(
 
 
 async def persist_all_sessions_op(sessions: dict, tasks: dict) -> None:
-    from backend.apps.agents.agent_mock import fire_session_completed
     for session_id, session in list(sessions.items()):
         if session.status in ("running", "waiting_approval"):
             session.status = "stopped"
@@ -92,7 +94,6 @@ async def persist_all_sessions_op(sessions: dict, tasks: dict) -> None:
 
 
 async def restore_all_sessions_op(sessions: dict) -> None:
-    from backend.apps.agents.session_store import load_all_session_data
     for sid, data in load_all_session_data():
         try:
             session = AgentSession(**data)

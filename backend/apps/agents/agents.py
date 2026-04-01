@@ -1,11 +1,10 @@
 from backend.config.Apps import SubApp
-from backend.apps.agents.agent_manager import agent_manager
-from backend.apps.agents.ws_manager import ws_manager
+from backend.apps.agents.manager.agent_manager import agent_manager
 from backend.apps.agents.models import AgentConfig, ApprovalResponse
+from backend.apps.agents.browser.runner import run_browser_agents
 from contextlib import asynccontextmanager
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from uuid import uuid4
 import logging
 
 logger = logging.getLogger(__name__)
@@ -169,25 +168,9 @@ async def resume_session(session_id: str):
     return {"session": session.model_dump(mode="json")}
 
 
-@agents.router.post("/browser/command")
-async def browser_command(request: Request):
-    """Proxy browser commands to the frontend via WebSocket and wait for results."""
-    body = await request.json()
-    action = body.get("action", "")
-    browser_id = body.get("browser_id", "")
-    tab_id = body.get("tab_id", "")
-    params = body.get("params", {})
-    if not action or not browser_id:
-        return JSONResponse({"error": "action and browser_id are required"}, status_code=400)
-    request_id = uuid4().hex
-    result = await ws_manager.send_browser_command(request_id, action, browser_id, params, tab_id=tab_id)
-    return JSONResponse(result)
-
-
 @agents.router.post("/browser-agent/run")
 async def browser_agent_run(request: Request):
     """Run one or more browser sub-agents in parallel."""
-    from backend.apps.agents.browser_agent import run_browser_agents
     body = await request.json()
     tasks = body.get("tasks", [])
     if not tasks:

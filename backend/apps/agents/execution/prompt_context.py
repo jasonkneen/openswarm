@@ -13,6 +13,9 @@ import os
 from backend.apps.outputs.outputs import _load_all as load_all_outputs
 from backend.apps.common.mcp_utils import sanitize_server_name as _sanitize_server_name
 
+from backend.apps.dashboards.dashboards import _load as load_dashboard
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,7 +112,6 @@ def build_browser_context(
     if not dashboard_id:
         return None
     try:
-        from backend.apps.dashboards.dashboards import _load as load_dashboard
         dashboard = load_dashboard(dashboard_id)
     except Exception:
         return None
@@ -160,7 +162,6 @@ def get_pre_selected_browser_ids(dashboard_id: str | None) -> list[str]:
     if not dashboard_id:
         return []
     try:
-        from backend.apps.dashboards.dashboards import _load as load_dashboard
         dashboard = load_dashboard(dashboard_id)
     except Exception:
         return []

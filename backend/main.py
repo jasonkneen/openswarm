@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 from backend.config.Apps import MainApp
 from backend.apps.health.health import health
 from backend.apps.agents.agents import agents
-from backend.apps.agents.ws_manager import ws_manager
+from backend.apps.agents.manager.ws_manager import ws_manager
 from backend.apps.agents.ws_routes import handle_session_message, handle_dashboard_message
 from backend.apps.skills.skills import skills
 from backend.apps.tools_lib.tools_lib import tools_lib

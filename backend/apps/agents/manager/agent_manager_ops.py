@@ -14,12 +14,19 @@ from uuid import uuid4
 from backend.apps.agents.models import (
     AgentSession, Message, MessageBranch,
 )
-from backend.apps.agents.ws_manager import ws_manager
-from backend.apps.agents.session_store import (
+from backend.apps.agents.manager.ws_manager import ws_manager
+from backend.apps.agents.manager.session_store import (
     save_session, load_session_data, delete_session_file,
     build_search_text, copy_session_messages,
 )
 from backend.apps.analytics.collector import record as _analytics
+from backend.apps.agents.execution.agent_loop import run_agent_loop
+
+from backend.apps.agents.execution.agent_loop import run_agent_loop
+
+from backend.apps.agents.execution.agent_mock import fire_session_completed
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +82,6 @@ async def edit_message_op(
     session.sdk_session_id = None
     session.status = "running"
     await ws_manager.emit_status(session_id, "running", session)
-    from backend.apps.agents.agent_loop import run_agent_loop
     task = asyncio.create_task(run_agent_loop(
         sessions, session_id, new_content,
         images=target_msg.images, context_paths=target_msg.context_paths,
@@ -88,8 +94,9 @@ async def close_session_op(
     sessions: dict, tasks: dict,
     session_id: str,
 ):
-    from backend.apps.agents.agent_manager import agent_manager
     children = [s for s in sessions.values() if s.parent_session_id == session_id and s.mode == "browser-agent"]
+    from backend.apps.agents.manager.agent_manager import agent_manager
+    # NOTE: this is a circular dependency, must be fixed soon by fixing the ai slop
     for child in children:
         await agent_manager.stop_agent(child.id)
     task = tasks.get(session_id)
@@ -110,7 +117,6 @@ async def close_session_op(
     session.pending_approvals = []
     if hasattr(session, '_cancel_event'):
         session._cancel_event.set()
-    from backend.apps.agents.agent_mock import fire_session_completed
     fire_session_completed(session, sessions)
     doc_data = session.model_dump(mode="json")
     doc_data["search_text"] = build_search_text(session)
@@ -204,7 +210,6 @@ async def invoke_agent_op(
     user_msg = Message(role="user", content=message, branch_id=fork.active_branch_id)
     fork.messages.append(user_msg)
     await ws_manager.emit_message(fork.id, user_msg)
-    from backend.apps.agents.agent_loop import run_agent_loop
     await run_agent_loop(sessions, fork.id, message, fork_session=True)
     last_assistant = None
     for msg in reversed(fork.messages):
@@ -223,10 +228,3 @@ async def invoke_agent_op(
         "response": last_assistant or "No response from invoked agent.",
         "cost_usd": fork.cost_usd,
     }
-
-
-from backend.apps.agents.agent_manager_meta import (  # noqa: F401 — re-exports
-    generate_title_op, generate_group_meta_op,
-    persist_all_sessions_op, restore_all_sessions_op,
-    delete_session_op,
-)

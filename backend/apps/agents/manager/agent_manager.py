@@ -19,24 +19,25 @@ from typing import Optional
 from uuid import uuid4
 
 from backend.apps.agents.models import AgentConfig, AgentSession, Message
-from backend.apps.agents.ws_manager import ws_manager
-from backend.apps.agents.prompt_builder import resolve_mode
-from backend.apps.agents.mcp_builder import get_all_tool_names
-from backend.apps.agents.session_store import (
-    delete_session_file, get_history,
+from backend.apps.agents.manager.ws_manager import ws_manager
+from backend.apps.agents.execution.prompt_builder import resolve_mode
+from backend.apps.agents.execution.mcp_builder import get_all_tool_names
+from backend.apps.agents.manager.session_store import (
+    get_history,
     reconcile_on_startup, get_browser_agent_children,
 )
-from backend.apps.agents.agent_loop import run_agent_loop
-from backend.apps.agents.agent_manager_ops import (
+from backend.apps.agents.execution.agent_loop import run_agent_loop
+from backend.apps.agents.manager.agent_manager_ops import (
     edit_message_op, close_session_op, resume_session_op,
-    duplicate_session_op, invoke_agent_op,
+    duplicate_session_op, invoke_agent_op
 )
-from backend.apps.agents.agent_manager_meta import (
+from backend.apps.agents.manager.agent_manager_meta import (
     generate_title_op, generate_group_meta_op,
-    persist_all_sessions_op, restore_all_sessions_op,
+    persist_all_sessions_op, restore_all_sessions_op, delete_session_op
 )
 from backend.apps.settings.settings import load_settings
 from backend.apps.analytics.collector import record as _analytics
+
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,6 @@ class AgentManager:
         await close_session_op(self.sessions, self.tasks, session_id)
 
     async def delete_session(self, session_id: str) -> None:
-        from backend.apps.agents.agent_manager_ops import delete_session_op
         await delete_session_op(self, session_id)
 
     async def resume_session(self, session_id: str) -> AgentSession:

@@ -13,15 +13,25 @@ import logging
 from uuid import uuid4
 
 from backend.apps.agents.models import AgentSession, Message
-from backend.apps.agents.ws_manager import ws_manager
-from backend.apps.agents.session_store import save_session
-from backend.apps.agents.prompt_builder import build_prompt_content
+from backend.apps.agents.manager.ws_manager import ws_manager
+from backend.apps.agents.manager.session_store import save_session
+from backend.apps.agents.execution.prompt_builder import build_prompt_content
 from backend.apps.tools_lib.tools_lib import (
     _load_all as load_all_tools,
     load_builtin_permissions,
 )
 from backend.apps.analytics.collector import record as _analytics
-from backend.apps.agents.agent_mock import run_mock_agent, fire_session_completed
+from backend.apps.agents.execution.agent_hooks import create_sdk_hooks
+
+from claude_agent_sdk import (
+    query, ClaudeAgentOptions, AssistantMessage, ResultMessage,
+)
+from claude_agent_sdk.types import (
+    PermissionResultAllow, PermissionResultDeny,
+    TextBlock, ToolUseBlock, StreamEvent, SystemMessage,
+)
+from backend.apps.agents.execution.agent_options import build_agent_options
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,29 +57,13 @@ async def run_agent_loop(
         load_all_tools_fn=load_all_tools,
     )
 
-    try:
-        from claude_agent_sdk import (
-            query, ClaudeAgentOptions, AssistantMessage, ResultMessage,
-        )
-        from claude_agent_sdk.types import (
-            HookMatcher, PermissionResultAllow, PermissionResultDeny,
-            TextBlock, ToolUseBlock, StreamEvent, SystemMessage,
-        )
-    except ImportError:
-        logger.warning("claude_agent_sdk not installed, running in mock mode")
-        await run_mock_agent(session_id, prompt, sessions)
-        return
-
     session.status = "running"
     builtin_perms = load_builtin_permissions()
 
-    from backend.apps.agents.agent_hooks import create_sdk_hooks
     can_use_tool, pre_tool_hook, post_tool_hook = create_sdk_hooks(
         session, session_id, sessions, builtin_perms,
         PermissionResultAllow, PermissionResultDeny,
     )
-
-    from backend.apps.agents.agent_options import build_agent_options
 
     try:
         options_kwargs = await build_agent_options(

@@ -9,9 +9,17 @@ from datetime import datetime
 from uuid import uuid4
 
 from backend.apps.agents.models import AgentSession, Message
-from backend.apps.agents.ws_manager import ws_manager
+from backend.apps.agents.manager.ws_manager import ws_manager
 from backend.apps.common.model_registry import resolve_model_id
 from backend.apps.tools_lib.tools_lib import load_builtin_permissions
+from backend.apps.agents.manager.agent_manager import agent_manager
+from backend.apps.settings.settings import load_settings
+from backend.apps.settings.credentials import get_anthropic_client
+from backend.apps.common.llm_helpers import _resolve_model as _resolve_9r
+from backend.apps.dashboards.dashboards import _load, _save
+from backend.apps.dashboards.models import BrowserCardPosition, BrowserTab
+from backend.apps.analytics.collector import record as _analytics
+
 from backend.apps.agents.browser.schemas import (
     BROWSER_TOOLS_SCHEMA, SYSTEM_PROMPT, MAX_TURNS,
 )
@@ -28,7 +36,6 @@ async def run_browser_agent(
     pre_selected: bool = False, initial_url: str | None = None,
     parent_session_id: str | None = None,
 ) -> dict:
-    from backend.apps.agents.agent_manager import agent_manager
 
     _browser_perms = load_builtin_permissions()
     session_id = uuid4().hex
@@ -49,9 +56,6 @@ async def run_browser_agent(
         logger.info(f"Browser agent {session_id}: navigated to {initial_url}: {nav_result.get('text', nav_result.get('error', ''))}")
 
     api_model = resolve_model_id(model)
-    from backend.apps.settings.settings import load_settings
-    from backend.apps.settings.credentials import get_anthropic_client
-    from backend.apps.common.llm_helpers import _resolve_model as _resolve_9r
     _settings = load_settings()
     api_model = _resolve_9r(api_model, _settings)
     client = get_anthropic_client(_settings)
@@ -168,8 +172,6 @@ async def run_browser_agent(
 
 
 async def _create_browser_card(dashboard_id: str, url: str, parent_session_id: str | None = None) -> str:
-    from backend.apps.dashboards.dashboards import _load, _save
-    from backend.apps.dashboards.models import BrowserCardPosition, BrowserTab
 
     dashboard = _load(dashboard_id)
     browser_id = f"browser-{uuid4().hex[:8]}"
@@ -196,7 +198,6 @@ async def run_browser_agents(
     pre_selected_browser_ids: list[str] | None = None,
     parent_session_id: str | None = None,
 ) -> list[dict]:
-    from backend.apps.analytics.collector import record as _analytics
     _analytics("feature.used", {
         "feature": "browser_agent.launched", "task_count": len(tasks), "model": model,
     }, dashboard_id=dashboard_id)

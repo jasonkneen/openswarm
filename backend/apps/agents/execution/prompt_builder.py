@@ -11,7 +11,9 @@ from typing import Any
 
 from backend.apps.modes.modes import load_mode
 from backend.apps.common.mcp_utils import sanitize_server_name as _sanitize_server_name
-from backend.apps.agents.prompt_context import resolve_context_paths
+from backend.apps.agents.execution.prompt_context import resolve_context_paths
+from backend.apps.tools_lib.models import BUILTIN_TOOLS
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +49,6 @@ def resolve_forced_tools(
 ) -> str:
     if not forced_tools:
         return ""
-    from backend.apps.tools_lib.models import BUILTIN_TOOLS
     desc_map: dict[str, str] = {t.name: t.description for t in BUILTIN_TOOLS}
     tool_to_server: dict[str, str] = {}
     tool_to_email: dict[str, str] = {}

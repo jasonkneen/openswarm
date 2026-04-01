@@ -11,22 +11,32 @@ import os
 import sys
 
 from backend.apps.agents.models import AgentSession
-from backend.apps.agents.prompt_builder import resolve_mode, compose_system_prompt
-from backend.apps.agents.prompt_context import (
+from backend.apps.agents.execution.prompt_builder import resolve_mode, compose_system_prompt
+from backend.apps.agents.execution.prompt_context import (
     build_connected_tools_context, build_outputs_context,
     build_browser_context, get_pre_selected_browser_ids,
 )
-from backend.apps.agents.mcp_builder import (
+from backend.apps.agents.execution.mcp_builder import (
     FULL_TOOLS, build_mcp_servers, get_all_tool_names,
     _get_denied_tool_names, _get_all_known_tool_names, _is_fully_denied,
 )
 from backend.apps.settings.settings import load_settings
 from backend.apps.tools_lib.tools_lib import (
-    _load_all as load_all_tools,
-    load_builtin_permissions,
+    _load_all as load_all_tools
 )
 from backend.apps.common.mcp_utils import sanitize_server_name as _sanitize_server_name
 from backend.ports import BACKEND_DEV_PORT, NINE_ROUTER_PORT
+
+from claude_agent_sdk.types import HookMatcher
+
+from backend.apps.outputs.view_builder_templates import VIEW_BUILDER_SKILL
+
+from backend.apps.common.model_registry import resolve_model_id as _resolve_mid
+
+from backend.apps.nine_router import is_running as _9r_running
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +55,6 @@ async def build_agent_options(
     Requires claude_agent_sdk types to be imported by the caller; they are
     passed in via the hook callables.
     """
-    from claude_agent_sdk import ClaudeAgentOptions
-    from claude_agent_sdk.types import HookMatcher
 
     _, mode_sys_prompt, _ = resolve_mode(session.mode, get_all_tool_names)
     connected_tools_ctx = build_connected_tools_context(
@@ -61,7 +69,6 @@ async def build_agent_options(
     )
 
     if session.mode == "view-builder":
-        from backend.apps.outputs.view_builder_templates import VIEW_BUILDER_SKILL
         skill_block = f"<app_builder_reference>\n{VIEW_BUILDER_SKILL}\n</app_builder_reference>"
         composed_prompt = f"{composed_prompt}\n\n{skill_block}" if composed_prompt else skill_block
 
@@ -122,7 +129,6 @@ async def build_agent_options(
         "include_partial_messages": True,
     }
 
-    from backend.apps.nine_router import is_running as _9r_running
     if global_settings.anthropic_api_key:
         options_kwargs["env"] = {"ANTHROPIC_API_KEY": global_settings.anthropic_api_key}
         logger.info("[MCP-DEBUG] Using direct API key")
@@ -132,7 +138,6 @@ async def build_agent_options(
             "ANTHROPIC_BASE_URL": f"http://localhost:{NINE_ROUTER_PORT}",
         }
         options_kwargs["extra_args"] = {"bare": None}
-        from backend.apps.common.model_registry import resolve_model_id as _resolve_mid
         resolved = _resolve_mid(session.model)
         if not resolved.startswith("cc/"):
             options_kwargs["model"] = f"cc/{resolved}"

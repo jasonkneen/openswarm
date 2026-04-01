@@ -12,6 +12,8 @@ import platform
 from uuid import uuid4
 
 from posthog import Posthog
+from backend.apps.settings.settings import load_settings, _save_settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,6 @@ def _get_installation_id() -> str:
     if _installation_id:
         return _installation_id
     try:
-        from backend.apps.settings.settings import load_settings, _save_settings
         settings = load_settings()
         iid = getattr(settings, "installation_id", None)
         if not iid:

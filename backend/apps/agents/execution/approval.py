@@ -11,7 +11,10 @@ from datetime import datetime
 from uuid import uuid4
 
 from backend.apps.agents.models import AgentSession, ApprovalRequest
-from backend.apps.agents.ws_manager import ws_manager
+from backend.apps.agents.manager.ws_manager import ws_manager
+
+from backend.apps.analytics.collector import record as _analytics
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +43,6 @@ async def request_approval(
     session.status = "waiting_approval"
 
     if track_analytics:
-        from backend.apps.analytics.collector import record as _analytics
         _analytics("approval.requested", {
             "tool_name": tool_name,
             "is_first_approval_in_session": len(session.pending_approvals) == 1,
@@ -63,7 +65,6 @@ async def request_approval(
         )
 
     if track_analytics:
-        from backend.apps.analytics.collector import record as _analytics
         latency_ms = int((datetime.now() - approval_req.created_at).total_seconds() * 1000)
         _analytics("approval.resolved", {
             "tool_name": tool_name,
