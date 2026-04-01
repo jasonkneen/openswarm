@@ -113,10 +113,22 @@ def get_all_tool_names() -> list[str]:
     return builtin_tools + mcp_names
 
 
+# Sentinel value placed in a session queue to shut the loop down cleanly.
+_QUEUE_STOP = object()
+
+# How long (seconds) a session loop waits idle before self-terminating.
+_SESSION_IDLE_TIMEOUT = 30 * 60  # 30 minutes
+
+
 class AgentManager:
     def __init__(self):
         self.sessions: dict[str, AgentSession] = {}
+        # Long-lived per-session loop tasks (one per open session).
         self.tasks: dict[str, asyncio.Task] = {}
+        # Short-lived tasks: the currently-running query inside a session loop.
+        self.run_tasks: dict[str, asyncio.Task] = {}
+        # Message queues – send_message() enqueues here, _session_loop() dequeues.
+        self.message_queues: dict[str, asyncio.Queue] = {}
     
     def _resolve_mode(self, mode_id: str) -> tuple[list[str], str | None, str | None]:
         """Return (tools, system_prompt, default_folder) resolved from the mode store."""
@@ -466,6 +478,58 @@ class AgentManager:
                 },
             })
         return content
+
+    async def _session_loop(self, session_id: str) -> None:
+        """Long-lived per-session task.
+
+        Reads (prompt_kwargs, extras) tuples from the session's message queue
+        and runs _run_agent_loop for each one sequentially.  Exits after
+        _SESSION_IDLE_TIMEOUT seconds of inactivity, or when a _QUEUE_STOP
+        sentinel is enqueued (close/delete).
+        """
+        queue = self.message_queues.get(session_id)
+        if queue is None:
+            return
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=_SESSION_IDLE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.info(f"Session {session_id} loop idle-timeout, shutting down.")
+                    break
+
+                if item is _QUEUE_STOP:
+                    break
+
+                kwargs = item
+                run_task = asyncio.create_task(
+                    self._run_agent_loop(session_id, **kwargs)
+                )
+                self.run_tasks[session_id] = run_task
+                try:
+                    await run_task
+                except asyncio.CancelledError:
+                    # stop_agent() cancelled the run; loop stays alive for next msg
+                    pass
+                finally:
+                    self.run_tasks.pop(session_id, None)
+        except asyncio.CancelledError:
+            # The whole loop was cancelled (close/delete).
+            run = self.run_tasks.pop(session_id, None)
+            if run and not run.done():
+                run.cancel()
+        finally:
+            self.message_queues.pop(session_id, None)
+
+    def _ensure_session_loop(self, session_id: str) -> None:
+        """Create the queue and long-lived loop task for a session if not running."""
+        existing = self.tasks.get(session_id)
+        if existing and not existing.done():
+            return  # already alive
+        queue: asyncio.Queue = asyncio.Queue()
+        self.message_queues[session_id] = queue
+        loop_task = asyncio.create_task(self._session_loop(session_id))
+        self.tasks[session_id] = loop_task
 
     async def _run_agent_loop(self, session_id: str, prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None, fork_session: bool = False, selected_browser_ids: list[str] | None = None):
         """Run the Claude Agent SDK query loop for a session."""
@@ -826,9 +890,8 @@ class AgentManager:
                 "disallowed_tools": effective_disallowed,
                 "include_partial_messages": True,
             }
-            if not global_settings.anthropic_api_key:
-                raise ValueError("Anthropic API key not configured. Set it in Settings.")
-            options_kwargs["env"] = {"ANTHROPIC_API_KEY": global_settings.anthropic_api_key}
+            if global_settings.anthropic_api_key:
+                options_kwargs["env"] = {**os.environ, "ANTHROPIC_API_KEY": global_settings.anthropic_api_key}
             if mcp_servers:
                 options_kwargs["mcp_servers"] = mcp_servers
             if composed_prompt:
@@ -1191,19 +1254,29 @@ class AgentManager:
             "session": session.model_dump(mode="json"),
         })
 
-        task = asyncio.create_task(self._run_agent_loop(session_id, prompt, images=images, context_paths=context_paths, forced_tools=forced_tools, attached_skills=attached_skills, selected_browser_ids=selected_browser_ids))
-        self.tasks[session_id] = task
+        self._ensure_session_loop(session_id)
+        queue = self.message_queues.get(session_id)
+        if queue is not None:
+            await queue.put({
+                "prompt": prompt,
+                "images": images,
+                "context_paths": context_paths,
+                "forced_tools": forced_tools,
+                "attached_skills": attached_skills,
+                "selected_browser_ids": selected_browser_ids,
+            })
 
     async def stop_agent(self, session_id: str):
-        """Stop a running agent and all its browser-agent children."""
-        task = self.tasks.get(session_id)
-        if task and not task.done():
-            task.cancel()
+        """Stop the running query for a session (but keep the loop alive)."""
+        # Cancel only the in-flight query task, not the session loop.
+        run_task = self.run_tasks.get(session_id)
+        if run_task and not run_task.done():
+            run_task.cancel()
             try:
-                await task
+                await run_task
             except asyncio.CancelledError:
                 pass
-        
+
         session = self.sessions.get(session_id)
         if session:
             for req in list(session.pending_approvals):
@@ -1237,11 +1310,12 @@ class AgentManager:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
-        existing = self.tasks.get(session_id)
-        if existing and not existing.done():
-            existing.cancel()
+        # Cancel only the in-flight query (not the session loop).
+        run_task = self.run_tasks.get(session_id)
+        if run_task and not run_task.done():
+            run_task.cancel()
             try:
-                await existing
+                await run_task
             except asyncio.CancelledError:
                 pass
 
@@ -1306,14 +1380,29 @@ class AgentManager:
             "session": session.model_dump(mode="json"),
         })
 
-        task = asyncio.create_task(self._run_agent_loop(
-            session_id, new_content,
-            images=target_msg.images,
-            context_paths=target_msg.context_paths,
-            forced_tools=target_msg.forced_tools,
-            attached_skills=target_msg.attached_skills,
-        ))
-        self.tasks[session_id] = task
+        # Drain the queue (stale messages from before the edit), restart the loop,
+        # then enqueue the edited message.
+        old_queue = self.message_queues.pop(session_id, None)
+        if old_queue is not None:
+            while not old_queue.empty():
+                old_queue.get_nowait()
+        loop_task = self.tasks.get(session_id)
+        if loop_task and not loop_task.done():
+            loop_task.cancel()
+            try:
+                await loop_task
+            except asyncio.CancelledError:
+                pass
+        self._ensure_session_loop(session_id)
+        queue = self.message_queues.get(session_id)
+        if queue is not None:
+            await queue.put({
+                "prompt": new_content,
+                "images": target_msg.images,
+                "context_paths": target_msg.context_paths,
+                "forced_tools": target_msg.forced_tools,
+                "attached_skills": target_msg.attached_skills,
+            })
 
     async def switch_branch(self, session_id: str, branch_id: str):
         session = self.sessions.get(session_id)
@@ -1337,9 +1426,10 @@ class AgentManager:
         try:
             import anthropic
             global_settings = load_settings()
-            if not global_settings.anthropic_api_key:
+            api_key = global_settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
                 raise ValueError("API key not configured")
-            client = anthropic.AsyncAnthropic(api_key=global_settings.anthropic_api_key)
+            client = anthropic.AsyncAnthropic(api_key=api_key)
             resp = await client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=30,
@@ -1381,9 +1471,10 @@ class AgentManager:
         try:
             import anthropic, json as _json
             global_settings = load_settings()
-            if not global_settings.anthropic_api_key:
+            api_key = global_settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
                 raise ValueError("API key not configured")
-            client = anthropic.AsyncAnthropic(api_key=global_settings.anthropic_api_key)
+            client = anthropic.AsyncAnthropic(api_key=api_key)
 
             tool_desc = "\n".join(
                 f"- {tc.get('tool', '?')}: {tc.get('input_summary', '')}" for tc in tool_calls
@@ -1465,6 +1556,30 @@ class AgentManager:
         text = " ".join(parts)
         return text[:max_len]
 
+    async def _kill_session_tasks(self, session_id: str) -> None:
+        """Cancel both the in-flight query and the session loop, then clean up."""
+        # 1. Cancel the current query.
+        run_task = self.run_tasks.pop(session_id, None)
+        if run_task and not run_task.done():
+            run_task.cancel()
+            try:
+                await run_task
+            except asyncio.CancelledError:
+                pass
+        # 2. Send the stop sentinel so the loop exits cleanly, then cancel.
+        queue = self.message_queues.get(session_id)
+        if queue is not None:
+            await queue.put(_QUEUE_STOP)
+        loop_task = self.tasks.get(session_id)
+        if loop_task and not loop_task.done():
+            loop_task.cancel()
+            try:
+                await loop_task
+            except asyncio.CancelledError:
+                pass
+        self.tasks.pop(session_id, None)
+        self.message_queues.pop(session_id, None)
+
     async def close_session(self, session_id: str) -> None:
         """Close a session: pause the agent if running, persist to JSON file,
         and remove from in-memory state. Also stops browser-agent children."""
@@ -1475,13 +1590,7 @@ class AgentManager:
         for child in children:
             await self.stop_agent(child.id)
 
-        task = self.tasks.get(session_id)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await self._kill_session_tasks(session_id)
 
         session = self.sessions.get(session_id)
         if not session:
@@ -1529,16 +1638,9 @@ class AgentManager:
         for child in children:
             await self.stop_agent(child.id)
 
-        task = self.tasks.get(session_id)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await self._kill_session_tasks(session_id)
 
         self.sessions.pop(session_id, None)
-        self.tasks.pop(session_id, None)
 
         _delete_session_file(session_id)
         logger.info(f"Session {session_id} permanently deleted")

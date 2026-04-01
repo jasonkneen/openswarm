@@ -9,6 +9,9 @@ const getPort = require('get-port');
 const http = require('http');
 
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
+// Prevent macOS Keychain "Chrome Safe Storage" prompts — the app doesn't
+// persist cookies/passwords so it doesn't need OS-level encryption storage.
+app.commandLine.appendSwitch('password-store', 'basic');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
@@ -21,6 +24,10 @@ let cachedUpdateStatus = { status: 'idle', info: null, error: null };
 
 const isPackaged = app.isPackaged;
 const isDev = process.env.ELECTRON_DEV === '1';
+
+// Set consistent app name so macOS Keychain doesn't create a new entry
+// each time the dev binary runs under the generic "Electron" name.
+if (!isPackaged) app.setName('OpenSwarm');
 const iconPath = path.join(__dirname, 'build', 'icon.png');
 
 /**
