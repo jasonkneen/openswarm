@@ -1593,7 +1593,7 @@ class AgentManager:
             resp = await client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=30,
-                system="Generate a clear 3-5 word title for this chat. Use plain language like 'Debug Login Page', 'Weekly Report Draft', 'API Integration Help'. No quotes, no punctuation, no emojis. Return only the title.",
+                system="Generate a clear 3-5 word title describing what the user wants to do. Examples: 'Summarize Today Emails', 'Debug Login Page', 'Weekly Report Draft'. Never describe errors, outcomes, or system states. No quotes, no punctuation, no emojis. Return only the title.",
                 messages=[{"role": "user", "content": first_prompt}],
             )
             generated = resp.content[0].text.strip().strip('"\'')

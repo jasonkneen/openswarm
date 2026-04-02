@@ -127,44 +127,72 @@ async def oauth_callback(code: str = Query(...), state: str = Query("")):
         return HTMLResponse("<html><body><h2>Invalid OAuth state</h2></body></html>", status_code=400)
 
     tool = _load(tool_id)
-    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
     _port = os.environ.get("OPENSWARM_PORT", "8324")
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(GOOGLE_TOKEN_URL, data={
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        })
+    if tool.name.lower() == "notion":
+        # Notion OAuth: Basic auth with client_id:secret
+        notion_client_id = os.environ.get("NOTION_OAUTH_CLIENT_ID", "")
+        notion_client_secret = os.environ.get("NOTION_OAUTH_CLIENT_SECRET", "")
+        import base64
+        credentials = base64.b64encode(f"{notion_client_id}:{notion_client_secret}".encode()).decode()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post("https://api.notion.com/v1/oauth/token", json={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+            }, headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/json",
+            })
 
-    if resp.status_code != 200:
-        logger.warning(f"OAuth token exchange failed: {resp.text}")
-        return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
+        if resp.status_code != 200:
+            logger.warning(f"Notion OAuth token exchange failed: {resp.text}")
+            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
 
-    tokens = resp.json()
-    access_token = tokens.get("access_token", "")
-    tool.oauth_tokens = {
-        "access_token": access_token,
-        "refresh_token": tokens.get("refresh_token", ""),
-        "token_expiry": time.time() + tokens.get("expires_in", 3600),
-    }
-    tool.auth_status = "connected"
+        tokens = resp.json()
+        tool.oauth_tokens = {
+            "access_token": tokens.get("access_token", ""),
+        }
+        tool.auth_status = "connected"
+        tool.connected_account_email = tokens.get("workspace_name", "Notion workspace")
+    else:
+        # Google OAuth
+        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+        client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(GOOGLE_TOKEN_URL, data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            })
 
-    if access_token:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as info_client:
-                info_resp = await info_client.get(
-                    GOOGLE_USERINFO_URL,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
-            if info_resp.status_code == 200:
-                tool.connected_account_email = info_resp.json().get("email")
-        except Exception as e:
-            logger.warning(f"Failed to fetch Google userinfo: {e}")
+        if resp.status_code != 200:
+            logger.warning(f"OAuth token exchange failed: {resp.text}")
+            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
+
+        tokens = resp.json()
+        access_token = tokens.get("access_token", "")
+        tool.oauth_tokens = {
+            "access_token": access_token,
+            "refresh_token": tokens.get("refresh_token", ""),
+            "token_expiry": time.time() + tokens.get("expires_in", 3600),
+        }
+        tool.auth_status = "connected"
+
+        if access_token:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as info_client:
+                    info_resp = await info_client.get(
+                        GOOGLE_USERINFO_URL,
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                if info_resp.status_code == 200:
+                    tool.connected_account_email = info_resp.json().get("email")
+            except Exception as e:
+                logger.warning(f"Failed to fetch Google userinfo: {e}")
 
     _save(tool)
 
@@ -391,6 +419,9 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
         else:
             env = config.setdefault("env", {})
             env["OAUTH_ACCESS_TOKEN"] = tool.oauth_tokens["access_token"]
+            # Notion MCP uses NOTION_TOKEN env var
+            if tool.name.lower() == "notion":
+                env["NOTION_TOKEN"] = tool.oauth_tokens["access_token"]
             if tool.oauth_tokens.get("refresh_token"):
                 env["GOOGLE_WORKSPACE_REFRESH_TOKEN"] = tool.oauth_tokens["refresh_token"]
             client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
@@ -407,13 +438,29 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                 pkg_name = next((a for a in (config.get("args") or []) if not a.startswith("-")), None)
                 if pkg_name:
                     _backend = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    bundle_path = os.path.join(_backend, "mcp-bundles", f"{pkg_name}.js")
                     electron_path = os.environ.get("OPENSWARM_ELECTRON_PATH")
+                    # Check for single-file bundle first (e.g. reddit-mcp-buddy)
+                    bundle_path = os.path.join(_backend, "mcp-bundles", f"{pkg_name}.js")
                     if os.path.isfile(bundle_path) and electron_path:
                         config["command"] = electron_path
                         config["args"] = [bundle_path]
                         config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
                         logger.info(f"Using bundled MCP server for {pkg_name}")
+                    elif electron_path:
+                        # Check for pre-installed npm package
+                        safe_dir = pkg_name.replace("/", "-").replace("@", "")
+                        npm_dir = os.path.join(_backend, "npm-servers", safe_dir)
+                        pkg_json_path = os.path.join(npm_dir, "node_modules", pkg_name, "package.json")
+                        if os.path.isfile(pkg_json_path):
+                            import json as _json
+                            with open(pkg_json_path) as f:
+                                pkg_meta = _json.load(f)
+                            bin_field = pkg_meta.get("bin", {})
+                            entry = list(bin_field.values())[0] if isinstance(bin_field, dict) else bin_field
+                            config["command"] = electron_path
+                            config["args"] = [os.path.join(npm_dir, "node_modules", pkg_name, entry)]
+                            config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
+                            logger.info(f"Using pre-installed npm MCP server for {pkg_name}")
 
             if not os.path.isabs(config.get("command", "")):
                 resolved = _resolve_command(config["command"])
@@ -611,6 +658,7 @@ async def _discover_mcp_tools_stdio(command: str, args: list[str] | None = None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=proc_env,
+        limit=10 * 1024 * 1024,  # 10 MB buffer for large tool lists
     )
 
     async def _send(msg: dict) -> None:
@@ -685,22 +733,26 @@ async def discover_tools(tool_id: str):
     tool = _load(tool_id)
 
     if tool.auth_type == "oauth2" and tool.auth_status == "connected":
-        refreshed = await refresh_google_token(tool)
-        if not refreshed and tool.oauth_tokens.get("access_token"):
-            expiry = tool.oauth_tokens.get("token_expiry", 0)
-            if time.time() >= expiry - 60:
-                client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-                if not client_id:
+        # Only attempt Google token refresh for tools that use Google OAuth
+        # (identified by having a refresh_token — Notion and other non-Google
+        # OAuth providers don't use refresh tokens through our flow).
+        if tool.oauth_tokens.get("refresh_token"):
+            refreshed = await refresh_google_token(tool)
+            if not refreshed and tool.oauth_tokens.get("access_token"):
+                expiry = tool.oauth_tokens.get("token_expiry", 0)
+                if time.time() >= expiry - 60:
+                    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+                    if not client_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="OAuth token expired and GOOGLE_OAUTH_CLIENT_ID is not set. "
+                                   "In the packaged app, create ~/.openswarm.env or "
+                                   "~/Library/Application Support/OpenSwarm/.env with your Google OAuth credentials.",
+                        )
                     raise HTTPException(
-                        status_code=400,
-                        detail="OAuth token expired and GOOGLE_OAUTH_CLIENT_ID is not set. "
-                               "In the packaged app, create ~/.openswarm.env or "
-                               "~/Library/Application Support/OpenSwarm/.env with your Google OAuth credentials.",
+                        status_code=502,
+                        detail="OAuth token expired and refresh failed. Try reconnecting Google.",
                     )
-                raise HTTPException(
-                    status_code=502,
-                    detail="OAuth token expired and refresh failed. Try reconnecting Google.",
-                )
 
     config = derive_mcp_config(tool)
     if not config:
@@ -798,27 +850,39 @@ async def oauth_disconnect(tool_id: str):
 
 @tools_lib.router.post("/{tool_id}/oauth/start")
 async def oauth_start(tool_id: str):
-    _load(tool_id)
-    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-    if not client_id:
-        raise HTTPException(status_code=400, detail="GOOGLE_OAUTH_CLIENT_ID not set in backend .env")
-
+    tool = _load(tool_id)
     _port = os.environ.get("OPENSWARM_PORT", "8324")
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
     state = tool_id
-
     _pending_oauth[state] = tool_id
 
-    params = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": " ".join(GOOGLE_SCOPES),
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": state,
-    }
-    auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    if tool.name.lower() == "notion":
+        client_id = os.environ.get("NOTION_OAUTH_CLIENT_ID", "")
+        if not client_id:
+            raise HTTPException(status_code=400, detail="NOTION_OAUTH_CLIENT_ID not set in backend .env")
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "owner": "user",
+            "state": state,
+        }
+        auth_url = f"https://api.notion.com/v1/oauth/authorize?{urlencode(params)}"
+    else:
+        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+        if not client_id:
+            raise HTTPException(status_code=400, detail="GOOGLE_OAUTH_CLIENT_ID not set in backend .env")
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(GOOGLE_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": state,
+        }
+        auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
     return {"auth_url": auth_url}
 
 

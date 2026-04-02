@@ -70,15 +70,41 @@ echo ""
 MCP_BUNDLE_DIR="$PROJECT_ROOT/backend/mcp-bundles"
 mkdir -p "$MCP_BUNDLE_DIR"
 if [[ ! -f "$MCP_BUNDLE_DIR/reddit-mcp-buddy.js" ]]; then
-    echo "[0b] Bundling npm MCP servers..."
+    echo "[0b] Bundling reddit-mcp-buddy..."
     TMPDIR_MCP=$(mktemp -d)
     cd "$TMPDIR_MCP"
     npm install reddit-mcp-buddy --silent 2>/dev/null
     npx esbuild node_modules/reddit-mcp-buddy/dist/index.js --bundle --platform=node --format=cjs --outfile="$MCP_BUNDLE_DIR/reddit-mcp-buddy.js" 2>/dev/null
     rm -rf "$TMPDIR_MCP"
-    echo "npm MCP servers bundled."
+    echo "reddit-mcp-buddy bundled."
 else
-    echo "[0b] npm MCP bundles already present."
+    echo "[0b] reddit-mcp-buddy bundle already present."
+fi
+
+# Step 0c: Pre-install npm MCP servers that can't be esbuild'd
+NPM_SERVERS_DIR="$PROJECT_ROOT/backend/npm-servers"
+mkdir -p "$NPM_SERVERS_DIR"
+
+if [[ ! -d "$NPM_SERVERS_DIR/softeria-ms-365-mcp-server/node_modules" ]]; then
+    echo "[0c] Installing @softeria/ms-365-mcp-server..."
+    mkdir -p "$NPM_SERVERS_DIR/softeria-ms-365-mcp-server"
+    cd "$NPM_SERVERS_DIR/softeria-ms-365-mcp-server"
+    npm init -y > /dev/null 2>&1
+    npm install @softeria/ms-365-mcp-server --silent 2>/dev/null
+    echo "@softeria/ms-365-mcp-server installed."
+else
+    echo "[0c] @softeria/ms-365-mcp-server already present."
+fi
+
+if [[ ! -d "$NPM_SERVERS_DIR/notionhq-notion-mcp-server/node_modules" ]]; then
+    echo "[0c] Installing @notionhq/notion-mcp-server..."
+    mkdir -p "$NPM_SERVERS_DIR/notionhq-notion-mcp-server"
+    cd "$NPM_SERVERS_DIR/notionhq-notion-mcp-server"
+    npm init -y > /dev/null 2>&1
+    npm install @notionhq/notion-mcp-server --silent 2>/dev/null
+    echo "@notionhq/notion-mcp-server installed."
+else
+    echo "[0c] @notionhq/notion-mcp-server already present."
 fi
 echo ""
 

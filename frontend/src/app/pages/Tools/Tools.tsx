@@ -157,6 +157,20 @@ const INTEGRATIONS: Integration[] = [
     ),
     authType: 'oauth2',
   },
+  {
+    id: 'notion',
+    name: 'Notion',
+    description: 'Create, read, and update pages, databases, and blocks in Notion workspaces.',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', '@notionhq/notion-mcp-server'] },
+    color: '#000000',
+    website: 'https://www.notion.so',
+    icon: (
+      <svg viewBox="0 0 24 24" width="22" height="22">
+        <path d="M4.46 2.95c.53.43.73.4 1.73.33l9.4-.57c.2 0 .03-.2-.03-.23l-1.57-1.13c-.3-.23-.7-.5-1.47-.43L3.3 1.78c-.5.07-.6.33-.4.53l1.56 1.13v.51zM5.03 6.15v9.93c0 .53.27.73.87.7l10.33-.6c.6-.03.67-.4.67-.83V5.52c0-.43-.17-.63-.53-.6l-10.8.63c-.4.03-.54.2-.54.6zM14.93 6.63c.07.3 0 .6-.3.63l-.5.1v7.33c-.43.23-.83.37-1.17.37-.53 0-.67-.17-1.07-.67l-3.27-5.13v4.97l1.03.23s0 .6-.83.6l-2.3.13c-.07-.13 0-.47.23-.53l.6-.17V8.33l-.83-.07c-.07-.3.1-.73.57-.77l2.47-.17 3.4 5.2V8.6l-.87-.1c-.07-.37.2-.63.53-.67l2.3-.2zM2.57 1.28L11.93.28c1.17-.1 1.47-.03 2.2.5l3.03 2.13c.5.37.67.47.67.87v15.27c0 .63-.23 1-.87 1.07l-10.7.63c-.5.03-.73-.07-.97-.37L2.73 17.3c-.27-.33-.4-.6-.4-1.03V2.15c0-.53.23-.83.83-.87h-.59z" fill="#000"/>
+      </svg>
+    ),
+    authType: 'oauth2',
+  },
 ];
 
 const CATEGORY_ORDER = ['filesystem', 'system', 'search', 'interaction', 'agents', 'planning', 'scheduling'];
@@ -773,11 +787,11 @@ const Tools: React.FC = () => {
       const afterConnect = async () => {
         const statusResult = await dispatch(fetchToolStatus(toolId));
         if (fetchToolStatus.fulfilled.match(statusResult) && statusResult.payload.auth_status === 'connected') {
-          setSnackbar({ open: true, message: 'Google account connected! Discovering actions…' });
+          setSnackbar({ open: true, message: 'Account connected! Discovering actions…' });
           setExpandedToolId(toolId);
           dispatch(discoverTools(toolId));
         } else {
-          setSnackbar({ open: true, message: 'Google account connected!' });
+          setSnackbar({ open: true, message: 'Account connected!' });
         }
       };
 
@@ -1425,7 +1439,7 @@ const Tools: React.FC = () => {
                             onClick={(e) => { e.stopPropagation(); handleOAuthConnect(tool.id); }}
                             sx={{ borderColor: `${c.status.info}40`, color: c.status.info, '&:hover': { borderColor: c.status.info, bgcolor: `${c.status.info}10` }, textTransform: 'none', fontSize: '0.78rem', borderRadius: 1.5, py: 0.5, flexShrink: 0 }}
                           >
-                            Connect Google
+                            Connect {tool.name}
                           </Button>
                         )}
                         {!isDisabled && ig?.credentialFields && tool.auth_status !== 'connected' && (

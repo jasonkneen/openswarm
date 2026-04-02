@@ -17,6 +17,9 @@ electron/package-lock.json
 9router/.next/
 9router/package-lock.json
 
+# Pre-installed MCP server dependencies
+backend/npm-servers/*/node_modules/
+
 # Frontend build output
 frontend/dist/
 # Bundled uv binaries (downloaded during build)

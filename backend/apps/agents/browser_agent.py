@@ -155,6 +155,29 @@ BROWSER_TOOLS_SCHEMA = [
             "required": [],
         },
     },
+    {
+        "name": "RequestHumanIntervention",
+        "description": (
+            "Request the user's help when you encounter an obstacle you cannot solve "
+            "programmatically — captchas, login prompts, cookie consent walls, "
+            "two-factor authentication, or any blocking popup. The agent will pause "
+            "until the user resolves the issue and clicks Continue."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "problem": {
+                    "type": "string",
+                    "description": "What obstacle was encountered.",
+                },
+                "instruction": {
+                    "type": "string",
+                    "description": "What the user should do to resolve it.",
+                },
+            },
+            "required": ["problem", "instruction"],
+        },
+    },
 ]
 
 ACTION_MAP = {
@@ -188,8 +211,9 @@ SYSTEM_PROMPT = (
     "you've reached the end of the page.\n"
     "- For complex SPAs (Notion, Gmail, etc.), prefer BrowserScroll over BrowserEvaluate for scrolling.\n"
     "- Avoid looping: if scrolling shows no new content (scrolled 0px), you're at the boundary.\n\n"
-    "You have access ONLY to browser tools. Do not ask the user questions — "
-    "complete the task autonomously to the best of your ability."
+    "You have access ONLY to browser tools. Complete the task autonomously. "
+    "If you encounter a captcha, login wall, or popup you cannot bypass, "
+    "use RequestHumanIntervention to ask the user for help instead of retrying endlessly."
 )
 
 MAX_TURNS = 25
@@ -426,6 +450,30 @@ async def run_browser_agent(
                 if cancel_event.is_set():
                     cancelled = True
                     break
+
+                # Handle RequestHumanIntervention — pause and wait for user
+                if tu.name == "RequestHumanIntervention":
+                    problem = tu.input.get("problem", "")
+                    instruction = tu.input.get("instruction", "")
+                    decision = await _request_browser_approval(
+                        session, tu.name, {"problem": problem, "instruction": instruction},
+                    )
+                    result_text = "User resolved the issue." if decision.get("behavior") != "deny" else "User declined to help."
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": [{"type": "text", "text": result_text}],
+                    })
+                    result_msg = Message(
+                        role="tool_result",
+                        content={"text": result_text, "tool_name": tu.name, "elapsed_ms": 0},
+                    )
+                    session.messages.append(result_msg)
+                    await ws_manager.send_to_session(session_id, "agent:message", {
+                        "session_id": session_id,
+                        "message": result_msg.model_dump(mode="json"),
+                    })
+                    continue
 
                 policy = _browser_perms.get(tu.name, "always_allow")
 
