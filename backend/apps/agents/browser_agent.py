@@ -309,6 +309,12 @@ async def run_browser_agent(
     session._cancel_event = cancel_event
     agent_manager.sessions[session_id] = session
 
+    # If parent was already stopped before we registered, bail immediately
+    if parent_session_id:
+        parent = agent_manager.sessions.get(parent_session_id)
+        if parent and parent.status == "stopped":
+            cancel_event.set()
+
     await ws_manager.send_to_session(session_id, "agent:status", {
         "session_id": session_id,
         "status": "running",
@@ -510,7 +516,8 @@ async def run_browser_agent(
             return {
                 "session_id": session_id,
                 "browser_id": browser_id,
-                "summary": "Agent was stopped.",
+                "summary": "Agent was stopped by the user. Do NOT retry or create new browser agents.",
+                "error": "Agent was stopped by the user.",
                 "action_log": action_log,
                 "final_screenshot": final_screenshot,
             }
