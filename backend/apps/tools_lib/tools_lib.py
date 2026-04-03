@@ -155,6 +155,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query("")):
         tool.oauth_tokens = {
             "access_token": tokens.get("access_token", ""),
         }
+        tool.auth_type = "oauth2"
         tool.auth_status = "connected"
         tool.connected_account_email = tokens.get("workspace_name", "Notion workspace")
     else:
@@ -181,6 +182,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query("")):
             "refresh_token": tokens.get("refresh_token", ""),
             "token_expiry": time.time() + tokens.get("expires_in", 3600),
         }
+        tool.auth_type = "oauth2"
         tool.auth_status = "connected"
 
         if access_token:
@@ -413,7 +415,7 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
             env = config.setdefault("env", {})
             env.update(tool.credentials)
 
-    if tool.auth_type == "oauth2" and tool.oauth_tokens.get("access_token"):
+    if tool.oauth_tokens.get("access_token"):
         if config.get("type") in ("http", "sse"):
             headers = config.setdefault("headers", {})
             headers["Authorization"] = f"Bearer {tool.oauth_tokens['access_token']}"

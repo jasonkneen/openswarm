@@ -1593,7 +1593,7 @@ class AgentManager:
             resp = await client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=30,
-                system="Generate a clear 3-5 word title describing what the user wants to do. Examples: 'Summarize Today Emails', 'Debug Login Page', 'Weekly Report Draft'. Never describe errors, outcomes, or system states. No quotes, no punctuation, no emojis. Return only the title.",
+                system="Generate a 2-4 word title for what the user wants. Be terse. No filler words. No quotes, no punctuation. Return only the title.",
                 messages=[{"role": "user", "content": first_prompt}],
             )
             generated = resp.content[0].text.strip().strip('"\'')
@@ -1645,7 +1645,7 @@ class AgentManager:
                 "Generate a concise 2-5 word name and a minimal SVG icon for a group of tool actions.\n\n"
                 "Return ONLY valid JSON: {\"name\": \"...\", \"svg\": \"...\"}\n\n"
                 "Name rules:\n"
-                "- 2-5 words, title case, describes the action (e.g. \"Email Inbox Search\", \"Reading Project Files\")\n\n"
+                "- 2-3 words, title case, terse, no filler words\n\n"
                 "SVG rules:\n"
                 "- 24x24 viewBox\n"
                 "- Use currentColor for all stroke/fill values\n"
