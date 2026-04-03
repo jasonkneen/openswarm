@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
-    "electron": "castlabs/electron-releases#v33.4.11+wvcus",
+    "electron": "castlabs/electron-releases#v40.7.0+wvcus",
     "electron-builder": "^25.1.0"
   },
   "build": {

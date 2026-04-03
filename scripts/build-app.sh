@@ -18,28 +18,36 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 PUBLISH_MODE=false
+SIGN_MODE=false
 if [[ "${1:-}" == "--publish" ]]; then
     PUBLISH_MODE=true
+    SIGN_MODE=true
+elif [[ "${1:-}" == "--sign" ]]; then
+    SIGN_MODE=true
 fi
 
 echo "========================================"
 echo "  OpenSwarm Desktop App Builder"
 if $PUBLISH_MODE; then
     echo "  Mode: PRODUCTION (sign + notarize + publish)"
+elif $SIGN_MODE; then
+    echo "  Mode: SIGNED (sign + notarize, no publish)"
 else
     echo "  Mode: LOCAL (unsigned)"
 fi
 echo "========================================"
 echo ""
 
-if $PUBLISH_MODE; then
+if $SIGN_MODE; then
     missing_vars=()
     [[ -z "${APPLE_ID:-}" ]] && missing_vars+=("APPLE_ID")
     [[ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]] && missing_vars+=("APPLE_APP_SPECIFIC_PASSWORD")
     [[ -z "${APPLE_TEAM_ID:-}" ]] && missing_vars+=("APPLE_TEAM_ID")
-    [[ -z "${GH_TOKEN:-}" ]] && missing_vars+=("GH_TOKEN")
+    if $PUBLISH_MODE; then
+        [[ -z "${GH_TOKEN:-}" ]] && missing_vars+=("GH_TOKEN")
+    fi
     if [[ ${#missing_vars[@]} -gt 0 ]]; then
-        echo "ERROR: Missing required environment variables for --publish mode:"
+        echo "ERROR: Missing required environment variables:"
         printf '  - %s\n' "${missing_vars[@]}"
         echo ""
         echo "See script header for details."
@@ -163,7 +171,10 @@ mkdir -p "$STAGING_DIR"
 rsync -a \
     --exclude='__pycache__' --exclude='**/__pycache__' \
     --exclude='*.pyc' --exclude='.venv' \
+    --exclude='data/tools' \
     "$PROJECT_ROOT/backend/" "$STAGING_DIR/backend/"
+# Create empty tools directory so the app has a place to write
+mkdir -p "$STAGING_DIR/backend/data/tools"
 
 rsync -a \
     --exclude='__pycache__' --exclude='**/__pycache__' \
@@ -196,6 +207,15 @@ npm install
 
 if $PUBLISH_MODE; then
     npx electron-builder --mac --arm64 --x64 --publish always
+elif $SIGN_MODE; then
+    ARCH=$(uname -m)
+    if [[ "$ARCH" == "arm64" ]]; then
+        npx electron-builder --mac --arm64 --publish never
+    elif [[ "$ARCH" == "x86_64" ]]; then
+        npx electron-builder --mac --x64 --publish never
+    else
+        npx electron-builder --mac --publish never
+    fi
 else
     export CSC_IDENTITY_AUTO_DISCOVERY=false
     ARCH=$(uname -m)

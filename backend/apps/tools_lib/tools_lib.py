@@ -53,6 +53,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/contacts.readonly",
 ]
 
+
 _pending_oauth: dict[str, str] = {}
 
 
@@ -419,7 +420,6 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
         else:
             env = config.setdefault("env", {})
             env["OAUTH_ACCESS_TOKEN"] = tool.oauth_tokens["access_token"]
-            # Notion MCP uses NOTION_TOKEN env var
             if tool.name.lower() == "notion":
                 env["NOTION_TOKEN"] = tool.oauth_tokens["access_token"]
             if tool.oauth_tokens.get("refresh_token"):
@@ -430,6 +430,14 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                 env["GOOGLE_WORKSPACE_CLIENT_ID"] = client_id
             if client_secret:
                 env["GOOGLE_WORKSPACE_CLIENT_SECRET"] = client_secret
+
+    # Microsoft 365 MCP: use a stable token cache path shared across process spawns
+    if tool.name.lower() == "microsoft 365" and config.get("type") == "stdio":
+        env = config.setdefault("env", {})
+        cache_dir = os.path.join(os.path.expanduser("~"), ".openswarm")
+        os.makedirs(cache_dir, exist_ok=True)
+        env["MS365_MCP_TOKEN_CACHE_PATH"] = os.path.join(cache_dir, "ms365-token-cache.json")
+        env["MS365_MCP_SELECTED_ACCOUNT_PATH"] = os.path.join(cache_dir, "ms365-selected-account.json")
 
     if config.get("type") == "stdio":
         if config.get("command"):
@@ -446,8 +454,8 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                         config["args"] = [bundle_path]
                         config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
                         logger.info(f"Using bundled MCP server for {pkg_name}")
-                    elif electron_path:
-                        # Check for pre-installed npm package
+                    else:
+                        # Check for pre-installed npm package (works in both dev and packaged modes)
                         safe_dir = pkg_name.replace("/", "-").replace("@", "")
                         npm_dir = os.path.join(_backend, "npm-servers", safe_dir)
                         pkg_json_path = os.path.join(npm_dir, "node_modules", pkg_name, "package.json")
@@ -457,10 +465,13 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                                 pkg_meta = _json.load(f)
                             bin_field = pkg_meta.get("bin", {})
                             entry = list(bin_field.values())[0] if isinstance(bin_field, dict) else bin_field
-                            config["command"] = electron_path
-                            config["args"] = [os.path.join(npm_dir, "node_modules", pkg_name, entry)]
-                            config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
-                            logger.info(f"Using pre-installed npm MCP server for {pkg_name}")
+                            node_cmd = electron_path or shutil.which("node")
+                            if node_cmd:
+                                config["command"] = node_cmd
+                                config["args"] = [os.path.join(npm_dir, "node_modules", pkg_name, entry)]
+                                if electron_path:
+                                    config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
+                                logger.info(f"Using pre-installed npm MCP server for {pkg_name}")
 
             if not os.path.isabs(config.get("command", "")):
                 resolved = _resolve_command(config["command"])
@@ -824,13 +835,180 @@ async def discover_tools(tool_id: str):
     return {"ok": True, "tool": tool.model_dump()}
 
 
+# ---------------------------------------------------------------------------
+# Microsoft 365 device-code login (runs in the backend, not the MCP server)
+# ---------------------------------------------------------------------------
+
+_m365_login_processes: dict[str, dict] = {}  # tool_id -> {proc, device_code, status, email}
+
+
+def _m365_server_script() -> str:
+    _backend = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(
+        _backend, "npm-servers", "softeria-ms-365-mcp-server",
+        "node_modules", "@softeria", "ms-365-mcp-server", "dist", "index.js",
+    )
+
+
+def _m365_cache_env() -> dict[str, str]:
+    cache_dir = os.path.join(os.path.expanduser("~"), ".openswarm")
+    os.makedirs(cache_dir, exist_ok=True)
+    return {
+        "MS365_MCP_TOKEN_CACHE_PATH": os.path.join(cache_dir, "ms365-token-cache.json"),
+        "MS365_MCP_SELECTED_ACCOUNT_PATH": os.path.join(cache_dir, "ms365-selected-account.json"),
+    }
+
+
+@tools_lib.router.post("/{tool_id}/m365/device-login")
+async def m365_device_login(tool_id: str):
+    """Start a Microsoft 365 device-code login.
+
+    Spawns the MCP server with --login in a long-lived subprocess.
+    Returns the device code and URL for the user to authenticate.
+    """
+    import subprocess
+
+    tool = _load(tool_id)
+    script = _m365_server_script()
+    if not os.path.isfile(script):
+        raise HTTPException(status_code=500, detail="M365 MCP server not installed")
+
+    node = shutil.which("node")
+    electron = os.environ.get("OPENSWARM_ELECTRON_PATH")
+    cmd = electron or node
+    if not cmd:
+        raise HTTPException(status_code=500, detail="No node/electron found")
+
+    env = {**os.environ, **_m365_cache_env()}
+    if electron:
+        env["ELECTRON_RUN_AS_NODE"] = "1"
+
+    # Kill any existing login process for this tool
+    existing = _m365_login_processes.pop(tool_id, None)
+    if existing and existing.get("proc"):
+        try:
+            existing["proc"].kill()
+        except Exception:
+            pass
+
+    proc = subprocess.Popen(
+        [cmd, script, "--login"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env, text=True,
+    )
+
+    # Read stdout lines until we find the device code (MSAL prints it)
+    import threading
+    login_state: dict = {"proc": proc, "status": "waiting_for_code", "device_code": "", "device_code_url": "", "email": None, "output": ""}
+
+    def _read_output():
+        import re
+        for line in proc.stdout:
+            login_state["output"] += line
+            # MSAL device code message contains the URL and code
+            code_match = re.search(r'enter the code\s+(\S+)', line, re.IGNORECASE)
+            url_match = re.search(r'(https://\S+)', line)
+            if code_match:
+                login_state["device_code"] = code_match.group(1)
+                login_state["status"] = "awaiting_auth"
+            if url_match and "microsoft" in url_match.group(1).lower():
+                login_state["device_code_url"] = url_match.group(1)
+        # Process ended — check result
+        proc.wait()
+        remaining_stderr = proc.stderr.read() if proc.stderr else ""
+        login_state["output"] += remaining_stderr
+        if proc.returncode == 0:
+            login_state["status"] = "connected"
+            # Try to extract email from output
+            try:
+                import json as _j
+                result = _j.loads(login_state["output"].strip().split("\n")[-1])
+                if result.get("success"):
+                    ud = result.get("userData", {})
+                    login_state["email"] = ud.get("userPrincipalName") or ud.get("displayName")
+            except Exception:
+                pass
+            # Update tool status
+            try:
+                t = _load(tool_id)
+                t.auth_status = "connected"
+                if login_state.get("email"):
+                    t.connected_account_email = login_state["email"]
+                _save(t)
+            except Exception:
+                pass
+        else:
+            login_state["status"] = "error"
+
+    thread = threading.Thread(target=_read_output, daemon=True)
+    thread.start()
+
+    _m365_login_processes[tool_id] = login_state
+
+    # Wait briefly for device code to appear
+    for _ in range(30):
+        if login_state["device_code"]:
+            break
+        await asyncio.sleep(0.2)
+
+    if not login_state["device_code"]:
+        return {"status": "error", "message": "Timed out waiting for device code from MCP server"}
+
+    return {
+        "status": "awaiting_auth",
+        "device_code": login_state["device_code"],
+        "device_code_url": login_state["device_code_url"] or "https://login.microsoft.com/device",
+    }
+
+
+@tools_lib.router.get("/{tool_id}/m365/device-login/status")
+async def m365_device_login_status(tool_id: str):
+    """Poll the status of a pending M365 device-code login."""
+    state = _m365_login_processes.get(tool_id)
+    if not state:
+        # Check if already connected via cached token
+        cache_env = _m365_cache_env()
+        cache_path = cache_env["MS365_MCP_TOKEN_CACHE_PATH"]
+        if os.path.isfile(cache_path):
+            tool = _load(tool_id)
+            if tool.auth_status == "connected":
+                return {"status": "connected", "email": tool.connected_account_email}
+        return {"status": "no_login_in_progress"}
+
+    status = state["status"]
+    result: dict = {"status": status}
+    if status == "connected":
+        result["email"] = state.get("email")
+        _m365_login_processes.pop(tool_id, None)
+    elif status == "error":
+        result["message"] = "Login failed"
+        _m365_login_processes.pop(tool_id, None)
+
+    return result
+
+
+@tools_lib.router.post("/{tool_id}/m365/disconnect")
+async def m365_disconnect(tool_id: str):
+    """Disconnect M365 by clearing the cached token."""
+    tool = _load(tool_id)
+    cache_env = _m365_cache_env()
+    for path in cache_env.values():
+        if os.path.isfile(path):
+            os.remove(path)
+    tool.auth_status = "configured"
+    tool.connected_account_email = None
+    _save(tool)
+    return {"ok": True, "tool": tool.model_dump()}
+
+
 @tools_lib.router.post("/{tool_id}/oauth/disconnect")
 async def oauth_disconnect(tool_id: str):
     """Clear OAuth tokens and reset auth status so the user can reconnect with a different account."""
     tool = _load(tool_id)
     access_token = tool.oauth_tokens.get("access_token")
 
-    if access_token:
+    if access_token and tool.name.lower() != "notion":
+        # Revoke Google tokens
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(

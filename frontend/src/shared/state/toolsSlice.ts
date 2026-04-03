@@ -98,6 +98,33 @@ export const startOAuth = createAsyncThunk(
   }
 );
 
+export const startDeviceCodeLogin = createAsyncThunk(
+  'tools/startDeviceCodeLogin',
+  async (toolId: string) => {
+    const res = await fetch(`${TOOLS_API}/${toolId}/m365/device-login`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to start device code login');
+    return await res.json();
+  }
+);
+
+export const pollDeviceCodeStatus = createAsyncThunk(
+  'tools/pollDeviceCodeStatus',
+  async (toolId: string) => {
+    const res = await fetch(`${TOOLS_API}/${toolId}/m365/device-login/status`);
+    return await res.json();
+  }
+);
+
+export const disconnectM365 = createAsyncThunk(
+  'tools/disconnectM365',
+  async (toolId: string) => {
+    const res = await fetch(`${TOOLS_API}/${toolId}/m365/disconnect`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to disconnect M365');
+    const data = await res.json();
+    return data.tool as ToolDefinition;
+  }
+);
+
 export const disconnectOAuth = createAsyncThunk(
   'tools/disconnectOAuth',
   async (toolId: string) => {

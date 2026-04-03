@@ -69,6 +69,9 @@ import {
   startOAuth,
   fetchToolStatus,
   discoverTools,
+  startDeviceCodeLogin,
+  pollDeviceCodeStatus,
+  disconnectM365,
   ToolDefinition,
   BuiltinTool,
 } from '@/shared/state/toolsSlice';
@@ -156,6 +159,20 @@ const INTEGRATIONS: Integration[] = [
       </svg>
     ),
     authType: 'oauth2',
+  },
+  {
+    id: 'microsoft-365',
+    name: 'Microsoft 365',
+    description: 'Outlook email, Calendar, OneDrive, Excel, OneNote, Tasks, Contacts, Teams, and SharePoint.',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', '@softeria/ms-365-mcp-server'] },
+    color: '#0078D4',
+    website: 'https://github.com/softeria/ms-365-mcp-server',
+    icon: (
+      <svg viewBox="0 0 24 24" width="22" height="22">
+        <path d="M11.4 24H0V12.6L11.4 24zM24 24H12.6V12.6L24 24zM11.4 11.4H0V0l11.4 11.4zM24 11.4H12.6V0L24 11.4z" fill="#0078D4"/>
+      </svg>
+    ),
+    authType: 'device_code' as any,
   },
   {
     id: 'notion',
@@ -439,6 +456,13 @@ const Tools: React.FC = () => {
   // Integration toggle state
   const [integrationLoading, setIntegrationLoading] = useState<Record<string, boolean>>({});
 
+  // Device code login dialog state (M365)
+  const [deviceCodeDialogOpen, setDeviceCodeDialogOpen] = useState(false);
+  const [deviceCodeDialogToolId, setDeviceCodeDialogToolId] = useState<string | null>(null);
+  const [deviceCode, setDeviceCode] = useState('');
+  const [deviceCodeUrl, setDeviceCodeUrl] = useState('');
+  const [deviceCodeStatus, setDeviceCodeStatus] = useState<'loading' | 'awaiting' | 'connected' | 'error'>('loading');
+
   // Integration credentials dialog state
   const [credDialogOpen, setCredDialogOpen] = useState(false);
   const [credDialogToolId, setCredDialogToolId] = useState<string | null>(null);
@@ -482,7 +506,7 @@ const Tools: React.FC = () => {
         }));
         if (createTool.fulfilled.match(result)) {
           const newTool = result.payload;
-          if (integration.authType === 'oauth2') {
+          if (integration.authType === 'oauth2' || integration.authType === 'device_code') {
             setSnackbar({ open: true, message: `Enabled ${integration.name} — connect your account to discover actions` });
           } else {
             setSnackbar({ open: true, message: `Enabled ${integration.name} — discovering actions…` });
@@ -813,6 +837,56 @@ const Tools: React.FC = () => {
     } else {
       setSnackbar({ open: true, message: 'OAuth failed — make sure GOOGLE_OAUTH_CLIENT_ID is set in backend .env', severity: 'error' });
     }
+  };
+
+  const handleDeviceCodeConnect = async (toolId: string) => {
+    setDeviceCodeDialogToolId(toolId);
+    setDeviceCodeStatus('loading');
+    setDeviceCode('');
+    setDeviceCodeUrl('');
+    setDeviceCodeDialogOpen(true);
+
+    const result = await dispatch(startDeviceCodeLogin(toolId));
+    if (startDeviceCodeLogin.fulfilled.match(result)) {
+      const { device_code, device_code_url } = result.payload;
+      setDeviceCode(device_code);
+      const url = device_code_url || 'https://login.microsoft.com/device';
+      setDeviceCodeUrl(url);
+      setDeviceCodeStatus('awaiting');
+
+      // Auto-open Microsoft login in a popup
+      window.open(url, 'm365-login', 'width=500,height=700,left=200,top=100');
+
+      // Poll for completion
+      const poll = setInterval(async () => {
+        const statusResult = await dispatch(pollDeviceCodeStatus(toolId));
+        if (pollDeviceCodeStatus.fulfilled.match(statusResult)) {
+          const { status, email } = statusResult.payload;
+          if (status === 'connected') {
+            clearInterval(poll);
+            setDeviceCodeStatus('connected');
+            setSnackbar({ open: true, message: `Connected to Microsoft 365${email ? ` as ${email}` : ''}! Discovering actions…` });
+            setDeviceCodeDialogOpen(false);
+            setExpandedToolId(toolId);
+            await dispatch(fetchToolStatus(toolId));
+            dispatch(discoverTools(toolId));
+          } else if (status === 'error') {
+            clearInterval(poll);
+            setDeviceCodeStatus('error');
+          }
+        }
+      }, 2000);
+
+      // Stop polling after 5 minutes
+      setTimeout(() => clearInterval(poll), 300000);
+    } else {
+      setDeviceCodeStatus('error');
+    }
+  };
+
+  const handleM365Disconnect = async (toolId: string) => {
+    await dispatch(disconnectM365(toolId));
+    setSnackbar({ open: true, message: 'Disconnected from Microsoft 365' });
   };
 
   const openCredentialsDialog = (toolId: string, integration: Integration) => {
@@ -1431,7 +1505,7 @@ const Tools: React.FC = () => {
                           </Box>
                           {tool.description && <Typography sx={{ color: c.text.muted, fontSize: '0.84rem' }}>{tool.description}</Typography>}
                         </Box>
-                        {!isDisabled && tool.auth_type === 'oauth2' && tool.auth_status !== 'connected' && (
+                        {!isDisabled && (tool.auth_type === 'oauth2' || ig?.authType === 'oauth2') && tool.auth_status !== 'connected' && (
                           <Button
                             size="small"
                             variant="outlined"
@@ -1440,6 +1514,17 @@ const Tools: React.FC = () => {
                             sx={{ borderColor: `${c.status.info}40`, color: c.status.info, '&:hover': { borderColor: c.status.info, bgcolor: `${c.status.info}10` }, textTransform: 'none', fontSize: '0.78rem', borderRadius: 1.5, py: 0.5, flexShrink: 0 }}
                           >
                             Connect {tool.name}
+                          </Button>
+                        )}
+                        {!isDisabled && ig?.authType === 'device_code' && tool.auth_status !== 'connected' && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<LinkIcon sx={{ fontSize: 14 }} />}
+                            onClick={(e) => { e.stopPropagation(); handleDeviceCodeConnect(tool.id); }}
+                            sx={{ borderColor: `${ig.color}40`, color: ig.color, '&:hover': { borderColor: ig.color, bgcolor: `${ig.color}10` }, textTransform: 'none', fontSize: '0.78rem', borderRadius: 1.5, py: 0.5, flexShrink: 0 }}
+                          >
+                            Connect Microsoft 365
                           </Button>
                         )}
                         {!isDisabled && ig?.credentialFields && tool.auth_status !== 'connected' && (
@@ -1454,12 +1539,12 @@ const Tools: React.FC = () => {
                           </Button>
                         )}
                         {!isDisabled && ig && tool.auth_status === 'connected' && (
-                          <Tooltip title={ig.credentialFields || ig.authType === 'oauth2' ? 'Disconnect' : ''}>
+                          <Tooltip title={ig.credentialFields || ig.authType === 'oauth2' || ig.authType === 'device_code' ? 'Disconnect' : ''}>
                             <Chip
                               icon={<CheckCircleIcon sx={{ fontSize: 12 }} />}
                               label={tool.connected_account_email ? `Connected · ${tool.connected_account_email}` : 'Connected'}
                               size="small"
-                              onDelete={(ig.credentialFields || ig.authType === 'oauth2') ? (e: React.SyntheticEvent) => { e.stopPropagation(); handleDisconnectIntegration(tool.id, ig); } : undefined}
+                              onDelete={(ig.credentialFields || ig.authType === 'oauth2' || ig.authType === 'device_code') ? (e: React.SyntheticEvent) => { e.stopPropagation(); ig.authType === 'device_code' ? handleM365Disconnect(tool.id) : handleDisconnectIntegration(tool.id, ig); } : undefined}
                               onClick={(e) => e.stopPropagation()}
                               sx={{ bgcolor: c.status.successBg, color: c.status.success, fontSize: '0.7rem', height: 22, '& .MuiChip-icon': { color: c.status.success }, '& .MuiChip-deleteIcon': { color: c.status.success, '&:hover': { color: c.status.error } }, flexShrink: 0 }}
                             />
@@ -2024,6 +2109,65 @@ const Tools: React.FC = () => {
             sx={{ bgcolor: c.accent.primary, '&:hover': { bgcolor: c.accent.pressed }, textTransform: 'none', borderRadius: 2 }}
           >
             Install Tool
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Microsoft 365 Device Code Login Dialog */}
+      <Dialog
+        open={deviceCodeDialogOpen}
+        onClose={() => { if (deviceCodeStatus !== 'loading') setDeviceCodeDialogOpen(false); }}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{ sx: { bgcolor: c.bg.surface, backgroundImage: 'none', borderRadius: 4, border: `1px solid ${c.border.subtle}` } }}
+      >
+        <DialogTitle sx={{ color: c.text.primary, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{ width: 32, height: 32, borderRadius: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#0078D418' }}>
+            <svg viewBox="0 0 24 24" width="20" height="20"><path d="M11.4 24H0V12.6L11.4 24zM24 24H12.6V12.6L24 24zM11.4 11.4H0V0l11.4 11.4zM24 11.4H12.6V0L24 11.4z" fill="#0078D4"/></svg>
+          </Box>
+          Connect Microsoft 365
+        </DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '8px !important' }}>
+          {deviceCodeStatus === 'loading' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 3, justifyContent: 'center' }}>
+              <CircularProgress size={20} />
+              <Typography sx={{ color: c.text.muted, fontSize: '0.9rem' }}>Generating login code...</Typography>
+            </Box>
+          )}
+          {deviceCodeStatus === 'awaiting' && (
+            <>
+              <Typography sx={{ color: c.text.muted, fontSize: '0.85rem', lineHeight: 1.6 }}>
+                Open the link below and enter the code to sign in:
+              </Typography>
+              <Box sx={{ bgcolor: c.bg.page, border: `1px solid ${c.border.subtle}`, borderRadius: 2, p: 2, display: 'flex', flexDirection: 'column', gap: 1.5, alignItems: 'center' }}>
+                <Typography component="a" href={deviceCodeUrl} target="_blank" rel="noopener" sx={{ color: c.status.info, fontSize: '0.9rem', fontWeight: 500 }}>
+                  {deviceCodeUrl}
+                </Typography>
+                <Typography sx={{ fontFamily: c.font.mono, fontSize: '1.5rem', fontWeight: 700, color: c.text.primary, letterSpacing: 2 }}>
+                  {deviceCode}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center', py: 1 }}>
+                <CircularProgress size={14} />
+                <Typography sx={{ color: c.text.ghost, fontSize: '0.8rem' }}>Waiting for you to sign in...</Typography>
+              </Box>
+            </>
+          )}
+          {deviceCodeStatus === 'connected' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 2, justifyContent: 'center' }}>
+              <CheckCircleIcon sx={{ color: c.status.success, fontSize: 20 }} />
+              <Typography sx={{ color: c.status.success, fontSize: '0.9rem', fontWeight: 500 }}>Connected successfully!</Typography>
+            </Box>
+          )}
+          {deviceCodeStatus === 'error' && (
+            <Typography sx={{ color: c.status.error, fontSize: '0.85rem', py: 2, textAlign: 'center' }}>
+              Login failed. Please try again.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDeviceCodeDialogOpen(false)} sx={{ color: c.text.muted, textTransform: 'none' }}>
+            {deviceCodeStatus === 'connected' ? 'Done' : 'Cancel'}
           </Button>
         </DialogActions>
       </Dialog>
