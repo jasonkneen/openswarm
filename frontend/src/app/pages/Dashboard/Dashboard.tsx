@@ -56,6 +56,7 @@ import BrowserCard from './BrowserCard';
 import CanvasControls from './CanvasControls';
 import CardSearchPalette from './CardSearchPalette';
 import DirectionHints from './DirectionHints';
+import OnboardingWalkthrough from '@/app/components/OnboardingWalkthrough';
 import DashboardToolbar from './DashboardToolbar';
 import { captureDashboardThumbnail } from './captureDashboardThumbnail';
 import { useCanvasControls } from './useCanvasControls';
@@ -143,6 +144,18 @@ const DashboardInner: React.FC = () => {
   const [autoFocusSessionId, setAutoFocusSessionId] = useState<string | null>(null);
   const [pendingSelectSessionId, setPendingSelectSessionId] = useState<string | null>(null);
   const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
+  const [showWalkthrough, setShowWalkthrough] = useState(() => {
+    if (localStorage.getItem('openswarm_walkthrough_pending') === 'true') {
+      return true;
+    }
+    return false;
+  });
+
+  const handleWalkthroughComplete = useCallback(() => {
+    setShowWalkthrough(false);
+    localStorage.removeItem('openswarm_walkthrough_pending');
+    localStorage.setItem('openswarm_walkthrough_seen', 'true');
+  }, []);
 
   const handleHighlightCard = useCallback((cardId: string) => {
     if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
@@ -1836,6 +1849,11 @@ const DashboardInner: React.FC = () => {
       browserCards={browserCards}
       sessions={sessions}
     />
+
+    {/* Onboarding walkthrough overlay */}
+    {showWalkthrough && (
+      <OnboardingWalkthrough onComplete={handleWalkthroughComplete} />
+    )}
     </>
   );
 };

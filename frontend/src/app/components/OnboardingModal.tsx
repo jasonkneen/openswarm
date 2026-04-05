@@ -44,14 +44,14 @@ const OnboardingModal: React.FC = () => {
     let attempts = 0;
     const maxAttempts = 15; // 30 seconds
     const check = () => {
+      const alreadySeen = localStorage.getItem('openswarm_onboarding_seen');
       fetch(`${API_BASE}/agents/subscriptions/status`)
         .then((r) => r.json())
         .then((data) => {
           if (data.running) {
-            // Check if already has subscription
+            // Skip onboarding only if already seen AND has active subscription
             const connections = data.providers?.connections || [];
-            if (connections.some((p: any) => p.isActive)) {
-              // Already connected — don't show onboarding
+            if (alreadySeen === 'true' && connections.some((p: any) => p.isActive)) {
               return;
             }
             // Delay before marking ready — 9Router's OAuth needs time to warm up
@@ -68,7 +68,7 @@ const OnboardingModal: React.FC = () => {
         .catch(() => {
           attempts++;
           if (attempts < maxAttempts) setTimeout(check, 2000);
-          else setNineRouterReady(false);
+          else setNineRouterReady(false); // Still show onboarding even if 9Router isn't available
         });
     };
     check();
@@ -91,11 +91,37 @@ const OnboardingModal: React.FC = () => {
     };
   }, []);
 
-  const dismiss = () => {
+  const dismiss = async () => {
     localStorage.setItem('openswarm_onboarding_seen', 'true');
     if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
     if (msgHandlerRef.current) { window.removeEventListener('message', msgHandlerRef.current); msgHandlerRef.current = null; }
     setConnecting(null);
+
+    // Create a demo dashboard with a pre-populated example agent
+    try {
+      const createRes = await fetch(`${API_BASE}/dashboards/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Getting Started' }),
+      });
+      if (createRes.ok) {
+        const dashboard = await createRes.json();
+        if (dashboard?.id) {
+          const seedRes = await fetch(`${API_BASE}/dashboards/${dashboard.id}/seed-demo`, { method: 'POST' });
+          if (seedRes.ok) {
+            localStorage.setItem('openswarm_walkthrough_pending', 'true');
+            setOpen(false);
+            // Force full page load to ensure dashboard mounts fresh with walkthrough
+            window.location.href = `${window.location.pathname}${window.location.search}#/dashboard/${dashboard.id}`;
+            window.location.reload();
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Demo dashboard creation failed:', e);
+    }
+
     setOpen(false);
   };
 

@@ -130,6 +130,73 @@ async def create_dashboard(body: DashboardCreate):
     return dashboard.model_dump(mode="json")
 
 
+@dashboards.router.post("/{dashboard_id}/seed-demo")
+async def seed_demo(dashboard_id: str):
+    """Create a pre-populated demo session for onboarding."""
+    dashboard = _load(dashboard_id)
+
+    session_id = uuid4().hex
+    now = datetime.now()
+
+    session_data = {
+        "id": session_id,
+        "name": "Welcome Chat",
+        "status": "completed",
+        "provider": "anthropic",
+        "model": "sonnet",
+        "mode": "agent",
+        "sdk_session_id": None,
+        "system_prompt": None,
+        "allowed_tools": [],
+        "max_turns": None,
+        "cwd": None,
+        "created_at": now.isoformat(),
+        "closed_at": now.isoformat(),
+        "cost_usd": 0.0,
+        "tokens": {"input": 0, "output": 0},
+        "messages": [
+            {
+                "id": uuid4().hex,
+                "role": "user",
+                "content": "What can you help me with?",
+                "timestamp": now.isoformat(),
+                "branch_id": "main",
+                "parent_id": None,
+                "hidden": False,
+            },
+            {
+                "id": uuid4().hex,
+                "role": "assistant",
+                "content": "I can help you with all kinds of tasks! Here are some things I'm great at:\n\n"
+                    "- **Research** \u2014 Find information, summarize articles, compare options\n"
+                    "- **Writing** \u2014 Draft emails, reports, social media posts, or any content\n"
+                    "- **Analysis** \u2014 Work with data, spot trends, create summaries\n"
+                    "- **Browsing** \u2014 Search the web, read pages, gather information\n"
+                    "- **Planning** \u2014 Break down projects, create timelines, organize ideas\n\n"
+                    "Just type what you need and I'll get to work! You can also open a browser tab to have me interact with websites.",
+                "timestamp": now.isoformat(),
+                "branch_id": "main",
+                "parent_id": None,
+                "hidden": False,
+            },
+        ],
+        "pending_approvals": [],
+        "branches": {"main": {"id": "main", "parent_branch_id": None, "fork_point_message_id": None, "created_at": now.isoformat()}},
+        "active_branch_id": "main",
+        "tool_group_meta": {},
+        "dashboard_id": dashboard_id,
+        "browser_id": None,
+        "parent_session_id": None,
+        "needs_fork": False,
+    }
+
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    with open(os.path.join(SESSIONS_DIR, f"{session_id}.json"), "w") as f:
+        json.dump(session_data, f, indent=2)
+
+    return {"session_id": session_id}
+
+
 @dashboards.router.post("/{dashboard_id}/generate-name")
 async def generate_name(dashboard_id: str):
     dashboard = _load(dashboard_id)

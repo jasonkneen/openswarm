@@ -591,6 +591,7 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               <Box
                 role="button"
                 aria-label="New Agent"
+                data-onboarding="new-agent-button"
                 tabIndex={0}
                 onClick={onNewAgent}
                 sx={{
@@ -659,6 +660,7 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               <Box
                 role="button"
                 aria-label="Browser"
+                data-onboarding="browser-button"
                 tabIndex={0}
                 onClick={onAddBrowser}
                 sx={{

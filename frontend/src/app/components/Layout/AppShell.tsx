@@ -47,10 +47,10 @@ const SIDEBAR_WIDTH_KEY = 'openswarm-sidebar-width';
 const UPDATE_DISMISS_KEY = 'openswarm-update-dismissed';
 
 const CUSTOMIZATION_ITEMS = [
-  { label: 'Prompts', path: '/templates', icon: <DescriptionIcon /> },
-  { label: 'Skills', path: '/skills', icon: <PsychologyIcon /> },
-  { label: 'Actions', path: '/actions', icon: <BuildIcon /> },
-  { label: 'Modes', path: '/modes', icon: <TuneIcon /> },
+  { label: 'Prompts', path: '/templates', icon: <DescriptionIcon />, onboarding: 'sidebar-prompts' },
+  { label: 'Skills', path: '/skills', icon: <PsychologyIcon />, onboarding: 'sidebar-skills' },
+  { label: 'Actions', path: '/actions', icon: <BuildIcon />, onboarding: 'sidebar-actions' },
+  { label: 'Modes', path: '/modes', icon: <TuneIcon />, onboarding: 'sidebar-modes' },
 ];
 
 const CUSTOMIZATION_PATHS = new Set(CUSTOMIZATION_ITEMS.map((i) => i.path));
@@ -690,6 +690,7 @@ const AppShell: React.FC = () => {
                   >
                     {({ isActive }) => (
                       <Box
+                        data-onboarding={item.onboarding}
                         sx={{
                           display: 'flex',
                           alignItems: 'center',
@@ -734,6 +735,7 @@ const AppShell: React.FC = () => {
           <Box sx={{ px: 1, mb: 0.25 }}>
             <ListItemButton
               onClick={handleAppsClick}
+              data-onboarding="sidebar-apps"
               sx={{
                 borderRadius: 1.5,
                 py: 0.6,

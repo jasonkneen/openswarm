@@ -60,6 +60,7 @@ const CanvasControls: React.FC<Props> = ({ zoom, actions, onFitToView, onTidy, m
           px: 0.5,
           userSelect: 'none',
         }}
+        data-onboarding="canvas-controls"
       >
         <Tooltip title="Zoom out" placement="top">
           <IconButton size="small" onClick={actions.zoomOut} sx={{ color: c.text.muted }}>
