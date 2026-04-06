@@ -741,7 +741,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
               scrollbarColor: `${c.border.medium} transparent`,
             }}
           >
-            {renderItems.map((item) => {
+            {renderItems.filter((item) => !session.streamingMessage || item.id !== session.streamingMessage.id).map((item) => {
               if (isToolGroup(item)) {
                 const groupMeta = session.tool_group_meta?.[item.id];
                 return <ToolGroupBubble key={item.id} group={item} isSessionRunning={sessionRunning} meta={groupMeta} sessionId={session.id} />;
