@@ -219,6 +219,20 @@ const INTEGRATIONS: Integration[] = [
     ),
     authType: 'oauth2',
   },
+  {
+    id: 'hubspot',
+    name: 'HubSpot',
+    description: 'CRM contacts, deals, companies, tickets, and more. Free CRM tier included.',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', '@hubspot/mcp-server'] },
+    color: '#FF7A59',
+    website: 'https://developers.hubspot.com/docs/guides/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server',
+    icon: (
+      <svg viewBox="0 0 24 24" width="22" height="22">
+        <path d="M17.58 10.1V7.64a2.08 2.08 0 0 0 1.2-1.88 2.1 2.1 0 0 0-2.1-2.1 2.1 2.1 0 0 0-2.1 2.1c0 .82.48 1.53 1.17 1.88V10.1a5.37 5.37 0 0 0-2.55 1.2L7.31 6.93a2.52 2.52 0 0 0 .1-.68A2.44 2.44 0 0 0 4.97 3.8a2.44 2.44 0 0 0-2.44 2.45 2.44 2.44 0 0 0 2.44 2.44c.47 0 .9-.14 1.28-.37l5.73 4.32a5.36 5.36 0 0 0-.06 6.1l-1.73 1.73a2.06 2.06 0 0 0-.6-.1 2.07 2.07 0 0 0-2.07 2.08A2.07 2.07 0 0 0 9.6 24.5a2.07 2.07 0 0 0 2.07-2.07c0-.42-.13-.8-.34-1.13l1.68-1.68a5.38 5.38 0 1 0 4.57-9.52zm-.9 7.62a2.53 2.53 0 0 1-2.52-2.53 2.53 2.53 0 0 1 2.53-2.53 2.53 2.53 0 0 1 2.52 2.53 2.53 2.53 0 0 1-2.52 2.53z" fill="#FF7A59"/>
+      </svg>
+    ),
+    authType: 'oauth2',
+  },
 ];
 
 const CATEGORY_ORDER = ['filesystem', 'system', 'search', 'interaction', 'agents', 'planning', 'scheduling'];

@@ -64,6 +64,9 @@ AIRTABLE_SCOPES = [
     "user.email:read",
 ]
 
+HUBSPOT_AUTH_URL = "https://mcp-na2.hubspot.com/oauth/authorize/user"
+HUBSPOT_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
+
 
 # Maps state -> {tool_id, code_verifier (for PKCE flows)}
 _pending_oauth: dict[str, dict] = {}
@@ -177,6 +180,36 @@ async def oauth_callback(code: str = Query(...), state: str = Query("")):
         tool.auth_type = "oauth2"
         tool.auth_status = "connected"
         tool.connected_account_email = "Airtable account"
+
+    elif tool.name.lower() == "hubspot":
+        # HubSpot OAuth 2.1: PKCE flow
+        client_id = os.environ.get("HUBSPOT_OAUTH_CLIENT_ID", "")
+        client_secret = os.environ.get("HUBSPOT_OAUTH_CLIENT_SECRET", "")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(HUBSPOT_TOKEN_URL, data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code_verifier": code_verifier or "",
+            }, headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            })
+
+        if resp.status_code != 200:
+            logger.warning(f"HubSpot OAuth token exchange failed: {resp.text}")
+            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
+
+        tokens = resp.json()
+        tool.oauth_tokens = {
+            "access_token": tokens.get("access_token", ""),
+            "refresh_token": tokens.get("refresh_token", ""),
+            "token_expiry": time.time() + tokens.get("expires_in", 1800),
+        }
+        tool.auth_type = "oauth2"
+        tool.auth_status = "connected"
+        tool.connected_account_email = "HubSpot account"
 
     elif tool.name.lower() == "notion":
         # Notion OAuth: Basic auth with client_id:secret
@@ -471,6 +504,8 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
             env["OAUTH_ACCESS_TOKEN"] = tool.oauth_tokens["access_token"]
             if tool.name.lower() == "notion":
                 env["NOTION_TOKEN"] = tool.oauth_tokens["access_token"]
+            if tool.name.lower() == "hubspot":
+                env["PRIVATE_APP_ACCESS_TOKEN"] = tool.oauth_tokens["access_token"]
             if tool.oauth_tokens.get("refresh_token"):
                 env["GOOGLE_WORKSPACE_REFRESH_TOKEN"] = tool.oauth_tokens["refresh_token"]
             client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
@@ -801,6 +836,8 @@ async def discover_tools(tool_id: str):
         if tool.oauth_tokens.get("refresh_token"):
             if tool.name.lower() == "airtable":
                 refreshed = await refresh_airtable_token(tool)
+            elif tool.name.lower() == "hubspot":
+                refreshed = await refresh_hubspot_token(tool)
             else:
                 refreshed = await refresh_google_token(tool)
             if not refreshed and tool.oauth_tokens.get("access_token"):
@@ -1099,6 +1136,23 @@ async def oauth_start(tool_id: str):
             "code_challenge_method": "S256",
         }
         auth_url = f"{AIRTABLE_AUTH_URL}?{urlencode(params)}"
+    elif tool.name.lower() == "hubspot":
+        client_id = os.environ.get("HUBSPOT_OAUTH_CLIENT_ID", "")
+        if not client_id:
+            raise HTTPException(status_code=400, detail="HUBSPOT_OAUTH_CLIENT_ID not set in backend .env")
+        code_verifier = secrets.token_urlsafe(96)
+        code_challenge = hashlib.sha256(code_verifier.encode()).digest()
+        import base64
+        code_challenge_b64 = base64.urlsafe_b64encode(code_challenge).rstrip(b"=").decode()
+        _pending_oauth[state] = {"tool_id": tool_id, "code_verifier": code_verifier}
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": code_challenge_b64,
+            "code_challenge_method": "S256",
+            "state": state,
+        }
+        auth_url = f"{HUBSPOT_AUTH_URL}?{urlencode(params)}"
     elif tool.name.lower() == "notion":
         _pending_oauth[state] = {"tool_id": tool_id}
         client_id = os.environ.get("NOTION_OAUTH_CLIENT_ID", "")
@@ -1220,4 +1274,43 @@ async def refresh_airtable_token(tool: ToolDefinition) -> Optional[str]:
             return data["access_token"]
     except Exception as e:
         logger.warning(f"Airtable token refresh failed for tool {tool.id}: {e}")
+    return None
+
+
+async def refresh_hubspot_token(tool: ToolDefinition) -> Optional[str]:
+    """Refresh an expired HubSpot OAuth token. Returns the fresh access_token or None."""
+    if tool.auth_type != "oauth2":
+        return None
+    refresh_token = tool.oauth_tokens.get("refresh_token")
+    if not refresh_token:
+        return None
+    expiry = tool.oauth_tokens.get("token_expiry", 0)
+    if time.time() < expiry - 60:
+        return tool.oauth_tokens.get("access_token")
+
+    client_id = os.environ.get("HUBSPOT_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("HUBSPOT_OAUTH_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(HUBSPOT_TOKEN_URL, data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            }, headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            })
+        if resp.status_code == 200:
+            data = resp.json()
+            tool.oauth_tokens["access_token"] = data["access_token"]
+            tool.oauth_tokens["token_expiry"] = time.time() + data.get("expires_in", 1800)
+            if data.get("refresh_token"):
+                tool.oauth_tokens["refresh_token"] = data["refresh_token"]
+            _save(tool)
+            return data["access_token"]
+    except Exception as e:
+        logger.warning(f"HubSpot token refresh failed for tool {tool.id}: {e}")
     return None

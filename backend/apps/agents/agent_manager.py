@@ -23,6 +23,7 @@ from backend.apps.tools_lib.tools_lib import (
     load_builtin_permissions,
     refresh_airtable_token,
     refresh_google_token,
+    refresh_hubspot_token,
 )
 from backend.config.paths import SESSIONS_DIR
 from backend.apps.analytics.collector import record as _analytics
@@ -153,6 +154,8 @@ class AgentManager:
             if tool.auth_type == "oauth2" and tool.auth_status == "connected":
                 if tool.name.lower() == "airtable":
                     refreshed = await refresh_airtable_token(tool)
+                elif tool.name.lower() == "hubspot":
+                    refreshed = await refresh_hubspot_token(tool)
                 else:
                     refreshed = await refresh_google_token(tool)
                 logger.info(f"[MCP-DEBUG] {tool.name} token refresh: {'OK' if refreshed else 'FAILED'}")
@@ -1175,6 +1178,18 @@ class AgentManager:
                 "provider": session.provider,
                 "mode": session.mode,
             }, session_id=session_id, dashboard_id=session.dashboard_id)
+            error_msg = Message(role="system", content=f"Error: {str(e)}", branch_id=session.active_branch_id)
+            session.messages.append(error_msg)
+            await ws_manager.send_to_session(session_id, "agent:message", {
+                "session_id": session_id,
+                "message": error_msg.model_dump(mode="json"),
+            })
+        except BaseException as e:
+            # Catch BaseExceptionGroup from anyio task groups (e.g. concurrent
+            # CLI crash + pending approval cancellation) so it doesn't escape
+            # and kill the uvicorn process.
+            logger.exception(f"Agent {session_id} fatal error: {e}")
+            session.status = "error"
             error_msg = Message(role="system", content=f"Error: {str(e)}", branch_id=session.active_branch_id)
             session.messages.append(error_msg)
             await ws_manager.send_to_session(session_id, "agent:message", {
