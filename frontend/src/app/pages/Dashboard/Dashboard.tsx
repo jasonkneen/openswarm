@@ -1082,12 +1082,10 @@ const DashboardInner: React.FC = () => {
 
           if (expandNewChats) {
             setAutoFocusSessionId(realId);
+            dispatch(expandSession(realId));
           } else {
             setPendingSelectSessionId(realId);
           }
-
-          // Expand the chat so user can see responses
-          dispatch(expandSession(realId));
 
           setTimeout(() => {
             const card = store.getState().dashboardLayout.cards[realId];

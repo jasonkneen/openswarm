@@ -71,16 +71,41 @@ const GoogleServiceIcon: React.FC<{ service: string; size?: number }> = ({ servi
   return null;
 };
 
-function formatDuration(createdAt: string, closedAt?: string | null, status?: string): string {
-  const start = new Date(createdAt).getTime();
-  const end = (closedAt ? new Date(closedAt).getTime() : null)
-    || (status === 'running' || status === 'waiting_approval' ? Date.now() : Date.now());
-  const seconds = Math.max(0, Math.floor((end - start) / 1000));
+function fmtSeconds(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${minutes % 60}m`;
+}
+
+function getAgentWorkTime(messages: Array<{ role: string; timestamp: string }>, status: string): { total: number; last: number } {
+  let total = 0;
+  let last = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role === 'user') {
+      // Find the next assistant/system response
+      let endTime: number | null = null;
+      for (let j = i + 1; j < messages.length; j++) {
+        if (messages[j].role === 'assistant' || messages[j].role === 'system') {
+          endTime = new Date(messages[j].timestamp).getTime();
+          break;
+        }
+      }
+      if (endTime) {
+        const dur = Math.max(0, Math.floor((endTime - new Date(msg.timestamp).getTime()) / 1000));
+        total += dur;
+        last = dur;
+      } else if (status === 'running' || status === 'waiting_approval') {
+        // Currently processing this prompt
+        const dur = Math.max(0, Math.floor((Date.now() - new Date(msg.timestamp).getTime()) / 1000));
+        total += dur;
+        last = dur;
+      }
+    }
+  }
+  return { total, last };
 }
 
 function summarizeToolInput(toolName: string, toolInput: Record<string, any>): string {
@@ -847,7 +872,7 @@ const AgentCard: React.FC<Props> = ({
             {session.mode}
           </Typography>
           <Typography variant="caption" sx={{ color: c.text.tertiary }}>
-            {formatDuration(session.created_at, (session as any).closed_at, session.status)}
+            {fmtSeconds(getAgentWorkTime(session.messages, session.status).last)}
           </Typography>
           {session.cost_usd > 0 && hasApiKey && (
             <Typography variant="caption" sx={{ color: c.accent.primary }}>

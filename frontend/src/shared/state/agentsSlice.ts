@@ -60,6 +60,7 @@ export interface AgentSession {
   allowed_tools: string[];
   max_turns: number | null;
   created_at: string;
+  closed_at?: string | null;
   cost_usd: number;
   tokens: { input: number; output: number };
   messages: AgentMessage[];
