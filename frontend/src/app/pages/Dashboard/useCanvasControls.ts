@@ -443,7 +443,7 @@ export function useCanvasControls(zoomSensitivity: number = 50, contentBounds?: 
     animateTo({ panX: newPanX, panY: newPanY, zoom: newZoom });
   }, [animateTo]);
 
-  const fitToCards = useCallback((cardRects: Array<{ x: number; y: number; width: number; height: number }>, maxZoom?: number, animate?: boolean) => {
+  const fitToCards = useCallback((cardRects: Array<{ x: number; y: number; width: number; height: number }>, maxZoom?: number, animate?: boolean, minZoom?: number) => {
     cancelAnimation();
 
     const viewport = viewportRef.current;
@@ -472,7 +472,8 @@ export function useCanvasControls(zoomSensitivity: number = 50, contentBounds?: 
     const availW = vRect.width - FIT_PADDING * 2;
     const availH = vRect.height - FIT_PADDING * 2;
     const ceiling = maxZoom ?? MAX_ZOOM;
-    const targetZoom = clamp(Math.min(availW / contentWidth, availH / contentHeight), MIN_ZOOM, ceiling);
+    const floor = minZoom ?? MIN_ZOOM;
+    const targetZoom = clamp(Math.min(availW / contentWidth, availH / contentHeight), floor, ceiling);
     const targetPanX = (vRect.width - contentWidth * targetZoom) / 2 - minX * targetZoom;
     // For single cards, position near top of viewport (80px padding) instead of dead center
     const topBiased = cardRects.length === 1;

@@ -337,7 +337,7 @@ const DashboardInner: React.FC = () => {
     setFocusedCardId(id);
     setTimeout(() => {
       const rect = getCardRect(id, type);
-      if (rect) canvas.actions.fitToCards([rect], 1.15, true);
+      if (rect) canvas.actions.fitToCards([rect], 1.15, true, type === 'browser' ? 0.8 : undefined);
       setTimeout(() => (document.activeElement as HTMLElement)?.blur?.(), 150);
     }, 100);
   }, [selection, getCardRect, canvas.actions, dispatch, expandedSessionIds]);

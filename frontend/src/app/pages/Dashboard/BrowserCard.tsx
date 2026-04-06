@@ -632,26 +632,7 @@ const BrowserCard: React.FC<Props> = ({
         }),
       }}
     >
-      {/* Selection overlay – blocks click interaction while selected, enabling drag from anywhere */}
-      {isSelected && (
-        <Box
-          ref={scrollOverlayRef}
-          onPointerDown={handleDragPointerDown}
-          onPointerMove={handleDragPointerMove}
-          onPointerUp={handleDragPointerUp}
-          onClick={(e: React.MouseEvent) => {
-            if (justDraggedRef.current) return;
-            onCardSelect?.(browserId, 'browser', e.shiftKey);
-          }}
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 15,
-            cursor: isDragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-          }}
-        />
-      )}
+      {/* Selection overlay – only covers header area so webview stays interactive */}
 
       {/* Rotating gradient border glow for element selection / streaming */}
       {showGlow && !agentActive && (
@@ -988,6 +969,7 @@ const BrowserCard: React.FC<Props> = ({
             onChange={(e) => setUrlBarValue(e.target.value)}
             onKeyDown={handleUrlKeyDown}
             onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             onFocus={(e) => (e.target as HTMLInputElement).select()}
             placeholder="Search Google or enter URL..."
             sx={{
@@ -1020,10 +1002,10 @@ const BrowserCard: React.FC<Props> = ({
       {/* ====== Browser body — multiple webviews stacked ====== */}
       <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         {isElementSelectMode && (
-          <Box sx={{ position: 'absolute', inset: 0, zIndex: 10 }} />
+          <Box sx={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }} />
         )}
         {cmdHeld && !isSelected && (
-          <Box sx={{ position: 'absolute', inset: 0, zIndex: 12 }} />
+          <Box sx={{ position: 'absolute', inset: 0, zIndex: 12, pointerEvents: 'none' }} />
         )}
         {isElectron ? (
           tabs.map((tab) => (
