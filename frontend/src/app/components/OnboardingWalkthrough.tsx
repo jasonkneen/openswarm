@@ -370,22 +370,7 @@ const OnboardingWalkthrough: React.FC<Props> = ({ onComplete }) => {
         )}
 
         {/* Buttons */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button
-            onClick={handleSkip}
-            sx={{
-              textTransform: 'none',
-              fontSize: '0.72rem',
-              color: c.text.muted,
-              fontFamily: c.font.sans,
-              minWidth: 'auto',
-              px: 1,
-              '&:hover': { bgcolor: 'transparent', color: c.text.secondary },
-            }}
-          >
-            Skip tour
-          </Button>
-
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
           <Button
             onClick={handleNext}
             sx={{
@@ -401,7 +386,7 @@ const OnboardingWalkthrough: React.FC<Props> = ({ onComplete }) => {
               '&:hover': { bgcolor: c.accent.hover || c.accent.primary },
             }}
           >
-            {isLastStep ? 'Get Started' : step.actionHint ? 'or Skip step' : 'Next'}
+            {isLastStep ? 'Get Started' : 'Next'}
           </Button>
         </Box>
       </Box>

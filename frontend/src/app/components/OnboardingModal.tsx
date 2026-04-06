@@ -277,7 +277,7 @@ const OnboardingModal: React.FC = () => {
   if (!open) return null;
 
   return (
-    <Modal open={open} onClose={handleSkip} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <Modal open={open} onClose={step === 'connect' ? handleSkip : undefined} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <Box sx={{
         width: 480, maxWidth: '90vw', bgcolor: c.bg.surface, borderRadius: `${c.radius.xl}px`,
         border: `1px solid ${c.border.subtle}`, p: 3.5, outline: 'none',
@@ -372,13 +372,6 @@ const OnboardingModal: React.FC = () => {
               }}
             >
               Continue
-            </Button>
-            <Button
-              onClick={() => setStep('connect')}
-              fullWidth
-              sx={{ textTransform: 'none', fontSize: '0.72rem', color: c.text.ghost, '&:hover': { bgcolor: 'transparent', color: c.text.muted } }}
-            >
-              Skip
             </Button>
           </>
         ) : (
