@@ -233,6 +233,28 @@ const INTEGRATIONS: Integration[] = [
     ),
     authType: 'oauth2',
   },
+  {
+    id: 'slack',
+    name: 'Slack',
+    description: 'Search messages, send messages, read channels, DMs, and threads in Slack workspaces.',
+    mcp_config: { type: 'stdio', command: 'npx', args: ['-y', 'slack-mcp-server@latest', '--transport', 'stdio'], env: { SLACK_MCP_ADD_MESSAGE_TOOL: 'true' } },
+    color: '#4A154B',
+    website: 'https://github.com/korotovsky/slack-mcp-server',
+    icon: (
+      <svg viewBox="0 0 24 24" width="22" height="22">
+        <path d="M5.04 15.16a2.53 2.53 0 0 1-2.52 2.53A2.53 2.53 0 0 1 0 15.16a2.53 2.53 0 0 1 2.52-2.52h2.52v2.52zm1.27 0a2.53 2.53 0 0 1 2.52-2.52 2.53 2.53 0 0 1 2.53 2.52v6.32A2.53 2.53 0 0 1 8.83 24a2.53 2.53 0 0 1-2.52-2.52v-6.32z" fill="#E01E5A"/>
+        <path d="M8.83 5.04a2.53 2.53 0 0 1-2.52-2.52A2.53 2.53 0 0 1 8.83 0a2.53 2.53 0 0 1 2.53 2.52v2.52H8.83zm0 1.27a2.53 2.53 0 0 1 2.53 2.52 2.53 2.53 0 0 1-2.53 2.53H2.52A2.53 2.53 0 0 1 0 8.83a2.53 2.53 0 0 1 2.52-2.52h6.31z" fill="#36C5F0"/>
+        <path d="M18.96 8.83a2.53 2.53 0 0 1 2.52-2.52A2.53 2.53 0 0 1 24 8.83a2.53 2.53 0 0 1-2.52 2.53h-2.52V8.83zm-1.27 0a2.53 2.53 0 0 1-2.52 2.53 2.53 2.53 0 0 1-2.53-2.53V2.52A2.53 2.53 0 0 1 15.17 0a2.53 2.53 0 0 1 2.52 2.52v6.31z" fill="#2EB67D"/>
+        <path d="M15.17 18.96a2.53 2.53 0 0 1 2.52 2.52A2.53 2.53 0 0 1 15.17 24a2.53 2.53 0 0 1-2.53-2.52v-2.52h2.53zm0-1.27a2.53 2.53 0 0 1-2.53-2.52 2.53 2.53 0 0 1 2.53-2.53h6.31A2.53 2.53 0 0 1 24 15.17a2.53 2.53 0 0 1-2.52 2.52h-6.31z" fill="#ECB22E"/>
+      </svg>
+    ),
+    connectLabel: 'Connect Slack',
+    connectInstructions: 'On macOS with Chrome, tokens are auto-extracted. Otherwise: open app.slack.com in Chrome → F12 → Console → type `JSON.stringify({token: boot_data.api_token, cookie: document.cookie.match(/d=([^;]+)/)?.[1]})` → copy the result.',
+    credentialFields: [
+      { key: 'SLACK_MCP_XOXC_TOKEN', label: 'Slack Token (xoxc-...)', placeholder: 'Auto-detected via Sign in, or paste xoxc- token' },
+      { key: 'SLACK_MCP_XOXD_TOKEN', label: 'Slack Cookie (xoxd-...)', placeholder: 'Auto-detected via Sign in, or paste xoxd- cookie' },
+    ],
+  },
 ];
 
 const CATEGORY_ORDER = ['filesystem', 'system', 'search', 'interaction', 'agents', 'planning', 'scheduling'];
@@ -967,6 +989,37 @@ const Tools: React.FC = () => {
       } else {
         setSnackbar({ open: true, message: 'Failed to save credentials', severity: 'error' });
       }
+    } finally {
+      setCredDialogSaving(false);
+    }
+  };
+
+  const handleSlackAutoConnect = async () => {
+    if (!credDialogToolId || !credDialogIntegration) return;
+    const slackBridge = (window as any).openswarm?.connectSlack;
+    if (!slackBridge) {
+      setSnackbar({ open: true, message: 'Slack auto-connect requires the desktop app', severity: 'error' });
+      return;
+    }
+    setCredDialogSaving(true);
+    try {
+      const { token, cookie } = await slackBridge();
+      const creds = { SLACK_MCP_XOXC_TOKEN: token, SLACK_MCP_XOXD_TOKEN: cookie };
+      const result = await dispatch(updateTool({
+        id: credDialogToolId,
+        credentials: creds,
+        auth_type: 'env_vars',
+        auth_status: 'connected',
+      }));
+      if (updateTool.fulfilled.match(result)) {
+        setCredDialogOpen(false);
+        setSnackbar({ open: true, message: 'Slack connected! Re-discovering actions…' });
+        dispatch(discoverTools(credDialogToolId));
+      } else {
+        setSnackbar({ open: true, message: 'Failed to save Slack credentials', severity: 'error' });
+      }
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err?.message || 'Slack sign-in cancelled', severity: 'error' });
     } finally {
       setCredDialogSaving(false);
     }
@@ -2237,35 +2290,43 @@ const Tools: React.FC = () => {
           {credDialogIntegration?.connectLabel || 'Connect'}
         </DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '8px !important' }}>
-          {credDialogIntegration?.connectInstructions && (
+          {credDialogIntegration?.id === 'slack' ? (
             <Typography sx={{ color: c.text.muted, fontSize: '0.85rem', lineHeight: 1.5, bgcolor: c.bg.secondary, px: 2, py: 1.5, borderRadius: 2, border: `1px solid ${c.border.subtle}` }}>
-              {credDialogIntegration.connectInstructions}
+              Click <strong>Sign in with Slack</strong> below — a Slack window will open. Sign in normally and the window will close automatically once you reach your workspace.
             </Typography>
+          ) : (
+            <>
+              {credDialogIntegration?.connectInstructions && (
+                <Typography sx={{ color: c.text.muted, fontSize: '0.85rem', lineHeight: 1.5, bgcolor: c.bg.secondary, px: 2, py: 1.5, borderRadius: 2, border: `1px solid ${c.border.subtle}` }}>
+                  {credDialogIntegration.connectInstructions}
+                </Typography>
+              )}
+              {(credDialogIntegration?.credentialFields || []).map((field) => (
+                <TextField
+                  key={field.key}
+                  label={field.label}
+                  placeholder={field.placeholder}
+                  value={credDialogValues[field.key] || ''}
+                  onChange={(e) => setCredDialogValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                  fullWidth
+                  size="small"
+                  helperText={field.helpText}
+                  sx={{ '& .MuiOutlinedInput-root': { bgcolor: c.bg.page, fontFamily: c.font.mono, fontSize: '0.85rem' } }}
+                />
+              ))}
+            </>
           )}
-          {(credDialogIntegration?.credentialFields || []).map((field) => (
-            <TextField
-              key={field.key}
-              label={field.label}
-              placeholder={field.placeholder}
-              value={credDialogValues[field.key] || ''}
-              onChange={(e) => setCredDialogValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
-              fullWidth
-              size="small"
-              helperText={field.helpText}
-              sx={{ '& .MuiOutlinedInput-root': { bgcolor: c.bg.page, fontFamily: c.font.mono, fontSize: '0.85rem' } }}
-            />
-          ))}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setCredDialogOpen(false)} sx={{ color: c.text.tertiary, textTransform: 'none' }}>Cancel</Button>
           <Button
             variant="contained"
-            onClick={handleCredentialsSave}
-            disabled={credDialogSaving || (credDialogIntegration?.credentialFields || []).some((f) => !credDialogValues[f.key]?.trim())}
+            onClick={credDialogIntegration?.id === 'slack' ? handleSlackAutoConnect : handleCredentialsSave}
+            disabled={credDialogSaving || (credDialogIntegration?.id !== 'slack' && (credDialogIntegration?.credentialFields || []).some((f) => !credDialogValues[f.key]?.trim()))}
             startIcon={credDialogSaving ? <CircularProgress size={14} /> : <LinkIcon sx={{ fontSize: 14 }} />}
             sx={{ bgcolor: credDialogIntegration?.color || c.accent.primary, '&:hover': { bgcolor: credDialogIntegration?.color || c.accent.pressed, filter: 'brightness(0.9)' }, textTransform: 'none', borderRadius: 2 }}
           >
-            Connect
+            {credDialogIntegration?.id === 'slack' ? (credDialogSaving ? 'Waiting for sign-in…' : 'Sign in with Slack') : 'Connect'}
           </Button>
         </DialogActions>
       </Dialog>

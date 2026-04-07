@@ -529,3 +529,93 @@ ipcMain.handle('open-external', (_event, url) => {
     shell.openExternal(url);
   }
 });
+
+ipcMain.handle('connect-slack', async () => {
+  const win = new BrowserWindow({
+    width: 900,
+    height: 750,
+    title: 'Sign in to Slack',
+    parent: mainWindow || undefined,
+    modal: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      partition: 'persist:slack-auth',
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  // Override the global window-open handler so new tabs/windows from Slack
+  // (e.g. workspace redirects) navigate this popup instead of getting
+  // hijacked into a dashboard browser card.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      win.loadURL(url).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
+
+  // Block slack:// deep-link attempts (they'd try to launch the native app
+  // and fail). Slack always falls through to a web URL after the deep link
+  // fails, so just swallow these.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('slack://')) {
+      event.preventDefault();
+    }
+  });
+
+  try {
+    await win.loadURL('https://app.slack.com/signin');
+  } catch (err) {
+    if (!win.isDestroyed()) win.close();
+    throw new Error(`Failed to load Slack: ${err.message}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(pollInterval);
+      clearTimeout(timeoutHandle);
+      if (!win.isDestroyed()) win.close();
+      fn(value);
+    };
+
+    win.on('closed', () => {
+      if (!settled) {
+        settled = true;
+        clearInterval(pollInterval);
+        clearTimeout(timeoutHandle);
+        reject(new Error('Sign-in window was closed'));
+      }
+    });
+
+    const pollInterval = setInterval(async () => {
+      if (win.isDestroyed()) return;
+      try {
+        const token = await win.webContents.executeJavaScript(
+          '(() => { try { return window.boot_data && window.boot_data.api_token; } catch(e) { return null; } })()'
+        );
+        if (typeof token === 'string' && token.startsWith('xoxc-')) {
+          const cookies = await win.webContents.session.cookies.get({ url: 'https://slack.com' });
+          const dCookie = cookies.find((c) => c.name === 'd');
+          if (dCookie && dCookie.value) {
+            // The d cookie value may or may not already include the xoxd- prefix
+            // depending on how Slack encodes it. Normalize it.
+            const raw = decodeURIComponent(dCookie.value);
+            const cookie = raw.startsWith('xoxd-') ? raw : `xoxd-${raw}`;
+            finish(resolve, { token, cookie });
+          }
+        }
+      } catch (_) {
+        // page navigating, ignore
+      }
+    }, 1000);
+
+    const timeoutHandle = setTimeout(() => {
+      finish(reject, new Error('Sign-in timed out after 10 minutes'));
+    }, 10 * 60 * 1000);
+  });
+});
