@@ -14,7 +14,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "Keep narration brief. Use plain language.\n\n"
     "## Interaction Style\n"
     "Be direct and action-oriented. Do not ask clarifying questions unless genuinely ambiguous — "
-    "make reasonable assumptions and act. If you need to ask, use the AskUserQuestion tool.\n"
+    "make reasonable assumptions and act.\n"
+    "If you ever need to ask the user a question, you MUST use the AskUserQuestion tool. "
+    "Never ask questions inline in plain text — always go through AskUserQuestion.\n"
     "Do not over-explain what you are about to do. Just do it and show the results.\n"
 )
 
