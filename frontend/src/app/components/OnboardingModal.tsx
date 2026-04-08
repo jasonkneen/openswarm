@@ -1,9 +1,48 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Modal, Button, CircularProgress, TextField } from '@mui/material';
+import { Box, Typography, Modal, Button, CircularProgress, TextField, InputAdornment } from '@mui/material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAppSelector } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { API_BASE } from '@/shared/config';
 import { trackEvent } from '@/shared/analytics';
+
+// Email validation: format check + typo correction for common domains.
+// Real ownership verification is intentionally pushed downstream (mailing list /
+// CRM system handles the confirm-subscription flow).
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const COMMON_DOMAIN_TYPOS: Record<string, string> = {
+  'gmial.com': 'gmail.com',
+  'gmai.com': 'gmail.com',
+  'gnail.com': 'gmail.com',
+  'gmaill.com': 'gmail.com',
+  'gmail.co': 'gmail.com',
+  'gmail.cm': 'gmail.com',
+  'yahooo.com': 'yahoo.com',
+  'yaho.com': 'yahoo.com',
+  'yahoo.co': 'yahoo.com',
+  'hotmial.com': 'hotmail.com',
+  'hotmai.com': 'hotmail.com',
+  'hotmail.co': 'hotmail.com',
+  'outlok.com': 'outlook.com',
+  'outloook.com': 'outlook.com',
+  'iclould.com': 'icloud.com',
+  'iclud.com': 'icloud.com',
+  'protonmial.com': 'protonmail.com',
+};
+
+function getEmailSuggestion(email: string): string | null {
+  const at = email.lastIndexOf('@');
+  if (at < 0) return null;
+  const domain = email.slice(at + 1).toLowerCase();
+  const correction = COMMON_DOMAIN_TYPOS[domain];
+  if (!correction) return null;
+  return email.slice(0, at + 1) + correction;
+}
+
+function isValidEmail(email: string): boolean {
+  return EMAIL_REGEX.test(email.trim());
+}
 
 const SUBSCRIPTION_PROVIDERS = [
   { id: 'claude', name: 'Claude', desc: 'Sonnet, Opus, Haiku', color: '#E8927A', preview: false },
@@ -48,6 +87,7 @@ const OnboardingModal: React.FC = () => {
   const [step, setStep] = useState<'profile' | 'connect'>('profile');
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [emailBlurred, setEmailBlurred] = useState(false);
   const [useCases, setUseCases] = useState<string[]>([]);
   const [useCaseOther, setUseCaseOther] = useState<string>('');
   const [referralSource, setReferralSource] = useState<string>('');
@@ -145,9 +185,8 @@ const OnboardingModal: React.FC = () => {
     setOpen(false);
   };
 
-  // Save profile and move to connect step
-  const handleProfileContinue = async () => {
-    // Save profile to settings
+  // Actually persist profile + advance to connect step.
+  const submitProfile = async () => {
     try {
       const r = await fetch(`${API_BASE}/settings`);
       const currentSettings = await r.json();
@@ -182,6 +221,37 @@ const OnboardingModal: React.FC = () => {
     });
     setStep('connect');
     trackEvent('onboarding.connect_started', { nine_router_ready: nineRouterReady });
+  };
+
+  // Whether all required profile fields are filled in.
+  const isProfileComplete = (() => {
+    const trimmedName = userName.trim();
+    const trimmedEmail = userEmail.trim();
+    if (!trimmedName) return false;
+    if (!trimmedEmail || !isValidEmail(trimmedEmail)) return false;
+    if (useCases.length === 0) return false;
+    if (useCases.includes('Other') && !useCaseOther.trim()) return false;
+    if (!referralSource) return false;
+    if (referralSource === 'Other' && !referralSourceOther.trim()) return false;
+    return true;
+  })();
+
+  // Continue: gate on full profile completion, then submit.
+  const handleProfileContinue = async () => {
+    const trimmed = userEmail.trim();
+    // Invalid format with non-empty value — refuse and force error state.
+    if (trimmed && !isValidEmail(trimmed)) {
+      setEmailBlurred(true);
+      trackEvent('onboarding.email_invalid_blocked', { value_length: trimmed.length });
+      return;
+    }
+    if (!isProfileComplete) return;
+    submitProfile();
+  };
+
+  const handleApplySuggestion = (suggested: string) => {
+    setUserEmail(suggested);
+    trackEvent('onboarding.email_suggestion_applied');
   };
 
   // Same connect logic as Settings/SubscriptionCards
@@ -341,25 +411,67 @@ const OnboardingModal: React.FC = () => {
                   '& .MuiOutlinedInput-input::placeholder': { color: c.text.ghost, opacity: 1 },
                 }}
               />
-              <TextField
-                placeholder="Email address"
-                type="email"
-                value={userEmail}
-                onChange={(e) => setUserEmail(e.target.value)}
-                size="small"
-                fullWidth
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    fontSize: '0.82rem',
-                    color: c.text.primary,
-                    borderRadius: `${c.radius.md}px`,
-                    '& fieldset': { borderColor: c.border.subtle },
-                    '&:hover fieldset': { borderColor: c.border.medium },
-                    '&.Mui-focused fieldset': { borderColor: c.accent.primary },
-                  },
-                  '& .MuiOutlinedInput-input::placeholder': { color: c.text.ghost, opacity: 1 },
-                }}
-              />
+              {(() => {
+                const trimmed = userEmail.trim();
+                const valid = trimmed.length > 0 && isValidEmail(trimmed);
+                const showError = emailBlurred && trimmed.length > 0 && !valid;
+                const suggestion = valid ? getEmailSuggestion(trimmed) : null;
+                return (
+                  <Box>
+                    <TextField
+                      placeholder="Email address"
+                      type="email"
+                      value={userEmail}
+                      onChange={(e) => setUserEmail(e.target.value)}
+                      onBlur={() => setEmailBlurred(true)}
+                      error={showError}
+                      size="small"
+                      fullWidth
+                      InputProps={{
+                        endAdornment: valid ? (
+                          <InputAdornment position="end">
+                            <CheckCircleIcon sx={{ fontSize: 16, color: c.status.success }} />
+                          </InputAdornment>
+                        ) : undefined,
+                      }}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          fontSize: '0.82rem',
+                          color: c.text.primary,
+                          borderRadius: `${c.radius.md}px`,
+                          '& fieldset': { borderColor: showError ? c.status.error : c.border.subtle },
+                          '&:hover fieldset': { borderColor: showError ? c.status.error : c.border.medium },
+                          '&.Mui-focused fieldset': { borderColor: showError ? c.status.error : c.accent.primary },
+                        },
+                        '& .MuiOutlinedInput-input::placeholder': { color: c.text.ghost, opacity: 1 },
+                      }}
+                    />
+                    {showError && (
+                      <Typography sx={{ fontSize: '0.68rem', color: c.status.error, mt: 0.4, ml: 0.5 }}>
+                        That doesn't look like a valid email address
+                      </Typography>
+                    )}
+                    {suggestion && (
+                      <Typography sx={{ fontSize: '0.68rem', color: c.text.muted, mt: 0.4, ml: 0.5 }}>
+                        Did you mean{' '}
+                        <Box
+                          component="span"
+                          onClick={() => handleApplySuggestion(suggestion)}
+                          sx={{
+                            color: c.accent.primary,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                        >
+                          {suggestion}
+                        </Box>
+                        ?
+                      </Typography>
+                    )}
+                  </Box>
+                );
+              })()}
 
               <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color: c.text.tertiary, textTransform: 'uppercase', letterSpacing: '0.08em', mt: 0.5 }}>
                 What will you use OpenSwarm for?
@@ -457,11 +569,13 @@ const OnboardingModal: React.FC = () => {
             <Button
               onClick={handleProfileContinue}
               fullWidth
+              disabled={!isProfileComplete}
               sx={{
                 textTransform: 'none', fontSize: '0.82rem', fontWeight: 600,
                 bgcolor: c.accent.primary, color: '#fff',
                 borderRadius: `${c.radius.md}px`, py: 1,
                 '&:hover': { bgcolor: c.accent.hover },
+                '&.Mui-disabled': { bgcolor: c.accent.primary, color: '#fff', opacity: 0.4 },
                 mb: 1,
               }}
             >
