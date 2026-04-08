@@ -41,7 +41,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { updateSettings, closeSettingsModal, resetSystemPrompt, AppSettings, DEFAULT_SYSTEM_PROMPT } from '@/shared/state/settingsSlice';
 import { fetchModels } from '@/shared/state/modelsSlice';
-import { setChecking, setUpdateError } from '@/shared/state/updateSlice';
+import { setChecking, setUpdateError, setInstalling } from '@/shared/state/updateSlice';
 import { fetchModes } from '@/shared/state/modesSlice';
 import { useClaudeTokens, useThemeMode } from '@/shared/styles/ThemeContext';
 import DirectoryBrowser from '@/app/components/DirectoryBrowser';
@@ -716,6 +716,7 @@ const Settings: React.FC = () => {
   const availableVersion = useAppSelector((s) => s.update.availableVersion);
   const downloadPercent = useAppSelector((s) => s.update.downloadPercent);
   const updateError = useAppSelector((s) => s.update.error);
+  const installing = useAppSelector((s) => s.update.installing);
 
   const [activeTab, setActiveTab] = useState<'general' | 'models' | 'usage' | 'commands'>('general');
   const [form, setForm] = useState<AppSettings>({ ...settings });
@@ -763,6 +764,8 @@ const Settings: React.FC = () => {
   };
 
   const handleInstallUpdate = () => {
+    if (installing) return;
+    dispatch(setInstalling());
     (window as any).openswarm?.installUpdate();
   };
 
@@ -1358,17 +1361,21 @@ const Settings: React.FC = () => {
                   variant="contained"
                   size="small"
                   onClick={handleInstallUpdate}
-                  startIcon={<RestartAltIcon sx={{ fontSize: 15 }} />}
+                  disabled={installing}
+                  startIcon={installing
+                    ? <CircularProgress size={14} sx={{ color: '#fff' }} />
+                    : <RestartAltIcon sx={{ fontSize: 15 }} />}
                   sx={{
                     bgcolor: c.accent.primary,
                     '&:hover': { bgcolor: c.accent.pressed },
+                    '&.Mui-disabled': { bgcolor: c.accent.primary, color: '#fff', opacity: 0.7 },
                     textTransform: 'none',
                     fontSize: '0.8rem',
                     whiteSpace: 'nowrap',
                     borderRadius: 1.5,
                   }}
                 >
-                  Restart &amp; Update
+                  {installing ? 'Restarting…' : 'Restart & Update'}
                 </Button>
               )}
             </Box>

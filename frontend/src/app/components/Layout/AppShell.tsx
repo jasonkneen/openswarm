@@ -29,6 +29,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt';
 import CloseIcon from '@mui/icons-material/Close';
 import LinearProgress from '@mui/material/LinearProgress';
+import CircularProgress from '@mui/material/CircularProgress';
 import Settings from '@/app/pages/Settings/Settings';
 import DynamicIsland from '@/app/components/DynamicIsland';
 import Dashboard from '@/app/pages/Dashboard/Dashboard';
@@ -39,6 +40,7 @@ import { fetchDashboards, createDashboard, renameDashboard } from '@/shared/stat
 import { addBrowserCard, addBrowserTab } from '@/shared/state/dashboardLayoutSlice';
 import { setPendingBrowserUrl } from '@/shared/state/tempStateSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
+import { setInstalling } from '@/shared/state/updateSlice';
 import { findBrowserByWebContentsId } from '@/shared/browserRegistry';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
@@ -84,6 +86,7 @@ const AppShell: React.FC = () => {
   const updateStatus = useAppSelector((state) => state.update.status);
   const availableVersion = useAppSelector((state) => state.update.availableVersion);
   const downloadPercent = useAppSelector((state) => state.update.downloadPercent);
+  const installing = useAppSelector((state) => state.update.installing);
 
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
     try { return localStorage.getItem(UPDATE_DISMISS_KEY); } catch { return null; }
@@ -109,8 +112,10 @@ const AppShell: React.FC = () => {
   }, []);
 
   const handleInstallUpdate = useCallback(() => {
+    if (installing) return;
+    dispatch(setInstalling());
     (window as any).openswarm?.installUpdate();
-  }, []);
+  }, [installing, dispatch]);
 
   const dashboardItems = useAppSelector((state) => state.dashboards.items);
   const dashboardList = Object.values(dashboardItems).sort(
@@ -454,9 +459,12 @@ const AppShell: React.FC = () => {
               size="small"
               variant="contained"
               onClick={handleInstallUpdate}
+              disabled={installing}
+              startIcon={installing ? <CircularProgress size={12} sx={{ color: '#fff' }} /> : undefined}
               sx={{
                 bgcolor: c.accent.primary,
                 '&:hover': { bgcolor: c.accent.pressed },
+                '&.Mui-disabled': { bgcolor: c.accent.primary, color: '#fff', opacity: 0.7 },
                 textTransform: 'none',
                 fontSize: '0.75rem',
                 fontWeight: 600,
@@ -468,7 +476,7 @@ const AppShell: React.FC = () => {
                 flexShrink: 0,
               }}
             >
-              Restart & Update
+              {installing ? 'Restarting…' : 'Restart & Update'}
             </Button>
           )}
           <IconButton
@@ -1002,16 +1010,19 @@ const AppShell: React.FC = () => {
                   size="small"
                   variant="contained"
                   onClick={handleInstallUpdate}
+                  disabled={installing}
+                  startIcon={installing ? <CircularProgress size={12} sx={{ color: '#fff' }} /> : undefined}
                   sx={{
                     bgcolor: c.accent.primary,
                     '&:hover': { bgcolor: c.accent.pressed },
+                    '&.Mui-disabled': { bgcolor: c.accent.primary, color: '#fff', opacity: 0.7 },
                     textTransform: 'none',
                     fontSize: '0.8rem',
                     borderRadius: 1.5,
                     minWidth: 'auto',
                   }}
                 >
-                  Restart & Update
+                  {installing ? 'Restarting…' : 'Restart & Update'}
                 </Button>
               )}
             </Box>

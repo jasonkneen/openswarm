@@ -15,6 +15,7 @@ interface UpdateState {
   availableVersion: string | null;
   downloadPercent: number;
   error: string | null;
+  installing: boolean;
 }
 
 const initialState: UpdateState = {
@@ -23,6 +24,7 @@ const initialState: UpdateState = {
   availableVersion: null,
   downloadPercent: 0,
   error: null,
+  installing: false,
 };
 
 const updateSlice = createSlice({
@@ -56,11 +58,16 @@ const updateSlice = createSlice({
     setUpdateError(state, action: PayloadAction<string>) {
       state.status = 'error';
       state.error = action.payload;
+      state.installing = false;
+    },
+    setInstalling(state) {
+      state.installing = true;
     },
     resetUpdateStatus(state) {
       state.status = 'idle';
       state.error = null;
       state.downloadPercent = 0;
+      state.installing = false;
     },
   },
 });
@@ -73,6 +80,7 @@ export const {
   setDownloading,
   setUpdateDownloaded,
   setUpdateError,
+  setInstalling,
   resetUpdateStatus,
 } = updateSlice.actions;
 
