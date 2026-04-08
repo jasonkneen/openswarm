@@ -262,7 +262,7 @@ const CategoryGroup: React.FC<{
   c: ReturnType<typeof useClaudeTokens>;
   children: React.ReactNode;
 }> = ({ icon, label, count, c, children }) => (
-  <Box sx={{ '&:not(:first-of-type)': { borderTop: `1px solid ${c.border.light}`, mt: 0.5, pt: 0.5 } }}>
+  <Box sx={{ '&:not(:first-of-type)': { borderTop: `1px solid ${c.border.subtle}`, mt: 0.5, pt: 0.5 } }}>
     <Box
       sx={{
         display: 'flex',

@@ -333,7 +333,6 @@ const OnboardingModal: React.FC = () => {
                   '& .MuiOutlinedInput-root': {
                     fontSize: '0.82rem',
                     color: c.text.primary,
-                    bgcolor: c.bg.input,
                     borderRadius: `${c.radius.md}px`,
                     '& fieldset': { borderColor: c.border.subtle },
                     '&:hover fieldset': { borderColor: c.border.medium },
@@ -353,7 +352,6 @@ const OnboardingModal: React.FC = () => {
                   '& .MuiOutlinedInput-root': {
                     fontSize: '0.82rem',
                     color: c.text.primary,
-                    bgcolor: c.bg.input,
                     borderRadius: `${c.radius.md}px`,
                     '& fieldset': { borderColor: c.border.subtle },
                     '&:hover fieldset': { borderColor: c.border.medium },
@@ -399,7 +397,6 @@ const OnboardingModal: React.FC = () => {
                     '& .MuiOutlinedInput-root': {
                       fontSize: '0.82rem',
                       color: c.text.primary,
-                      bgcolor: c.bg.input,
                       borderRadius: `${c.radius.md}px`,
                       '& fieldset': { borderColor: c.border.subtle },
                       '&:hover fieldset': { borderColor: c.border.medium },
@@ -446,7 +443,6 @@ const OnboardingModal: React.FC = () => {
                     '& .MuiOutlinedInput-root': {
                       fontSize: '0.82rem',
                       color: c.text.primary,
-                      bgcolor: c.bg.input,
                       borderRadius: `${c.radius.md}px`,
                       '& fieldset': { borderColor: c.border.subtle },
                       '&:hover fieldset': { borderColor: c.border.medium },
@@ -465,7 +461,7 @@ const OnboardingModal: React.FC = () => {
                 textTransform: 'none', fontSize: '0.82rem', fontWeight: 600,
                 bgcolor: c.accent.primary, color: '#fff',
                 borderRadius: `${c.radius.md}px`, py: 1,
-                '&:hover': { bgcolor: c.accent.primaryHover || c.accent.primary },
+                '&:hover': { bgcolor: c.accent.hover },
                 mb: 1,
               }}
             >

@@ -16,7 +16,6 @@ import {
 } from '@/shared/state/updateSlice';
 import AppShell from './components/Layout/AppShell';
 import DashboardSelection from './pages/DashboardSelection/DashboardSelection';
-import Templates from './pages/Templates/Templates';
 import Skills from './pages/Skills/Skills';
 import Tools from './pages/Tools/Tools';
 import Modes from './pages/Modes/Modes';
@@ -253,7 +252,6 @@ const ThemedApp: React.FC = () => {
                       routes. This route exists only so React Router matches the URL. */}
                   <Route path="/dashboard/:id" element={null} />
                   <Route path="/customization" element={<Customization />} />
-                  <Route path="/templates" element={<Templates />} />
                   <Route path="/skills" element={<Skills />} />
                   <Route path="/actions" element={<Tools />} />
                   <Route path="/modes" element={<Modes />} />

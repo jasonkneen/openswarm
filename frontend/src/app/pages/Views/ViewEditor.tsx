@@ -58,17 +58,12 @@ function getFileIcon(filename: string): React.ReactNode {
   }
 }
 
-function getEditorLanguage(filename: string): string {
+function getEditorLanguage(filename: string): 'html' | 'python' | 'json' {
   const ext = filename.split('.').pop()?.toLowerCase();
   switch (ext) {
-    case 'html': case 'htm': return 'html';
     case 'py': return 'python';
     case 'json': return 'json';
-    case 'js': case 'jsx': return 'javascript';
-    case 'ts': case 'tsx': return 'typescript';
-    case 'css': case 'scss': return 'css';
-    case 'md': return 'markdown';
-    default: return 'plaintext';
+    default: return 'html';
   }
 }
 
@@ -216,7 +211,7 @@ const LogEntry: React.FC<LogEntryProps> = ({ msg, c }) => {
 interface AutoRunLogProps {
   messages: AgentMessage[];
   status: string | null;
-  logEndRef: React.RefObject<HTMLDivElement | null>;
+  logEndRef: React.RefObject<HTMLDivElement>;
   c: ReturnType<typeof useClaudeTokens>;
 }
 

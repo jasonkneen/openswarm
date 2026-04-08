@@ -42,7 +42,6 @@ import {
   Mode,
 } from '@/shared/state/modesSlice';
 import { fetchBuiltinTools, fetchTools } from '@/shared/state/toolsSlice';
-import { fetchTemplates } from '@/shared/state/templatesSlice';
 import { fetchSkills } from '@/shared/state/skillsSlice';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ExtensionIcon from '@mui/icons-material/Extension';
@@ -126,7 +125,6 @@ const Modes: React.FC = () => {
     dispatch(fetchModes());
     dispatch(fetchBuiltinTools());
     dispatch(fetchTools());
-    dispatch(fetchTemplates());
     dispatch(fetchSkills());
   }, [dispatch]);
 

@@ -13,9 +13,7 @@ import {
   TriggerState,
   EMPTY_TRIGGER,
 } from '@/app/components/richEditorUtils';
-import TemplateInvokeModal from '@/app/pages/AgentChat/TemplateInvokeModal';
 import { useAppSelector } from '@/shared/hooks';
-import { PromptTemplate } from '@/shared/state/templatesSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 interface RichPromptEditorProps {
@@ -52,9 +50,7 @@ const RichPromptEditor: React.FC<RichPromptEditorProps> = ({
 
   const [picker, setPicker] = useState<TriggerState>(EMPTY_TRIGGER);
   const [pickerRect, setPickerRect] = useState<DOMRect | null>(null);
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
 
-  const templates = useAppSelector((state) => state.templates.items);
   const skills = useAppSelector((state) => state.skills.items);
 
   useEffect(() => {
@@ -185,15 +181,7 @@ const RichPromptEditor: React.FC<RichPromptEditorProps> = ({
       if (sel) { sel.removeAllRanges(); sel.addRange(range); }
     }
 
-    if (item.type === 'template') {
-      const tmpl = templates[item.id];
-      if (!tmpl) return;
-      if (tmpl.fields.length === 0) {
-        document.execCommand('insertText', false, tmpl.template);
-      } else {
-        setSelectedTemplate(tmpl);
-      }
-    } else if (item.type === 'skill') {
+    if (item.type === 'skill') {
       const skill = skills[item.id];
       if (!skill) return;
       if (editor.querySelector(`[${SKILL_PILL_ATTR}="${skill.id}"]`)) return;
@@ -363,22 +351,6 @@ const RichPromptEditor: React.FC<RichPromptEditorProps> = ({
         </Box>
       </Box>
 
-      {selectedTemplate && (
-        <TemplateInvokeModal
-          template={selectedTemplate}
-          open={!!selectedTemplate}
-          onClose={() => setSelectedTemplate(null)}
-          onApply={(rendered) => {
-            const editor = editorRef.current;
-            if (editor) {
-              document.execCommand('insertText', false, rendered);
-            }
-            setSelectedTemplate(null);
-            updateHasContent();
-            emitChange();
-          }}
-        />
-      )}
     </Box>
   );
 };

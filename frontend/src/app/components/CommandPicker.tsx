@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import QuestionAnswerOutlinedIcon from '@mui/icons-material/QuestionAnswerOutlined';
@@ -19,7 +18,6 @@ import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { fetchBuiltinTools, fetchTools } from '@/shared/state/toolsSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
 import { fetchSkills } from '@/shared/state/skillsSlice';
-import { fetchTemplates } from '@/shared/state/templatesSlice';
 
 const XLogoIcon: React.FC<{ sx?: object }> = ({ sx }) => (
   <SvgIcon sx={sx} viewBox="0 0 24 24">
@@ -58,7 +56,7 @@ export function getToolGroupIcon(groupName: string, size: number = 15): React.Re
 
 export interface CommandPickerItem {
   id: string;
-  type: 'template' | 'skill' | 'mode' | 'context';
+  type: 'skill' | 'mode' | 'context';
   category: string;
   name: string;
   description: string;
@@ -100,7 +98,6 @@ function highlightMatch(text: string, query: string, color: string): React.React
 const CommandPicker: React.FC<Props> = ({ trigger, filter, onSelect, onClose, visible }) => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
-  const templates = useAppSelector((s) => s.templates.items);
   const skills = useAppSelector((s) => s.skills.items);
   const modesMap = useAppSelector((s) => s.modes.items);
   const builtinTools = useAppSelector((s) => s.tools.builtinTools);
@@ -113,30 +110,18 @@ const CommandPicker: React.FC<Props> = ({ trigger, filter, onSelect, onClose, vi
   const builtinLoaded = useAppSelector((s) => s.tools.builtinLoaded);
   const outputsLoaded = useAppSelector((s) => s.outputs.loaded);
   const skillsLoaded = useAppSelector((s) => s.skills.loaded);
-  const templatesLoaded = useAppSelector((s) => s.templates.loaded);
 
   useEffect(() => {
     if (!builtinLoaded) dispatch(fetchBuiltinTools());
     if (!toolsLoaded) dispatch(fetchTools());
     if (!outputsLoaded) dispatch(fetchOutputs());
     if (!skillsLoaded) dispatch(fetchSkills());
-    if (!templatesLoaded) dispatch(fetchTemplates());
-  }, [dispatch, builtinLoaded, toolsLoaded, outputsLoaded, skillsLoaded, templatesLoaded]);
+  }, [dispatch, builtinLoaded, toolsLoaded, outputsLoaded, skillsLoaded]);
 
   const items: CommandPickerItem[] = useMemo(() => {
     let all: CommandPickerItem[] = [];
 
     if (trigger === '/') {
-      const templateItems: CommandPickerItem[] = Object.values(templates).map((t) => ({
-        id: t.id,
-        type: 'template' as const,
-        category: 'Templates',
-        name: t.name,
-        description: t.description || `Template with ${t.fields.length} fields`,
-        command: t.name.toLowerCase().replace(/\s+/g, '-'),
-        icon: <DescriptionIcon sx={{ fontSize: 15 }} />,
-      }));
-
       const skillItems: CommandPickerItem[] = Object.values(skills).map((s) => ({
         id: s.id,
         type: 'skill' as const,
@@ -160,7 +145,7 @@ const CommandPicker: React.FC<Props> = ({ trigger, filter, onSelect, onClose, vi
         };
       });
 
-      all = [...templateItems, ...skillItems, ...modeItems];
+      all = [...skillItems, ...modeItems];
     } else {
       const atItems: CommandPickerItem[] = [
         {
@@ -301,7 +286,7 @@ const CommandPicker: React.FC<Props> = ({ trigger, filter, onSelect, onClose, vi
         item.command.toLowerCase().includes(lower) ||
         item.description.toLowerCase().includes(lower),
     );
-  }, [trigger, templates, skills, modesMap, builtinTools, customTools, outputItems, filter]);
+  }, [trigger, skills, modesMap, builtinTools, customTools, outputItems, filter]);
 
   const flatItems = useMemo(() => {
     const result: { item: CommandPickerItem; isGroupStart: boolean; category: string }[] = [];
@@ -315,7 +300,6 @@ const CommandPicker: React.FC<Props> = ({ trigger, filter, onSelect, onClose, vi
 
   const getIconColor = (item: CommandPickerItem): string => {
     switch (item.type) {
-      case 'template': return c.accent.primary;
       case 'skill': return c.status.success;
       case 'mode': {
         const mode = modesMap[item.id];

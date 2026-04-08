@@ -22,10 +22,6 @@ export function useKeyboardShortcuts() {
         navigate('/');
         return;
       }
-      if (e.key === 't' && !e.metaKey && !e.ctrlKey) {
-        navigate('/templates');
-        return;
-      }
 
       if (e.key === 'A' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
         for (const session of Object.values(sessions)) {

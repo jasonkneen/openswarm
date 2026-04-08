@@ -8,7 +8,6 @@ import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 const shortcuts = [
   { key: 'd', description: 'Go to Dashboard' },
-  { key: 't', description: 'Go to Templates' },
   { key: '1-9', description: 'Open agent by position' },
   { key: '⌘M', description: 'Add App' },
   { key: '⌘N', description: 'New Browser' },

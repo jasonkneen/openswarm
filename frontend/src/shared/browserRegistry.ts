@@ -15,8 +15,8 @@ export interface BrowserWebview extends HTMLElement {
   executeJavaScript: (code: string) => Promise<any>;
   sendInputEvent: (event: any) => void;
   getWebContentsId: () => number;
-  addEventListener: (event: string, listener: (...args: any[]) => void) => void;
-  removeEventListener: (event: string, listener: (...args: any[]) => void) => void;
+  addEventListener: (event: string, listener: (...args: any[]) => void, options?: boolean | AddEventListenerOptions) => void;
+  removeEventListener: (event: string, listener: (...args: any[]) => void, options?: boolean | EventListenerOptions) => void;
 }
 
 const registry = new Map<string, BrowserWebview>();

@@ -14,7 +14,6 @@ import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import InputBase from '@mui/material/InputBase';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import BuildIcon from '@mui/icons-material/Build';
 import TuneIcon from '@mui/icons-material/Tune';
@@ -50,7 +49,6 @@ const SIDEBAR_WIDTH_KEY = 'openswarm-sidebar-width';
 const UPDATE_DISMISS_KEY = 'openswarm-update-dismissed';
 
 const CUSTOMIZATION_ITEMS = [
-  { label: 'Prompts', path: '/templates', icon: <DescriptionIcon />, onboarding: 'sidebar-prompts' },
   { label: 'Skills', path: '/skills', icon: <PsychologyIcon />, onboarding: 'sidebar-skills' },
   { label: 'Actions', path: '/actions', icon: <BuildIcon />, onboarding: 'sidebar-actions' },
   { label: 'Modes', path: '/modes', icon: <TuneIcon />, onboarding: 'sidebar-modes' },

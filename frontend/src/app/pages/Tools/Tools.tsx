@@ -110,7 +110,7 @@ interface Integration {
   credentialFields?: CredentialField[];
   connectLabel?: string;
   connectInstructions?: string;
-  authType?: 'none' | 'oauth2' | 'env_vars';
+  authType?: 'none' | 'oauth2' | 'env_vars' | 'device_code';
 }
 
 const INTEGRATIONS: Integration[] = [
@@ -186,7 +186,7 @@ const INTEGRATIONS: Integration[] = [
         <path d="M11.4 24H0V12.6L11.4 24zM24 24H12.6V12.6L24 24zM11.4 11.4H0V0l11.4 11.4zM24 11.4H12.6V0L24 11.4z" fill="#0078D4"/>
       </svg>
     ),
-    authType: 'device_code' as any,
+    authType: 'device_code',
   },
   {
     id: 'notion',
@@ -1179,14 +1179,13 @@ const Tools: React.FC = () => {
                         <Box sx={{
                           width: 28, height: 28, borderRadius: 1.5, flexShrink: 0,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          bgcolor: `${out.color}20`,
+                          bgcolor: `${c.accent.primary}20`,
                         }}>
-                          <ViewQuiltIcon sx={{ fontSize: 14, color: out.color }} />
+                          <ViewQuiltIcon sx={{ fontSize: 14, color: c.accent.primary }} />
                         </Box>
                         <Box sx={{ minWidth: 0, flex: 1 }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <Typography sx={{ color: c.text.primary, fontSize: '0.8rem', fontWeight: 500 }}>{out.name}</Typography>
-                            <Chip label={out.category} size="small" sx={{ bgcolor: `${out.color}15`, color: out.color, fontSize: '0.65rem', height: 18, '& .MuiChip-label': { px: 0.6 } }} />
                           </Box>
                           {out.description && (
                             <Typography sx={{ color: c.text.ghost, fontSize: '0.7rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

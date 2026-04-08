@@ -1,7 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 import tempStateReducer from './tempStateSlice';
 import agentsReducer from './agentsSlice';
-import templatesReducer from './templatesSlice';
 import skillsReducer from './skillsSlice';
 import toolsReducer from './toolsSlice';
 import modesReducer from './modesSlice';
@@ -19,7 +18,6 @@ export const store = configureStore({
   reducer: {
     tempState: tempStateReducer,
     agents: agentsReducer,
-    templates: templatesReducer,
     skills: skillsReducer,
     tools: toolsReducer,
     modes: modesReducer,

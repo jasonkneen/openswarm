@@ -2,7 +2,6 @@ import React, { useEffect, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
-import DescriptionIcon from '@mui/icons-material/Description';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import AlternateEmailIcon from '@mui/icons-material/AlternateEmail';
@@ -17,13 +16,12 @@ import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { fetchBuiltinTools, fetchTools } from '@/shared/state/toolsSlice';
 import { getToolGroupIcon } from '@/app/components/CommandPicker';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
-import { fetchTemplates } from '@/shared/state/templatesSlice';
 import { fetchSkills } from '@/shared/state/skillsSlice';
 import { fetchModes } from '@/shared/state/modesSlice';
 
 interface SlashCommand {
   id: string;
-  type: 'template' | 'skill' | 'mode';
+  type: 'skill' | 'mode';
   name: string;
   description: string;
   command: string;
@@ -46,7 +44,6 @@ interface Shortcut {
 
 const SHORTCUTS: Shortcut[] = [
   { key: 'd', description: 'Go to Dashboard', category: 'navigation' },
-  { key: 't', description: 'Go to Templates', category: 'navigation' },
   { key: '1-9', description: 'Open agent by position', category: 'navigation' },
   { key: 'Shift+A', description: 'Approve all pending', category: 'action' },
   { key: 'Shift+D', description: 'Deny all pending', category: 'action' },
@@ -115,14 +112,12 @@ const SectionHeader: React.FC<{
 export const CommandsContent: React.FC = () => {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
-  const templates = useAppSelector((state) => state.templates.items);
   const skills = useAppSelector((state) => state.skills.items);
   const modesMap = useAppSelector((state) => state.modes.items);
   const builtinTools = useAppSelector((state) => state.tools.builtinTools);
   const customTools = useAppSelector((state) => state.tools.items);
   const outputItems = useAppSelector((state) => state.outputs.items);
 
-  const templatesLoaded = useAppSelector((state) => state.templates.loaded);
   const skillsLoaded = useAppSelector((state) => state.skills.loaded);
   const modesLoaded = useAppSelector((state) => state.modes.loaded);
   const builtinLoaded = useAppSelector((state) => state.tools.builtinLoaded);
@@ -130,22 +125,14 @@ export const CommandsContent: React.FC = () => {
   const outputsLoaded = useAppSelector((state) => state.outputs.loaded);
 
   useEffect(() => {
-    if (!templatesLoaded) dispatch(fetchTemplates());
     if (!skillsLoaded) dispatch(fetchSkills());
     if (!modesLoaded) dispatch(fetchModes());
     if (!builtinLoaded) dispatch(fetchBuiltinTools());
     if (!toolsLoaded) dispatch(fetchTools());
     if (!outputsLoaded) dispatch(fetchOutputs());
-  }, [dispatch, templatesLoaded, skillsLoaded, modesLoaded, builtinLoaded, toolsLoaded, outputsLoaded]);
+  }, [dispatch, skillsLoaded, modesLoaded, builtinLoaded, toolsLoaded, outputsLoaded]);
 
   const slashCommands: SlashCommand[] = useMemo(() => [
-    ...Object.values(templates).map((t) => ({
-      id: t.id,
-      type: 'template' as const,
-      name: t.name,
-      description: t.description || `Template with ${t.fields.length} fields`,
-      command: t.name.toLowerCase().replace(/\s+/g, '-'),
-    })),
     ...Object.values(skills).map((s) => ({
       id: s.id,
       type: 'skill' as const,
@@ -160,7 +147,7 @@ export const CommandsContent: React.FC = () => {
       description: m.description || 'Switch to this mode',
       command: m.name.toLowerCase().replace(/\s+/g, '-'),
     })),
-  ], [templates, skills, modesMap]);
+  ], [skills, modesMap]);
 
   const atCommands: AtCommand[] = useMemo(() => {
     const items: AtCommand[] = [
@@ -272,7 +259,7 @@ export const CommandsContent: React.FC = () => {
           <SectionHeader
             icon={<TerminalIcon sx={{ fontSize: 22 }} />}
             title="Slash Commands"
-            subtitle="Type / in chat to invoke templates, skills, and modes"
+            subtitle="Type / in chat to invoke skills and modes"
             count={slashCommands.length}
             c={c}
           />
@@ -290,7 +277,7 @@ export const CommandsContent: React.FC = () => {
             >
               <TerminalIcon sx={{ fontSize: 36, opacity: 0.3 }} />
               <Typography sx={{ fontSize: '0.85rem' }}>
-                No slash commands yet. Create templates, skills, or modes to see them here.
+                No slash commands yet. Create skills or modes to see them here.
               </Typography>
             </Box>
           ) : (
@@ -310,14 +297,11 @@ export const CommandsContent: React.FC = () => {
                   }}
                 >
                   <Box sx={{
-                    color: cmd.type === 'template' ? c.accent.primary
-                      : cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
+                    color: cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
                       : c.status.success,
                     display: 'flex',
                   }}>
-                    {cmd.type === 'template' ? (
-                      <DescriptionIcon sx={{ fontSize: 18 }} />
-                    ) : cmd.type === 'mode' ? (
+                    {cmd.type === 'mode' ? (
                       <SmartToyOutlinedIcon sx={{ fontSize: 18 }} />
                     ) : (
                       <PsychologyIcon sx={{ fontSize: 18 }} />
@@ -342,11 +326,9 @@ export const CommandsContent: React.FC = () => {
                       fontSize: '0.65rem',
                       fontWeight: 600,
                       textTransform: 'uppercase',
-                      bgcolor: cmd.type === 'template' ? `${c.accent.primary}12`
-                        : cmd.type === 'mode' ? `${modesMap[cmd.id]?.color || c.accent.primary}15`
+                      bgcolor: cmd.type === 'mode' ? `${modesMap[cmd.id]?.color || c.accent.primary}15`
                         : `${c.status.success}15`,
-                      color: cmd.type === 'template' ? c.accent.primary
-                        : cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
+                      color: cmd.type === 'mode' ? (modesMap[cmd.id]?.color || c.accent.primary)
                         : c.status.success,
                     }}
                   />

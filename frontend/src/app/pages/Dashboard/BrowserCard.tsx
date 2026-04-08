@@ -138,16 +138,13 @@ const BrowserCard: React.FC<Props> = ({
 
   const [tabLocalStates, setTabLocalStates] = useState<Record<string, TabLocalState>>({});
   const updateTabLocal = useCallback((tabId: string, update: Partial<TabLocalState>) => {
-    setTabLocalStates((prev) => ({
-      ...prev,
-      [tabId]: {
-        loading: false,
-        canGoBack: false,
-        canGoForward: false,
-        ...prev[tabId],
-        ...update,
-      },
-    }));
+    setTabLocalStates((prev) => {
+      const existing = prev[tabId] ?? { loading: false, canGoBack: false, canGoForward: false };
+      return {
+        ...prev,
+        [tabId]: { ...existing, ...update },
+      };
+    });
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -744,7 +741,7 @@ const BrowserCard: React.FC<Props> = ({
                   transform: isBeingDragged ? `translateX(${dragTabOffset}px)` : 'none',
                   transition: isBeingDragged ? 'none' : 'background 0.15s ease, transform 0.2s ease',
                   zIndex: isBeingDragged ? 10 : 1,
-                  '&:hover': { bgcolor: isActive ? c.bg.surface : c.bg.hover },
+                  '&:hover': { bgcolor: isActive ? c.bg.surface : c.bg.secondary },
                   '&:hover .tab-close': { opacity: 1 },
                   ...(isActive && {
                     '&::after': {

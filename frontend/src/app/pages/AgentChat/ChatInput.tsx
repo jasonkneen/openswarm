@@ -39,10 +39,8 @@ import {
   TriggerState,
   EMPTY_TRIGGER,
 } from '@/app/components/richEditorUtils';
-import TemplateInvokeModal from './TemplateInvokeModal';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { fetchModes } from '@/shared/state/modesSlice';
-import { PromptTemplate } from '@/shared/state/templatesSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 export interface AttachedImage {
@@ -155,8 +153,6 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   attachedSkillsRef.current = attachedSkills;
 
   const [picker, setPicker] = useState<TriggerState>(EMPTY_TRIGGER);
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
-  const templates = useAppSelector((state) => state.templates.items);
   const skills = useAppSelector((state) => state.skills.items);
   const modesMap = useAppSelector((state) => state.modes.items);
   const modesArr = useMemo(() => Object.values(modesMap), [modesMap]);
@@ -427,15 +423,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
       if (sel) { sel.removeAllRanges(); sel.addRange(range); }
     }
 
-    if (item.type === 'template') {
-      const tmpl = templates[item.id];
-      if (!tmpl) return;
-      if (tmpl.fields.length === 0) {
-        document.execCommand('insertText', false, tmpl.template);
-      } else {
-        setSelectedTemplate(tmpl);
-      }
-    } else if (item.type === 'skill') {
+    if (item.type === 'skill') {
       const skill = skills[item.id];
       if (!skill) return;
       if (editor.querySelector(`[${SKILL_PILL_ATTR}="${skill.id}"]`)) return;
@@ -1203,29 +1191,6 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           </Box>
         )}
       </Box>
-
-      {selectedTemplate && (
-        <TemplateInvokeModal
-          template={selectedTemplate}
-          open={!!selectedTemplate}
-          onClose={() => setSelectedTemplate(null)}
-          onApply={(rendered) => {
-            const editor = editorRef.current;
-            if (editor) {
-              editor.innerHTML = '';
-              editor.textContent = rendered;
-              const range = document.createRange();
-              range.selectNodeContents(editor);
-              range.collapse(false);
-              const sel = window.getSelection();
-              if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-            }
-            setSelectedTemplate(null);
-            setAttachedSkills({});
-            setHasContent(!!rendered);
-          }}
-        />
-      )}
 
       <Modal
         open={!!lightboxSrc}

@@ -1322,7 +1322,6 @@ const Settings: React.FC = () => {
                   variant="outlined"
                   size="small"
                   onClick={handleCheckForUpdates}
-                  disabled={updateStatus === 'checking'}
                   startIcon={<SystemUpdateAltIcon sx={{ fontSize: 15 }} />}
                   sx={{
                     color: c.text.secondary,

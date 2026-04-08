@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useRef, useCallback, useMemo, RefObject } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback, useMemo, MutableRefObject } from 'react';
 
 export interface SelectedElement {
   id: string;
@@ -31,7 +31,7 @@ interface ElementSelectionContextValue {
   addElementForOwner: (ownerId: string, el: SelectedElement) => void;
   removeOwnerElement: (ownerId: string, elementId: string) => void;
   clearOwnerElements: (ownerId: string) => void;
-  iframeRef: RefObject<HTMLIFrameElement | null>;
+  iframeRef: MutableRefObject<HTMLIFrameElement | null>;
 }
 
 const ElementSelectionContext = createContext<ElementSelectionContextValue | null>(null);

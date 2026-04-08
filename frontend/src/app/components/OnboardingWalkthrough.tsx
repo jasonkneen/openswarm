@@ -43,12 +43,6 @@ const STEPS: WalkthroughStep[] = [
     placement: 'top',
   },
   {
-    target: 'sidebar-prompts',
-    title: 'Saved Prompts',
-    description: 'Save message templates you use often \u2014 like email formats, report structures, or frequently asked questions.',
-    placement: 'right',
-  },
-  {
     target: 'sidebar-skills',
     title: 'Skills',
     description: 'Browse and install ready-made workflows \u2014 no coding needed. Skills teach your AI new abilities.',
@@ -392,7 +386,7 @@ const OnboardingWalkthrough: React.FC<Props> = ({ onComplete }) => {
               py: 0.75,
               fontFamily: c.font.sans,
               visibility: currentStep === 0 || step.target === 'new-agent-button' ? 'hidden' : 'visible',
-              '&:hover': { bgcolor: c.bg.hover || 'rgba(255,255,255,0.05)' },
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' },
             }}
           >
             Back
