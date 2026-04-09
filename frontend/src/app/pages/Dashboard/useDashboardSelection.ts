@@ -177,6 +177,9 @@ export function useDashboardSelection(
         if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
         isDraggingMarqueeRef.current = true;
         document.body.style.userSelect = 'none';
+        // Disable pointer events on browser webviews/iframes for the
+        // duration of the drag so the cursor passes through them.
+        document.body.classList.add('dashboard-marquee-active');
       }
 
       const start = screenToCanvas(origin.screenX, origin.screenY);
@@ -210,6 +213,7 @@ export function useDashboardSelection(
       isDraggingMarqueeRef.current = false;
       setMarquee(null);
       document.body.style.userSelect = '';
+      document.body.classList.remove('dashboard-marquee-active');
     },
     [deselectAll],
   );
@@ -223,6 +227,28 @@ export function useDashboardSelection(
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [deselectAll]);
+
+  // Inject (once) a global CSS rule that makes browser webviews and iframes
+  // transparent to mouse events while a marquee drag is active. Without this,
+  // the Electron <webview> hit-tests the cursor at the OS level — when the
+  // cursor lands on an interactable element inside the browser (button,
+  // link, text), the webview steals the cursor and the marquee drag visually
+  // freezes until the cursor escapes. Setting `pointer-events: none` makes
+  // the cursor pass straight through, so the dashboard's mousemove handler
+  // continues to fire and the marquee keeps growing smoothly.
+  useEffect(() => {
+    const id = 'dashboard-marquee-style';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = `
+      body.dashboard-marquee-active webview,
+      body.dashboard-marquee-active iframe {
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
 
   return {
     selectedIds,
