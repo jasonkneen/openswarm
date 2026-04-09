@@ -72,6 +72,11 @@ FULL_TOOLS = [
     "RenderOutput",
     "InvokeAgent",
     "Agent",
+    # ToolSearch is the loader the CLI uses to expose deferred tool schemas
+    # on demand. Must be in the allowedTools whitelist or the model can't
+    # call it, which means none of the deferred extended tools become
+    # reachable even when the CLI advertises them in the system prompt.
+    "ToolSearch",
 ]
 
 def _get_denied_tool_names(tool) -> set[str]:
@@ -865,7 +870,22 @@ class AgentManager:
 
         try:
             _, mode_sys_prompt, _ = self._resolve_mode(session.mode)
-            connected_tools_ctx = self._build_connected_tools_context(session.allowed_tools)
+            # MCP servers and their tool inventories are intentionally NOT
+            # injected into the system prompt. The CLI's deferred-tool pool
+            # already exposes them by name via ToolSearch — eagerly listing
+            # connected MCPs (with account emails, full tool enumerations,
+            # etc.) here would defeat the deferral and leak knowledge of
+            # every connected integration into every turn. The model
+            # discovers MCPs only when it actively calls ToolSearch.
+            #
+            # Trade-offs of this removal:
+            # - Email auto-fill for Gmail/Calendar is gone. The model may
+            #   need to ask which account to use, or pass it explicitly.
+            # - Discord guild-id "hard restriction" is gone as a prompt
+            #   instruction. Enforce that at the Discord MCP server's
+            #   tool-call layer instead — prompt rules are not a security
+            #   boundary.
+            connected_tools_ctx = None
             outputs_ctx = self._build_outputs_context()
             browser_ctx = self._build_browser_context(session.dashboard_id, selected_browser_ids=selected_browser_ids)
             global_settings = load_settings()
@@ -1004,18 +1024,67 @@ class AgentManager:
                 options_kwargs["env"] = {
                     "ANTHROPIC_API_KEY": "9router",
                     "ANTHROPIC_BASE_URL": "http://localhost:20128",
+                    # The bundled CLI auto-disables tool search when
+                    # ANTHROPIC_BASE_URL isn't a first-party Anthropic host.
+                    # Without tool search, the entire deferred-tool pool
+                    # (WebSearch, NotebookEdit, TodoWrite, EnterPlanMode,
+                    # Cron*, Task*, etc.) becomes unreachable. Force-enable
+                    # in `auto` mode so the CLI surfaces them through the
+                    # ToolSearch loader. 9Router is a transparent SSE proxy
+                    # so tool_reference content blocks pass through intact.
+                    #
+                    # NOTE on context bloat: in `auto` mode, MCPs and
+                    # deferred builtins are still loaded eagerly when the
+                    # deferred-tool tokens are below ~10% of the model's
+                    # context window. Setting this to "true" instead would
+                    # force-enable tool search but the CLI's internal
+                    # `tengu_defer_all_bn4` Statsig flag (defaults to true
+                    # outside Anthropic's first-party network) then defers
+                    # ALL non-core tools including Read/Edit/Bash, leaving
+                    # the model with effectively zero tools. Until we have
+                    # a way to override that Statsig flag from outside the
+                    # binary, "auto" is the only working setting.
+                    "ENABLE_TOOL_SEARCH": "auto",
                 }
-                # --bare skips CLI's own OAuth/keychain auth, uses only ANTHROPIC_API_KEY
-                options_kwargs["extra_args"] = {"bare": None}
-                logger.info("[MCP-DEBUG] Using 9Router (bare mode)")
+                # NOTE: do NOT pass `--bare`. It internally sets
+                # CLAUDE_CODE_SIMPLE=1, which short-circuits the default
+                # Claude Code system prompt to a `"You are Claude Code"`
+                # stub and disables the deferred-tools / ToolSearch
+                # initialization. The CLI still picks up ANTHROPIC_API_KEY
+                # from env first (before OAuth/keychain), so the original
+                # goal of bare mode (skip OAuth/keychain) is preserved as
+                # long as ANTHROPIC_API_KEY is set above — which it is.
+                logger.info("[MCP-DEBUG] Using 9Router")
             else:
                 raise ValueError("No AI provider configured. Set an API key or connect a subscription.")
             if mcp_servers:
                 options_kwargs["mcp_servers"] = mcp_servers
                 mcp_json_len = len(json.dumps({"mcpServers": mcp_servers}))
                 logger.info(f"[MCP-DEBUG] mcp_servers passed to SDK: {list(mcp_servers.keys())}, JSON length={mcp_json_len}")
+            # Use the claude_code preset for BOTH the system prompt and the
+            # base tool set so the CLI's default scaffolding (deferred-tools
+            # listing + ToolSearch instructions) and full base tool set come
+            # along for the ride. Passing a raw string for system_prompt would
+            # send `--system-prompt` (REPLACE) and strip that scaffolding;
+            # leaving `tools` unset makes the CLI fall back to a much smaller
+            # default base set than the model expects (empirically only Bash/
+            # Read/Edit get surfaced). The pair below is what stock Claude
+            # Code uses, plus our composed_prompt appended on top.
+            options_kwargs["tools"] = {
+                "type": "preset",
+                "preset": "claude_code",
+            }
             if composed_prompt:
-                options_kwargs["system_prompt"] = composed_prompt
+                options_kwargs["system_prompt"] = {
+                    "type": "preset",
+                    "preset": "claude_code",
+                    "append": composed_prompt,
+                }
+            else:
+                options_kwargs["system_prompt"] = {
+                    "type": "preset",
+                    "preset": "claude_code",
+                }
             if session.max_turns:
                 options_kwargs["max_turns"] = session.max_turns
 

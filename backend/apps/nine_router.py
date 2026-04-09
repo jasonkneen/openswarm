@@ -91,7 +91,6 @@ async def ensure_running():
                 if result.stdout.strip():
                     logger.info("Dev mode: killing stale standalone 9Router to use next dev instead")
                     _sp.run(["pkill", "-f", "next-server"], timeout=5)
-                    import asyncio
                     await asyncio.sleep(2)
                 else:
                     logger.info("9Router already running on port %d", NINE_ROUTER_PORT)
@@ -160,12 +159,31 @@ async def ensure_running():
         cwd = None
         env = {**os.environ, "PORT": str(NINE_ROUTER_PORT)}
 
+    # By default, 9Router's stdout/stderr go to /dev/null (Next.js dev mode
+    # is extremely chatty and floods the openswarm console otherwise). When
+    # debugging is needed, set OPENSWARM_DEBUG_9ROUTER=1 in the environment
+    # before launching the backend — output will then be appended to
+    # backend/data/9router.log line-buffered, which can be `tail -f`'d.
+    if os.environ.get("OPENSWARM_DEBUG_9ROUTER"):
+        _log_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data",
+            "9router.log",
+        )
+        os.makedirs(os.path.dirname(_log_path), exist_ok=True)
+        _stdout = open(_log_path, "a", buffering=1)  # line-buffered
+        _stderr = subprocess.STDOUT
+        logger.info(f"9Router debug logging enabled → {_log_path}")
+    else:
+        _stdout = subprocess.DEVNULL
+        _stderr = subprocess.DEVNULL
+
     try:
         _process = subprocess.Popen(
             cmd,
             cwd=cwd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=_stdout,
+            stderr=_stderr,
             env=env,
         )
 

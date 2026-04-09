@@ -50,4 +50,3 @@ export async function POST(request) {
 
   return await handleChat(newRequest);
 }
-
