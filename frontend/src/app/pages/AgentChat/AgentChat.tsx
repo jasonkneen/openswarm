@@ -266,6 +266,37 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
     }
   }, [session?.status, mode, modesMap, id, isDraft, dispatch, dispatchMessage]);
 
+  // Idle reconcile: if the session has been 'running' for 5s with no
+  // WebSocket activity (no new messages, no streaming updates), do a
+  // single GET to fetch the real status from the backend. Catches the
+  // case where the completion WebSocket event was dropped (network blip,
+  // sleep/wake, SDK subprocess dying). Resets on every activity signal
+  // so it never fires during normal streaming.
+  const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageCount = session?.messages?.length ?? 0;
+  const hasStreaming = !!session?.streamingMessage;
+
+  useEffect(() => {
+    if (reconcileTimer.current) {
+      clearTimeout(reconcileTimer.current);
+      reconcileTimer.current = null;
+    }
+
+    if (!id || session?.status !== 'running') return;
+
+    reconcileTimer.current = setTimeout(() => {
+      reconcileTimer.current = null;
+      dispatch(fetchSession(id));
+    }, 5000);
+
+    return () => {
+      if (reconcileTimer.current) {
+        clearTimeout(reconcileTimer.current);
+        reconcileTimer.current = null;
+      }
+    };
+  }, [id, session?.status, messageCount, hasStreaming, dispatch]);
+
   const SCROLL_THRESHOLD = 50;
 
   const handleScroll = useCallback(() => {
