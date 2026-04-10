@@ -14,7 +14,7 @@ import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { AgentSession, AgentMessage, stopAgent, handleApproval } from '@/shared/state/agentsSlice';
-import { useAppDispatch } from '@/shared/hooks';
+import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 
 interface Props {
@@ -69,8 +69,22 @@ const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHe
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Check if the parent agent session is still running. If so, the overlay
+  // stays alive even when this browser-agent sub-task completes — the parent
+  // may send another BrowserAgent call momentarily. Only treat the overlay
+  // as "done" when both the browser-agent session AND the parent are terminal.
+  const parentStatus = useAppSelector((state) => {
+    if (!session.parent_session_id) return null;
+    return state.agents.sessions[session.parent_session_id]?.status ?? null;
+  });
+  const parentStillActive = parentStatus === 'running' || parentStatus === 'waiting_approval';
+
   const isRunning = session.status === 'running' || session.status === 'waiting_approval';
-  const isDone = session.status === 'completed' || session.status === 'error' || session.status === 'stopped';
+  const browserDone = session.status === 'completed' || session.status === 'error' || session.status === 'stopped';
+  // Only truly "done" (fade + hide) when the parent is also finished.
+  // While the parent is still active, the overlay stays visible in a
+  // "waiting for next task" state between sub-tasks.
+  const isDone = browserDone && !parentStillActive;
 
   const intervention = session.pending_approvals?.find(
     (a) => a.tool_name === 'RequestHumanIntervention',
@@ -201,7 +215,7 @@ const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHe
           : <SmartToyOutlinedIcon sx={{ fontSize: 14, color: accentColor }} />
         }
 
-        {isRunning && !intervention && (
+        {(isRunning || (browserDone && parentStillActive)) && !intervention && (
           <Box
             sx={{
               width: 6,
@@ -238,7 +252,9 @@ const BrowserAgentOverlay: React.FC<Props> = ({ session, browserWidth, browserHe
         >
           {isDone
             ? session.status === 'completed' ? 'Done' : session.status === 'error' ? 'Error' : 'Stopped'
-            : intervention ? 'Needs Help' : 'Browser Agent'}
+            : intervention ? 'Needs Help'
+            : browserDone && parentStillActive ? 'Waiting…'
+            : 'Browser Agent'}
         </Typography>
 
         <Tooltip title={expanded ? 'Collapse' : 'Expand'} placement="top">

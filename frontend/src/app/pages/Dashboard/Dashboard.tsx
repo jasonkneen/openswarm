@@ -1384,7 +1384,24 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
       };
     }).filter(Boolean) as Array<{ key: string; path: string; labelX: number; labelY: number; label: string; fading: boolean }>;
 
-    const browserTethers = Object.entries(glowingBrowserCards).map(([browserId, { sourceId, fading, label }]) => {
+    // Build browser tethers from TWO sources and merge:
+    // 1. glowingBrowserCards — the short-lived "flash" when a browser is first assigned
+    // 2. Active browser-agent sessions — persistent as long as the agent runs
+    //
+    // Source #2 is the fix for tethers disappearing when the parent session
+    // completes a turn (which clears glowingBrowserCards even though the
+    // browser agent is still working). Source #1 covers the initial moment
+    // before the browser-agent session is fully created. Together they
+    // ensure the arrow is always visible when it should be.
+
+    type Anchor = { x: number; y: number; side: 'left' | 'right' | 'top' | 'bottom' };
+
+    function browserTether(
+      browserId: string,
+      sourceId: string,
+      fading: boolean,
+      label: string,
+    ) {
       const src = cards[sourceId];
       const dst = browserCards[browserId];
       if (!src || !dst) return null;
@@ -1405,7 +1422,6 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
       const srcCx = srcX + src.width / 2;
       const dstCx = dstX + dst.width / 2;
 
-      type Anchor = { x: number; y: number; side: 'left' | 'right' | 'top' | 'bottom' };
       const srcAnchors: Anchor[] = [
         { x: srcX + src.width, y: srcY + srcH * 0.54, side: 'right' },
         { x: srcX, y: srcY + srcH * 0.54, side: 'left' },
@@ -1466,14 +1482,33 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
         path: pathD,
         labelX,
         labelY,
-        label: label || '',
+        label,
         fading,
       };
-    }).filter(Boolean) as Array<{ key: string; path: string; labelX: number; labelY: number; label: string; fading: boolean }>;
+    }
+
+    // Source 1: glow-based (covers the initial flash before browser-agent session exists)
+    const glowTethers = new Map<string, ReturnType<typeof browserTether>>();
+    for (const [browserId, { sourceId, fading, label }] of Object.entries(glowingBrowserCards)) {
+      const t = browserTether(browserId, sourceId, fading, label || '');
+      if (t) glowTethers.set(browserId, t);
+    }
+
+    // Source 2: active browser-agent sessions (persistent — survives parent turn completion)
+    for (const s of sessionList) {
+      if (s.mode !== 'browser-agent') continue;
+      if (s.status !== 'running' && s.status !== 'waiting_approval') continue;
+      if (!s.browser_id || !s.parent_session_id) continue;
+      if (glowTethers.has(s.browser_id)) continue; // glow already covers this one
+      const t = browserTether(s.browser_id, s.parent_session_id, false, '');
+      if (t) glowTethers.set(s.browser_id, t);
+    }
+
+    const browserTethers = Array.from(glowTethers.values()).filter(Boolean) as Array<{ key: string; path: string; labelX: number; labelY: number; label: string; fading: boolean }>;
 
     return [...agentTethers, ...browserTethers];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glowingAgentCards, glowingBrowserCards, cards, browserCards, expandedSessionIds, liveDragInfo, measuredHeightsTick]);
+  }, [glowingAgentCards, glowingBrowserCards, cards, browserCards, expandedSessionIds, liveDragInfo, measuredHeightsTick, sessionList]);
 
   const dotSize = Math.max(1, 1.5 * canvas.zoom);
   const dotSpacing = 24 * canvas.zoom;
