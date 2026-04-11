@@ -1,5 +1,5 @@
 {
-  "name": "notion-mcp-server",
+  "name": "notionhq-notion-mcp-server",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",

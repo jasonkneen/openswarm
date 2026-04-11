@@ -11,6 +11,6 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@softeria/ms-365-mcp-server": "^0.54.1"
+    "@softeria/ms-365-mcp-server": "^0.75.0"
   }
 }

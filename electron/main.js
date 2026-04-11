@@ -14,7 +14,7 @@ const http = require('http');
 // one populated window and one empty window.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  app.exit(0);
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
