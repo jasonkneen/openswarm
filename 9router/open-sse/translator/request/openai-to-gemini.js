@@ -87,14 +87,27 @@ function openaiToGeminiBase(model, body, stream) {
       } else if (role === "assistant") {
         const parts = [];
 
-        // Thinking/reasoning → thought part with signature
+        // Gemini 3 models require a valid per-session `thoughtSignature`
+        // on thinking blocks and function calls. Real signatures are lost
+        // during the Gemini→OpenAI→Claude→OpenAI→Gemini translation
+        // round-trip (no intermediate format has a field for them).
+        //
+        // Google's official workaround for proxy/translation layers:
+        // set thoughtSignature to the literal "skip_thought_signature_validator"
+        // which bypasses validation. Per Google's docs this is a "last
+        // resort" that "negatively impacts model performance" because the
+        // model can't build on its prior reasoning across turns — but it
+        // lets multi-turn tool use work through any translation layer.
+        // See: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures
+        const SKIP_SIG = "skip_thought_signature_validator";
+
         if (msg.reasoning_content) {
           parts.push({
             thought: true,
             text: msg.reasoning_content
           });
           parts.push({
-            thoughtSignature: DEFAULT_THINKING_GEMINI_SIGNATURE,
+            thoughtSignature: SKIP_SIG,
             text: ""
           });
         }
@@ -113,7 +126,7 @@ function openaiToGeminiBase(model, body, stream) {
 
             const args = tryParseJSON(tc.function?.arguments || "{}");
             parts.push({
-              thoughtSignature: DEFAULT_THINKING_GEMINI_SIGNATURE,
+              thoughtSignature: SKIP_SIG,
               functionCall: {
                 id: tc.id,
                 name: tc.function.name,
@@ -213,21 +226,26 @@ export function openaiToGeminiCLIRequest(model, body, stream) {
   const gemini = openaiToGeminiBase(model, body, stream);
   const isClaude = model.toLowerCase().includes("claude");
 
-  // Add thinking config for CLI
+  // Pass through thinking config from the incoming request. Gemini 3
+  // models have thinking always-on (can't be disabled per Google's docs).
+  // The thought-signature round-trip issue is handled by using
+  // "skip_thought_signature_validator" on all function call and thinking
+  // parts in the conversation history (see assistant message handling
+  // above at lines ~87-125). This lets thinking work with the trade-off
+  // that the model can't build on prior reasoning across turns.
   if (body.reasoning_effort) {
     const budgetMap = { low: 1024, medium: 8192, high: 32768 };
     const budget = budgetMap[body.reasoning_effort] || 8192;
     gemini.generationConfig.thinkingConfig = {
       thinkingBudget: budget,
-      include_thoughts: true
+      includeThoughts: true
     };
   }
 
-  // Thinking config from Claude format
   if (body.thinking?.type === "enabled" && body.thinking.budget_tokens) {
     gemini.generationConfig.thinkingConfig = {
       thinkingBudget: body.thinking.budget_tokens,
-      include_thoughts: true
+      includeThoughts: true
     };
   }
 

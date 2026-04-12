@@ -408,6 +408,32 @@ app.whenReady().then(async () => {
 });
 
 app.on('web-contents-created', (_event, contents) => {
+  // Override the user-agent on popup BrowserWindows (i.e. anything created
+  // via window.open from the renderer, which includes the OAuth popup for
+  // subscription connect flows). Electron's default UA includes an
+  // `Electron/X.Y.Z` token that accounts.google.com blacklists with a
+  // "browser not supported" page — and auth.openai.com is similarly picky.
+  // Spoofing a current Chrome UA makes those identity providers treat the
+  // popup like a real browser without changing the flow OpenSwarm uses to
+  // capture the callback (window.open + postMessage).
+  //
+  // This check runs synchronously during `new BrowserWindow()` construction.
+  // On the very first invocation (for mainWindow itself), `mainWindow` is
+  // still null because assignment happens after the constructor returns,
+  // so the `mainWindow &&` short-circuits and we leave the main window's
+  // UA alone. Webview tags report `getType() === 'webview'` and are also
+  // skipped — they render user-visited sites and must advertise the real UA.
+  if (
+    contents.getType() === 'window' &&
+    mainWindow &&
+    contents !== mainWindow.webContents
+  ) {
+    const OAUTH_POPUP_UA =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    contents.setUserAgent(OAUTH_POPUP_UA);
+  }
+
   contents.setWindowOpenHandler(({ url, disposition }) => {
     if (disposition === 'foreground-tab' || disposition === 'background-tab') {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -415,6 +441,17 @@ app.on('web-contents-created', (_event, contents) => {
       }
       return { action: 'deny' };
     }
+
+    // Note on Google OAuth: we tried running the Gemini flow inside this
+    // popup BrowserWindow with a spoofed Chrome UA, fresh session partition,
+    // sandboxed webPreferences, and a preload script that patched
+    // navigator.webdriver/plugins/chrome/permissions. Google's consent page
+    // still rejected with "browser not supported". Their detection is
+    // actively adversarial and Google explicitly prohibits embedded browser
+    // OAuth. Gemini now routes through shell.openExternal instead (see
+    // _EXTERNAL_BROWSER_PROVIDERS in backend/apps/nine_router.py). Anthropic
+    // and OpenAI/Codex don't fingerprint, so they still use this popup path
+    // with the generic Chrome UA override set above.
 
     return {
       action: 'allow',

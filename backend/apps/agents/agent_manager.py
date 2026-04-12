@@ -596,7 +596,7 @@ class AgentManager:
             )
             from claude_agent_sdk.types import (
                 HookMatcher, PermissionResultAllow, PermissionResultDeny,
-                TextBlock, ToolUseBlock, StreamEvent,
+                TextBlock, ToolUseBlock, ThinkingBlock, StreamEvent,
                 SystemMessage,
             )
         except ImportError:
@@ -605,7 +605,19 @@ class AgentManager:
             return
 
         session.status = "running"
-        
+
+        # Resolve the model id now so every closure (approval hook, tool.executed
+        # event, etc.) can tag analytics events with both the short name and
+        # the 9Router-prefixed id. This lets downstream dashboards correlate
+        # session-level stats (`session.model` = short name) with 9Router's
+        # per-model usage stats (keyed by the router_model_id).
+        from backend.apps.agents.providers.registry import (
+            resolve_model_id_for_sdk as _resolve_model_id_early,
+            get_api_type as _get_api_type_early,
+        )
+        _router_model_id = _resolve_model_id_early(session.model, load_settings())
+        _api_type_for_session = _get_api_type_early(session.model)
+
         _builtin_perms = load_builtin_permissions()
 
         def _get_effective_policy(tool_name: str) -> str:
@@ -650,6 +662,8 @@ class AgentManager:
                 "tool_name": tool_name,
                 "is_first_approval_in_session": len(session.pending_approvals) == 1,
                 "model": session.model,
+                "router_model_id": _router_model_id,
+                "api_type": _api_type_for_session,
             }, session_id=session_id, dashboard_id=session.dashboard_id)
 
             await ws_manager.send_to_session(session_id, "agent:status", {
@@ -668,6 +682,8 @@ class AgentManager:
                 "latency_ms": approval_latency_ms,
                 "input_was_modified": decision.get("updated_input") is not None,
                 "model": session.model,
+                "router_model_id": _router_model_id,
+                "api_type": _api_type_for_session,
             }, session_id=session_id, dashboard_id=session.dashboard_id)
 
             session.pending_approvals = [
@@ -777,6 +793,8 @@ class AgentManager:
                     "success": _tool_success,
                     "model": session.model,
                     "provider": session.provider,
+                    "router_model_id": _router_model_id,
+                    "api_type": _api_type_for_session,
                 }, session_id=session_id, dashboard_id=session.dashboard_id)
 
             if isinstance(raw_response, list) and raw_response:
@@ -1002,8 +1020,16 @@ class AgentManager:
             if effective_disallowed:
                 logger.info(f"[MCP-DEBUG] effective_disallowed: {effective_disallowed}")
 
+            # `_router_model_id` and `_api_type_for_session` were resolved
+            # at the top of _run_agent_loop (before any closures were
+            # defined) so analytics closures could tag events with them.
+            # Reuse those values here and keep session.provider in sync.
+            resolved_model = _router_model_id
+            api_type = _api_type_for_session
+            session.provider = api_type
+
             options_kwargs = {
-                "model": session.model,
+                "model": resolved_model,
                 "max_buffer_size": 5 * 1024 * 1024,
                 "permission_mode": "default",
                 "can_use_tool": can_use_tool,
@@ -1015,37 +1041,66 @@ class AgentManager:
                 "disallowed_tools": effective_disallowed,
                 "include_partial_messages": True,
             }
-            # Priority: API key → 9Router subscription
+            # Priority: Anthropic API key (Anthropic models only) → 9Router.
+            # Non-Anthropic api_types always route through 9Router regardless
+            # of whether an Anthropic API key is set.
             from backend.apps.nine_router import is_running as _9r_running
-            if global_settings.anthropic_api_key:
+            if api_type == "anthropic" and global_settings.anthropic_api_key:
                 options_kwargs["env"] = {"ANTHROPIC_API_KEY": global_settings.anthropic_api_key}
-                logger.info("[MCP-DEBUG] Using direct API key")
+                logger.info("[MCP-DEBUG] Using direct Anthropic API key")
             elif _9r_running():
-                options_kwargs["env"] = {
+                env = {
                     "ANTHROPIC_API_KEY": "9router",
                     "ANTHROPIC_BASE_URL": "http://localhost:20128",
-                    # The bundled CLI auto-disables tool search when
-                    # ANTHROPIC_BASE_URL isn't a first-party Anthropic host.
-                    # Without tool search, the entire deferred-tool pool
-                    # (WebSearch, NotebookEdit, TodoWrite, EnterPlanMode,
-                    # Cron*, Task*, etc.) becomes unreachable. Force-enable
-                    # in `auto` mode so the CLI surfaces them through the
-                    # ToolSearch loader. 9Router is a transparent SSE proxy
-                    # so tool_reference content blocks pass through intact.
-                    #
-                    # NOTE on context bloat: in `auto` mode, MCPs and
-                    # deferred builtins are still loaded eagerly when the
-                    # deferred-tool tokens are below ~10% of the model's
-                    # context window. Setting this to "true" instead would
-                    # force-enable tool search but the CLI's internal
-                    # `tengu_defer_all_bn4` Statsig flag (defaults to true
-                    # outside Anthropic's first-party network) then defers
-                    # ALL non-core tools including Read/Edit/Bash, leaving
-                    # the model with effectively zero tools. Until we have
-                    # a way to override that Statsig flag from outside the
-                    # binary, "auto" is the only working setting.
-                    "ENABLE_TOOL_SEARCH": "auto",
                 }
+                # ENABLE_TOOL_SEARCH=auto is Claude-specific. It keeps the
+                # deferred-tool pool (WebSearch, NotebookEdit, TodoWrite,
+                # EnterPlanMode, Cron*, Task*, etc.) reachable via the
+                # ToolSearch loader when the CLI is pointed at a non-first-
+                # party host — otherwise the CLI auto-disables tool search.
+                #
+                # For non-Claude models the same flag is actively dangerous:
+                # the CLI would still inject a ToolSearch reference block
+                # into the system prompt, and GPT/Gemini may (a) call
+                # ToolSearch with hallucinated arguments, (b) ignore it and
+                # lose the base tool set, or (c) loop on failed calls. Drop
+                # the flag for non-Anthropic so the CLI eagerly loads the
+                # base Read/Edit/Bash/WebSearch set into the system prompt
+                # instead of deferring it.
+                #
+                # NOTE on context bloat (Claude path): in `auto` mode MCPs
+                # and deferred builtins are loaded eagerly when the
+                # deferred-tool tokens are below ~10% of the model's context
+                # window. Setting this to "true" would force-enable tool
+                # search but the CLI's internal `tengu_defer_all_bn4`
+                # Statsig flag (defaults to true outside Anthropic's first-
+                # party network) then defers ALL non-core tools including
+                # Read/Edit/Bash, leaving the model with effectively zero
+                # tools. Until we have a way to override that Statsig flag
+                # from outside the binary, "auto" is the only working
+                # setting for Claude.
+                # Enable ToolSearch for ALL providers, not just Anthropic.
+                # Without this flag the CLI's internal `tengu_defer_all_bn4`
+                # Statsig flag (default ON outside Anthropic's network) defers
+                # all non-core tools (WebSearch, WebFetch, TodoWrite,
+                # NotebookEdit, EnterPlanMode, Task*, Cron*, Agent, etc.)
+                # with no way to load them — making 16 tools completely
+                # inaccessible on non-Anthropic models.
+                #
+                # With "auto", the CLI eagerly loads tools when the schema
+                # budget fits within ~10% of context, and defers the rest
+                # behind ToolSearch. Frontier models (GPT-5.3 Codex,
+                # Gemini 3 Pro) can follow the ToolSearch instructions in
+                # the system prompt to load deferred tools on demand.
+                # OpenClaw (open-source Claude Code alternative) validates
+                # this approach — they load ALL tools upfront for every
+                # provider with no deferral at all.
+                #
+                # Original concern was hallucinated ToolSearch calls from
+                # non-Claude models, but in practice frontier models handle
+                # structured tool-call instructions reliably.
+                env["ENABLE_TOOL_SEARCH"] = "auto"
+                options_kwargs["env"] = env
                 # NOTE: do NOT pass `--bare`. It internally sets
                 # CLAUDE_CODE_SIMPLE=1, which short-circuits the default
                 # Claude Code system prompt to a `"You are Claude Code"`
@@ -1054,9 +1109,29 @@ class AgentManager:
                 # from env first (before OAuth/keychain), so the original
                 # goal of bare mode (skip OAuth/keychain) is preserved as
                 # long as ANTHROPIC_API_KEY is set above — which it is.
-                logger.info("[MCP-DEBUG] Using 9Router")
+                logger.info(f"[MCP-DEBUG] Using 9Router (api_type={api_type})")
             else:
-                raise ValueError("No AI provider configured. Set an API key or connect a subscription.")
+                # 9Router is not up yet. For non-Anthropic api_types there
+                # is no API-key fallback, so wait for 9Router to start
+                # before giving up. ensure_running has its own 30s timeout.
+                if api_type != "anthropic":
+                    from backend.apps.nine_router import ensure_running as _9r_ensure
+                    logger.info(f"[MCP-DEBUG] 9Router not running for non-Anthropic model {session.model}; waiting for startup")
+                    await _9r_ensure()
+                    if _9r_running():
+                        options_kwargs["env"] = {
+                            "ANTHROPIC_API_KEY": "9router",
+                            "ANTHROPIC_BASE_URL": "http://localhost:20128",
+                        }
+                        logger.info(f"[MCP-DEBUG] 9Router started; routing {session.model} via 9Router")
+                    else:
+                        raise ValueError(
+                            f"9Router is not running; cannot use {session.model}. "
+                            "Install Node.js and restart the app, or switch to a model "
+                            "with a direct API key."
+                        )
+                else:
+                    raise ValueError("No AI provider configured. Set an API key or connect a subscription.")
             if mcp_servers:
                 options_kwargs["mcp_servers"] = mcp_servers
                 mcp_json_len = len(json.dumps({"mcpServers": mcp_servers}))
@@ -1105,7 +1180,7 @@ class AgentManager:
                     elif isinstance(prompt_content, list):
                         prompt_content.insert(0, {"type": "text", "text": history})
 
-            logger.info(f"[MCP-DEBUG] Creating ClaudeAgentOptions with model={session.model}")
+            logger.info(f"[MCP-DEBUG] Creating ClaudeAgentOptions short={session.model} resolved={resolved_model} api_type={api_type}")
             options = ClaudeAgentOptions(**options_kwargs)
             logger.info(f"[MCP-DEBUG] ClaudeAgentOptions created. Starting query...")
 
@@ -1153,6 +1228,22 @@ class AgentManager:
                                 })
                             stream_block_index_map[index] = stream_text_msg_id
 
+                        elif block_type == "thinking":
+                            # Reasoning trace from thinking-capable models
+                            # (GPT-5.3 Codex, Gemini 3 Pro/Flash, Claude
+                            # with extended thinking). Rendered as a
+                            # collapsible "thinking" message in the UI via
+                            # the existing stream infrastructure — the
+                            # frontend already handles role="thinking" for
+                            # the DynamicIsland/agent card rendering.
+                            thinking_msg_id = uuid4().hex
+                            stream_block_index_map[index] = thinking_msg_id
+                            await ws_manager.send_to_session(session_id, "agent:stream_start", {
+                                "session_id": session_id,
+                                "message_id": thinking_msg_id,
+                                "role": "thinking",
+                            })
+
                         elif block_type == "tool_use":
                             tool_msg_id = uuid4().hex
                             stream_tool_msg_ids_ordered.append(tool_msg_id)
@@ -1175,6 +1266,14 @@ class AgentManager:
                                 "session_id": session_id,
                                 "message_id": msg_id,
                                 "delta": delta.get("text", ""),
+                            })
+                        elif msg_id and delta_type == "thinking_delta":
+                            # Thinking content streams as thinking_delta
+                            # with a "thinking" field (not "text")
+                            await ws_manager.send_to_session(session_id, "agent:stream_delta", {
+                                "session_id": session_id,
+                                "message_id": msg_id,
+                                "delta": delta.get("thinking", ""),
                             })
                         elif msg_id and delta_type == "input_json_delta":
                             await ws_manager.send_to_session(session_id, "agent:stream_delta", {
@@ -1201,9 +1300,14 @@ class AgentManager:
 
                 elif isinstance(message, AssistantMessage):
                     content_parts = []
+                    thinking_parts = []
                     tool_uses = []
                     for block in message.content:
-                        if isinstance(block, TextBlock):
+                        if isinstance(block, ThinkingBlock):
+                            thinking_text = getattr(block, "thinking", None) or getattr(block, "text", None) or ""
+                            if thinking_text:
+                                thinking_parts.append(thinking_text)
+                        elif isinstance(block, TextBlock):
                             content_parts.append(block.text)
                         elif isinstance(block, ToolUseBlock):
                             tool_uses.append({
@@ -1211,6 +1315,21 @@ class AgentManager:
                                 "tool": block.name,
                                 "input": block.input,
                             })
+
+                    # Emit thinking trace as a separate message so the
+                    # frontend can render it as a collapsible reasoning
+                    # bubble (GPT-5.3 Codex, Gemini 3 Pro/Flash).
+                    if thinking_parts:
+                        thinking_msg = Message(
+                            role="thinking",
+                            content="\n".join(thinking_parts),
+                            branch_id=session.active_branch_id,
+                        )
+                        session.messages.append(thinking_msg)
+                        await ws_manager.send_to_session(session_id, "agent:message", {
+                            "session_id": session_id,
+                            "message": thinking_msg.model_dump(mode="json"),
+                        })
 
                     if content_parts:
                         asst_msg = Message(
@@ -1469,6 +1588,19 @@ class AgentManager:
 
         session_changed = False
         if model and model != session.model:
+            # Cross-provider model switches force a session fork. The CLI's
+            # resume transcript stores Anthropic-format content blocks with
+            # Anthropic tool_use_ids; replaying them on a non-Anthropic
+            # provider via 9Router's claude→openai translator corrupts
+            # history silently (fixMissingToolResponses stubs missing tool
+            # responses with placeholder text). Forking starts a new CLI
+            # session so history is re-sent fresh in whichever format the
+            # new provider expects.
+            from backend.apps.agents.providers.registry import get_api_type as _get_api_type_for_model
+            if _get_api_type_for_model(session.model) != _get_api_type_for_model(model):
+                session.needs_fork = True
+                logger.info(f"[MCP-DEBUG] Forking session: api_type changed {session.model}→{model}")
+
             _analytics("model.switched", {
                 "from_model": session.model,
                 "to_model": model,
@@ -1706,7 +1838,9 @@ class AgentManager:
         title = first_prompt[:40].strip()
         try:
             from backend.apps.settings.credentials import get_anthropic_client
+            from backend.apps.agents.providers.registry import resolve_aux_model
             global_settings = load_settings()
+            aux_model, _aux_base = await resolve_aux_model(global_settings, preferred_tier="haiku")
             client = get_anthropic_client(global_settings)
             system_prompt = (
                 "You label user messages with a 2-4 word topic title. "
@@ -1727,7 +1861,7 @@ class AgentManager:
                 f"<message>\n{first_prompt}\n</message>"
             )
             resp = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=aux_model,
                 max_tokens=20,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_turn}],
@@ -1767,7 +1901,9 @@ class AgentManager:
         try:
             import json as _json
             from backend.apps.settings.credentials import get_anthropic_client
+            from backend.apps.agents.providers.registry import resolve_aux_model
             global_settings = load_settings()
+            aux_model, _aux_base = await resolve_aux_model(global_settings, preferred_tier="sonnet")
             client = get_anthropic_client(global_settings)
 
             tool_desc = "\n".join(
@@ -1801,7 +1937,7 @@ class AgentManager:
             )
 
             resp = await client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=aux_model,
                 max_tokens=300,
                 system=system,
                 messages=[{"role": "user", "content": user_content}],

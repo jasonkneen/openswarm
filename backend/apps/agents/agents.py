@@ -280,6 +280,63 @@ async def subscriptions_models():
     return {"models": models}
 
 
+@agents.router.get("/models")
+async def list_models():
+    """Return the chat-picker model list grouped by provider.
+
+    Intersects BUILTIN_MODELS with runtime availability:
+    - Anthropic models are visible if an API key is set OR 9Router has the
+      `claude` subscription connected.
+    - Subscription-only models (OpenAI/Google/Copilot routed via 9Router's
+      cx/gc/gh prefixes) are visible only when 9Router is up AND that
+      provider has an active connection.
+
+    The frontend already calls this endpoint from
+    frontend/src/shared/state/modelsSlice.ts:24 and falls back to hardcoded
+    Claude entries on failure, so the response shape is
+    `{"models": {"provider_name": [{value, label, context_window}, ...]}}`.
+    """
+    from backend.apps.agents.providers.registry import BUILTIN_MODELS
+    from backend.apps.nine_router import is_running as _9r_running, get_providers as _9r_providers
+    from backend.apps.settings.settings import load_settings
+
+    settings = load_settings()
+    nine_router_up = _9r_running()
+
+    connected: set[str] = set()
+    if nine_router_up:
+        try:
+            providers_data = await _9r_providers()
+            conns = providers_data.get("connections", []) if isinstance(providers_data, dict) else []
+            connected = {c.get("provider", "") for c in conns if c.get("isActive")}
+        except Exception as e:
+            logger.debug(f"Failed to fetch 9Router providers: {e}")
+
+    result: dict[str, list[dict]] = {}
+    for provider_name, models in BUILTIN_MODELS.items():
+        visible = []
+        for m in models:
+            api = m.get("api", "")
+            if m.get("subscription_only"):
+                # Subscription-only models need that provider live in 9Router
+                if not nine_router_up or api not in connected:
+                    continue
+            elif api == "anthropic":
+                # Anthropic visible if API key set OR claude subscription connected
+                has_key = bool(getattr(settings, "anthropic_api_key", None))
+                if not has_key and "claude" not in connected:
+                    continue
+            visible.append({
+                "value": m["value"],
+                "label": m["label"],
+                "context_window": m.get("context_window", 128_000),
+            })
+        if visible:
+            result[provider_name] = visible
+
+    return {"models": result}
+
+
 @agents.router.post("/subscriptions/disconnect")
 async def subscriptions_disconnect(body: dict):
     """Disconnect a subscription provider via 9Router."""

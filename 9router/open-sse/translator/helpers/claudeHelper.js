@@ -173,6 +173,23 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null) {
       body.tools = body.tools.filter(tool => !tool.type || tool.type === "function");
     }
 
+    // Fix: Anthropic's API rejects empty domain lists on the web_search
+    // tool with "Empty list of domains is ambiguous". The Claude Code CLI
+    // sends both `blocked_domains: []` and `allowed_domains: []` meaning
+    // "no restrictions", but the API wants the fields omitted entirely
+    // when empty. Clean up here so the fix applies to both direct-API
+    // and 9Router-subscription paths.
+    for (const tool of body.tools) {
+      if (tool.type && tool.type.startsWith("web_search")) {
+        if (Array.isArray(tool.blocked_domains) && tool.blocked_domains.length === 0) {
+          delete tool.blocked_domains;
+        }
+        if (Array.isArray(tool.allowed_domains) && tool.allowed_domains.length === 0) {
+          delete tool.allowed_domains;
+        }
+      }
+    }
+
     body.tools = body.tools.map((tool, i) => {
       const { cache_control, ...rest } = tool;
       if (i === body.tools.length - 1) {

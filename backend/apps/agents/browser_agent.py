@@ -877,10 +877,55 @@ async def run_browser_agent(
         )
         logger.info(f"Browser agent {session_id}: navigated to {initial_url}: {nav_result.get('text', nav_result.get('error', ''))}")
 
-    api_model = MODEL_MAP.get(model, model)
     from backend.apps.settings.settings import load_settings
     from backend.apps.settings.credentials import get_anthropic_client
-    client = get_anthropic_client(load_settings())
+    from backend.apps.agents.providers.registry import (
+        _find_builtin_model,
+        resolve_model_id_for_sdk,
+        resolve_aux_model,
+    )
+    browser_settings = load_settings()
+    # Resolve the model string to whatever the SDK / 9Router expects.
+    # When the parent session is running on a non-Claude model (e.g. gpt-5.4),
+    # the browser agent inherits it and we route through 9Router's prefix.
+    # Tool-use fidelity for browser-specific tools (BrowserNavigate, click,
+    # type, etc.) through 9Router's claude→openai translator is UNVERIFIED —
+    # if translation is poor, the user should manually switch this session
+    # back to Claude in the model picker.
+    if _find_builtin_model(model) is not None:
+        api_model = resolve_model_id_for_sdk(model, browser_settings)
+    else:
+        # Unknown model string — fall back to whatever aux model is available
+        try:
+            api_model, _ = await resolve_aux_model(browser_settings, preferred_tier="haiku")
+        except ValueError:
+            # Nothing connected at all — surface a clear error so the caller
+            # (parent agent) sees it in the tool result instead of crashing
+            # on a 400 from 9Router.
+            session.status = "error"
+            error_text = (
+                "Browser agent requires an active LLM subscription. "
+                "Connect Claude, Codex, or Gemini in Settings."
+            )
+            err_msg = Message(role="system", content=f"Error: {error_text}")
+            session.messages.append(err_msg)
+            await ws_manager.send_to_session(session_id, "agent:message", {
+                "session_id": session_id,
+                "message": err_msg.model_dump(mode="json"),
+            })
+            await ws_manager.send_to_session(session_id, "agent:status", {
+                "session_id": session_id,
+                "status": "error",
+                "session": session.model_dump(mode="json"),
+            })
+            return {
+                "session_id": session_id,
+                "browser_id": browser_id,
+                "summary": f"Error: {error_text}",
+                "action_log": [],
+                "final_screenshot": None,
+            }
+    client = get_anthropic_client(browser_settings)
 
     # Resume prior conversation on this browser if we have one cached. This
     # lets the sub-agent skip the "take a screenshot to figure out where I am"
@@ -923,6 +968,7 @@ async def run_browser_agent(
             return None
         return task.result()
 
+    text_parts = []  # initialized before loop so post-loop summary (line ~1294) has a default
     try:
         for turn in range(MAX_TURNS):
             if cancel_event.is_set():
@@ -936,6 +982,11 @@ async def run_browser_agent(
                 messages=messages,
             ))
             if response is None:
+                break
+            # Guard against empty content (e.g. upstream API error from
+            # 9Router that the SDK parsed into a partial response object).
+            if not response.content:
+                logger.warning(f"Browser agent {session_id}: empty response content from {api_model}")
                 break
 
             # Track token usage from browser agent API calls

@@ -222,7 +222,9 @@ async def generate_name(dashboard_id: str):
     try:
         from backend.apps.settings.settings import load_settings
         from backend.apps.settings.credentials import get_anthropic_client
+        from backend.apps.agents.providers.registry import resolve_aux_model
         global_settings = load_settings()
+        aux_model, _aux_base = await resolve_aux_model(global_settings, preferred_tier="haiku")
         client = get_anthropic_client(global_settings)
 
         if len(prompts) == 1:
@@ -241,7 +243,7 @@ async def generate_name(dashboard_id: str):
             user_content = "\n".join(f"- {p}" for p in prompts)
 
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=aux_model,
             max_tokens=20,
             system=system,
             messages=[{"role": "user", "content": user_content}],

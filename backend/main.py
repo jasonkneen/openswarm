@@ -9,6 +9,22 @@ from fastapi import Request
 
 # In-memory store for pending OAuth flows (state -> {provider, code_verifier, redirect_uri})
 _pending_oauth: dict[str, dict] = {}
+# Recently-completed OAuth states so the /api/subscriptions/callback handler
+# can distinguish a legitimate duplicate callback (browser prefetch, refresh,
+# or Google redirect retry after a slow first response) from a truly stale
+# request. Bounded FIFO — drops the oldest entries once it grows past
+# _MAX_COMPLETED_OAUTH so it can't leak memory.
+_completed_oauth: list[str] = []
+_MAX_COMPLETED_OAUTH = 64
+
+
+def _mark_oauth_completed(state: str) -> None:
+    if state in _completed_oauth:
+        return
+    _completed_oauth.append(state)
+    # Trim head if we've outgrown the bound
+    while len(_completed_oauth) > _MAX_COMPLETED_OAUTH:
+        _completed_oauth.pop(0)
 from backend.config.Apps import MainApp
 from backend.apps.health.health import health
 from backend.apps.agents.agents import agents
@@ -135,9 +151,30 @@ async def subscriptions_pending(state: str):
     }, headers={"Access-Control-Allow-Origin": "*"})
 
 
+_SUCCESS_HTML = (
+    '<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">'
+    '<div style="text-align:center">'
+    '<div style="width:64px;height:64px;border-radius:50%;background:#22c55e20;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">&#10003;</div>'
+    '<h2 style="margin:0 0 8px">Connected!</h2>'
+    '<p style="color:#888;margin:0">You can close this window</p>'
+    '</div>'
+    '<script>setTimeout(()=>window.close(),1500)</script>'
+    '</body></html>'
+)
+
+
 @app.get("/api/subscriptions/callback")
 async def subscriptions_callback(request: Request):
-    """Catch OAuth redirect from provider, exchange code via 9Router, close window."""
+    """Catch OAuth redirect from provider, exchange code via 9Router, close window.
+
+    Must be idempotent: the browser can legitimately hit this URL more than
+    once (Chrome prefetch, user refresh, Google retrying a slow first
+    redirect). The first call consumes `_pending_oauth[state]`, so a second
+    call would otherwise render a misleading "Session expired" even though
+    the connection is already saved. To handle that, we track recently-
+    completed state values in `_completed_oauth` and return the success
+    page whenever we see a duplicate.
+    """
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     error = request.query_params.get("error", "")
@@ -148,24 +185,25 @@ async def subscriptions_callback(request: Request):
 
     pending = _pending_oauth.pop(state, None)
     if not pending:
+        # Either a duplicate callback for a state we've already exchanged,
+        # or a truly stale state. Duplicates are the expected case —
+        # Chrome's prefetcher and some extensions speculatively GET URLs.
+        if state and state in _completed_oauth:
+            logger.info(f"Duplicate OAuth callback for state {state[:8]}... (already completed)")
+            return HTMLResponse(_SUCCESS_HTML)
+        logger.warning(f"OAuth callback with unknown state {state[:8] if state else '(empty)'}...")
         return HTMLResponse('<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif"><div style="text-align:center"><h2>Session expired</h2><p style="color:#888">Please try connecting again.</p></div></body></html>')
 
     from backend.apps.nine_router import exchange_oauth
     try:
         await exchange_oauth(pending["provider"], code, pending["redirect_uri"], pending["code_verifier"], state)
     except Exception as e:
+        logger.warning(f"OAuth exchange failed for provider={pending.get('provider')}: {e}")
         return HTMLResponse(f'<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif"><div style="text-align:center"><h2>Connection failed</h2><p style="color:#888">{e}</p></div></body></html>')
 
-    return HTMLResponse(
-        '<html><body style="background:#1a1a1a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">'
-        '<div style="text-align:center">'
-        '<div style="width:64px;height:64px;border-radius:50%;background:#22c55e20;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">&#10003;</div>'
-        '<h2 style="margin:0 0 8px">Connected!</h2>'
-        '<p style="color:#888;margin:0">You can close this window</p>'
-        '</div>'
-        '<script>setTimeout(()=>window.close(),1500)</script>'
-        '</body></html>'
-    )
+    _mark_oauth_completed(state)
+    logger.info(f"OAuth exchange succeeded for provider={pending.get('provider')}")
+    return HTMLResponse(_SUCCESS_HTML)
 
 
 @app.post("/api/browser-agent/run")

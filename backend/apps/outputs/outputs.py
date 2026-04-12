@@ -377,10 +377,20 @@ async def vibe_code(body: VibeCodeRequest):
     if context_parts:
         user_message = "\n\n".join(context_parts) + "\n\nUser request: " + body.prompt
 
+    from backend.apps.agents.providers.registry import resolve_aux_model
+    try:
+        aux_model, _aux_base = await resolve_aux_model(load_settings(), preferred_tier="sonnet")
+    except ValueError as e:
+        return {
+            "message": f"Error: {str(e)}",
+            "frontend_code": body.current_frontend_code,
+            "backend_code": body.current_backend_code,
+            "input_schema": body.current_schema,
+        }
     client = _get_anthropic_client()
     try:
         resp = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=aux_model,
             max_tokens=8000,
             system=VIBE_CODE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
@@ -438,7 +448,24 @@ async def auto_run_output(body: AutoRunRequest):
     schema_str = json.dumps(body.input_schema, indent=2)
     user_message = f"Schema:\n```json\n{schema_str}\n```\n\nGenerate data for: {body.prompt}"
 
-    api_model = _resolve_model(body.model)
+    # Resolve body.model via the registry so non-Anthropic selections are
+    # routed through 9Router with the correct prefix (cx/, gc/, gh/).
+    # If body.model is unset or unknown, fall back to whichever aux model
+    # is available (prefers Claude, else any connected subscription).
+    from backend.apps.agents.providers.registry import (
+        _find_builtin_model,
+        resolve_model_id_for_sdk,
+        resolve_aux_model,
+    )
+    settings = load_settings()
+    if body.model and _find_builtin_model(body.model) is not None:
+        api_model = resolve_model_id_for_sdk(body.model, settings)
+    else:
+        try:
+            api_model, _ = await resolve_aux_model(settings, preferred_tier="haiku")
+        except ValueError as e:
+            return {"error": str(e), "input_data": None, "backend_result": None}
+
     client = _get_anthropic_client()
     try:
         resp = await client.messages.create(

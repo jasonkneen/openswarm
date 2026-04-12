@@ -48,120 +48,18 @@ import DirectoryBrowser from '@/app/components/DirectoryBrowser';
 import { CommandsContent } from '@/app/pages/Commands/Commands';
 import { API_BASE } from '@/shared/config';
 
-// ── Copilot Auth Button ──
-const CopilotAuthButton: React.FC = () => {
-  const c = useClaudeTokens();
-  const [status, setStatus] = useState<'idle' | 'waiting' | 'connected' | 'error'>('idle');
-  const [userCode, setUserCode] = useState('');
-  const [username, setUsername] = useState('');
-  const [error, setError] = useState('');
-
-  // Check if already connected
-  useEffect(() => {
-    fetch(`${API_BASE}/agents/copilot/models`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.models && d.models.length > 0) setStatus('connected');
-      })
-      .catch(() => {});
-  }, []);
-
-  const startAuth = async () => {
-    setStatus('waiting');
-    setError('');
-    try {
-      const resp = await fetch(`${API_BASE}/agents/copilot/start-auth`, { method: 'POST' });
-      const data = await resp.json();
-      setUserCode(data.user_code);
-      window.open(data.verification_uri, '_blank');
-
-      // Poll for completion
-      const deviceCode = data.device_code;
-      const poll = setInterval(async () => {
-        try {
-          const r = await fetch(`${API_BASE}/agents/copilot/poll-auth`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ device_code: deviceCode }),
-          });
-          const d = await r.json();
-          if (d.status === 'connected') {
-            clearInterval(poll);
-            setStatus('connected');
-            setUsername(d.username || '');
-          }
-        } catch {}
-      }, 5000);
-
-      // Timeout after 5 minutes
-      setTimeout(() => { clearInterval(poll); if (status === 'waiting') { setStatus('error'); setError('Auth timed out'); } }, 300000);
-    } catch (e: any) {
-      setStatus('error');
-      setError(e.message || 'Failed to start auth');
-    }
-  };
-
-  const disconnect = async () => {
-    await fetch(`${API_BASE}/agents/copilot/disconnect`, { method: 'POST' });
-    setStatus('idle');
-    setUsername('');
-  };
-
-  if (status === 'connected') {
-    return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: c.status.success, flexShrink: 0 }} />
-        <Typography sx={{ fontSize: '0.78rem', color: c.text.primary }}>
-          Connected{username ? ` as @${username}` : ''}
-        </Typography>
-        <Typography
-          onClick={disconnect}
-          sx={{ fontSize: '0.72rem', color: c.text.tertiary, cursor: 'pointer', ml: 'auto', '&:hover': { color: c.status.error } }}
-        >
-          Disconnect
-        </Typography>
-      </Box>
-    );
-  }
-
-  if (status === 'waiting') {
-    return (
-      <Box>
-        <Typography sx={{ fontSize: '0.78rem', color: c.text.primary, mb: 0.5 }}>
-          Enter code <strong style={{ fontFamily: 'monospace', fontSize: '0.9rem', letterSpacing: '0.1em' }}>{userCode}</strong> at github.com/login/device
-        </Typography>
-        <Typography sx={{ fontSize: '0.68rem', color: c.text.tertiary }}>Waiting for authorization...</Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <Box>
-      <Button
-        onClick={startAuth}
-        variant="outlined"
-        size="small"
-        sx={{
-          textTransform: 'none',
-          fontSize: '0.78rem',
-          color: c.text.primary,
-          borderColor: c.border.medium,
-          '&:hover': { borderColor: c.accent.primary, color: c.accent.primary },
-        }}
-      >
-        Sign in with GitHub
-      </Button>
-      {error && <Typography sx={{ fontSize: '0.7rem', color: c.status.error, mt: 0.5 }}>{error}</Typography>}
-    </Box>
-  );
-};
+// NOTE: a standalone CopilotAuthButton component used to live here, but it
+// referenced `/agents/copilot/{models,start-auth,poll-auth,disconnect}`
+// endpoints that never existed on the backend. GitHub Copilot now flows
+// through 9Router's `github` OAuth under the generic SubscriptionCard path
+// below, so the dead component was removed.
 
 // ── Subscription Provider Card ──
 const SUBSCRIPTION_PROVIDERS = [
-  { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet, Opus, Haiku — use your Anthropic subscription', color: '#E8927A', preview: false },
-  { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 2.5 Pro and Flash — use your Google subscription', color: '#4285F4', preview: true },
-  { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, o3, o4-mini — use your OpenAI subscription', color: '#74AA9C', preview: true },
-  { id: 'github', name: 'GitHub Copilot', desc: 'Claude + GPT models via your Copilot subscription', color: '#8B949E', preview: true },
+  { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet 4.6, Opus 4.6, Haiku 4.5', color: '#E8927A', preview: false },
+  { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 3 Pro, 3 Flash, 2.5 Pro, 2.5 Flash', color: '#4285F4', preview: false },
+  { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex', color: '#74AA9C', preview: false },
+  { id: 'github', name: 'GitHub Copilot', desc: 'Claude, GPT, Gemini, and more', color: '#8B949E', preview: true },
 ];
 
 const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; connected: boolean; onConnect: () => void; onDisconnect: () => void; connecting: boolean; userCode?: string; disconnecting?: boolean }> = ({ provider, connected, onConnect, onDisconnect, connecting, userCode, disconnecting }) => {
@@ -230,6 +128,7 @@ const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; c
 
 const SubscriptionCards: React.FC = () => {
   const c = useClaudeTokens();
+  const dispatch = useAppDispatch();
   const [status, setStatus] = useState<any>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -243,12 +142,18 @@ const SubscriptionCards: React.FC = () => {
       .catch(() => setStatus({ running: false, providers: [], models: [] }));
   };
 
+  // Refresh the chat model picker whenever subscription connection state
+  // changes — GET /agents/models intersects BUILTIN_MODELS with 9Router's
+  // live connected-provider set, so newly-connected subscriptions surface
+  // their models in the dropdown immediately.
+  const refreshPickerModels = () => { dispatch(fetchModels()); };
+
   useEffect(() => { fetchStatus(); }, []);
 
   const isConnected = (providerId: string) => {
     if (!status?.providers) return false;
     const connections = status.providers?.connections || (Array.isArray(status.providers) ? status.providers : []);
-    return connections.some((p: any) => p.provider === providerId && p.isActive);
+    return connections.some((p: any) => p.provider === providerId && (p.isActive || p.testStatus === 'active'));
   };
 
   const handleConnect = async (providerId: string) => {
@@ -271,48 +176,177 @@ const SubscriptionCards: React.FC = () => {
       if (data.flow === 'device_code') {
         const code = data.user_code || '';
         setUserCode(code);
-        if (data.verification_uri) window.open(data.verification_uri, '_blank');
+        // Use a named window with features (not `_blank`) so Electron's
+        // setWindowOpenHandler sees `new-window` disposition and spawns a
+        // BrowserWindow popup — matching the Anthropic/Codex flow. With
+        // `_blank` the disposition becomes `foreground-tab` and our main.js
+        // handler routes it into the dashboard as a webview tab, which is
+        // what we saw for GitHub before this change.
+        //
+        // Keep a reference to the popup so we can auto-close it when the
+        // backend poll detects success, instead of leaving the user to
+        // dismiss the "Congratulations, you're all set" page manually.
+        let devicePopup: Window | null = null;
+        if (data.verification_uri) {
+          devicePopup = window.open(data.verification_uri, 'oauth_connect', 'width=600,height=720');
+        }
 
-        const timer = setInterval(async () => {
+        // Shared cleanup — whichever detection path fires first calls this.
+        let stopped = false;
+        const onDeviceSuccess = () => {
+          if (stopped) return;
+          stopped = true;
+          clearInterval(devicePollTimer);
+          clearInterval(statusPollTimer);
+          setPollTimer(null);
+          setConnecting(null);
+          setUserCode('');
+          fetchStatus();
+          refreshPickerModels();
+          // Auto-close popup 2s after success so user briefly sees the
+          // "Congratulations" page then it goes away automatically.
+          setTimeout(() => {
+            if (devicePopup && !devicePopup.closed) {
+              try { devicePopup.close(); } catch {}
+            }
+          }, 2000);
+        };
+
+        // Path 1: device-code poll — asks backend to poll the provider's
+        // token endpoint via 9Router. Primary path when it works.
+        const pollOnce = async () => {
+          if (stopped) return;
           try {
             const pr = await fetch(`${API_BASE}/agents/subscriptions/poll`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ provider: providerId, device_code: data.device_code, code_verifier: data.code_verifier, extra_data: data.extra_data }),
             });
+            if (!pr.ok) {
+              console.warn(`[subscription-poll] ${providerId}: HTTP ${pr.status}`);
+              return;
+            }
             const pd = await pr.json();
             if (pd.success) {
-              clearInterval(timer);
+              onDeviceSuccess();
+            } else if (!pd.pending) {
+              console.warn(`[subscription-poll] ${providerId}: not success, not pending:`, pd);
+            }
+          } catch (e) {
+            console.warn(`[subscription-poll] ${providerId}: error:`, e);
+          }
+        };
+        pollOnce(); // immediate first attempt
+        const devicePollTimer = setInterval(pollOnce, 5000);
+
+        // Path 2: status poller — checks 9Router's connection list
+        // directly every 2s. Catches the connection even if the
+        // device-code poll silently errors (e.g. 9Router 500 from
+        // postExchange or createProviderConnection). Same pattern
+        // the authorization_code flow already uses.
+        const statusPollTimer = setInterval(async () => {
+          if (stopped) return;
+          try {
+            const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
+            const sd = await sr.json();
+            const connections = sd.providers?.connections || [];
+            if (connections.some((p: any) => p.provider === providerId && (p.isActive || p.testStatus === 'active'))) {
+              onDeviceSuccess();
+            }
+          } catch {}
+        }, 2000);
+
+        setPollTimer(devicePollTimer);
+
+        // Detect when the popup is closed (user may close it after seeing
+        // GitHub's "Congratulations" page). Give 9Router 3 seconds to
+        // process the token exchange, then do a final status check. If
+        // the connection still isn't found, reset the card so it doesn't
+        // stay stuck on "Waiting for authorization" forever — the root
+        // cause is a 9Router-side issue where the GitHub device-code poll
+        // sometimes fails to detect the token exchange completion.
+        const popupCloseCheck = setInterval(() => {
+          if (stopped) { clearInterval(popupCloseCheck); return; }
+          if (devicePopup && devicePopup.closed) {
+            clearInterval(popupCloseCheck);
+            setTimeout(async () => {
+              if (stopped) return;
+              // One last status check before giving up
+              try {
+                const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
+                const sd = await sr.json();
+                const connections = sd.providers?.connections || [];
+                if (connections.some((p: any) => p.provider === providerId && (p.isActive || p.testStatus === 'active'))) {
+                  onDeviceSuccess();
+                  return;
+                }
+              } catch {}
+              // Connection not found — reset card instead of staying stuck
+              stopped = true;
+              clearInterval(devicePollTimer);
+              clearInterval(statusPollTimer);
               setPollTimer(null);
               setConnecting(null);
               setUserCode('');
               fetchStatus();
-            }
-          } catch {}
-        }, 5000);
-        setPollTimer(timer);
-        setTimeout(() => { clearInterval(timer); setPollTimer(null); setConnecting(null); setUserCode(''); }, 300000);
+            }, 3000);
+          }
+        }, 1000);
+
+        // 5-minute hard timeout — clean up everything.
+        setTimeout(() => {
+          if (stopped) return;
+          stopped = true;
+          clearInterval(devicePollTimer);
+          clearInterval(statusPollTimer);
+          clearInterval(popupCloseCheck);
+          setPollTimer(null);
+          setConnecting(null);
+          setUserCode('');
+          if (devicePopup && !devicePopup.closed) {
+            try { devicePopup.close(); } catch {}
+          }
+        }, 300000);
 
       } else if (data.flow === 'authorization_code') {
-        const popup = window.open(data.auth_url, 'oauth_connect', 'width=600,height=700');
+        // Some providers (currently Gemini/Google) enforce an anti-embedded-
+        // browser policy on their OAuth consent page that no amount of
+        // user-agent spoofing defeats. For those, the backend sets
+        // `use_external_browser: true` and we open the auth URL in the
+        // user's default browser via shell.openExternal. The callback then
+        // lands on OpenSwarm's own /api/subscriptions/callback endpoint
+        // (backend/main.py:138) which performs the exchange itself and
+        // shows a "Connected!" page. Detection happens via the status
+        // poller below — no postMessage handoff possible because the
+        // system browser has no window.opener relationship back to us.
+        const useExternal = !!data.use_external_browser;
+        let popup: Window | null = null;
+        if (useExternal && (window as any).openswarm?.openExternal) {
+          (window as any).openswarm.openExternal(data.auth_url);
+        } else {
+          popup = window.open(data.auth_url, 'oauth_connect', 'width=600,height=700');
+        }
 
-        // Status polling as primary detection
+        // Status polling — primary for external-browser flow, secondary
+        // (fast postMessage path below) for popup flow.
         const statusPoller = setInterval(async () => {
           try {
             const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
             const sd = await sr.json();
             const connections = sd.providers?.connections || [];
-            if (connections.some((p: any) => p.provider === providerId && p.isActive)) {
+            if (connections.some((p: any) => p.provider === providerId && (p.isActive || p.testStatus === 'active'))) {
               clearInterval(statusPoller);
               setPollTimer(null);
-              window.removeEventListener('message', msgHandler);
+              if (!useExternal) window.removeEventListener('message', msgHandler);
               setConnecting(null);
               fetchStatus();
+              refreshPickerModels();
             }
           } catch {}
         }, 2000);
         setPollTimer(statusPoller);
 
-        // postMessage listener as secondary (faster when it works)
+        // postMessage listener — only wired up for the Electron popup flow
+        // since the system-browser flow has no opener relationship.
         const msgHandler = async (event: MessageEvent) => {
           const d = event.data;
           const callbackData = d?.type === 'oauth_callback' ? d.data : d;
@@ -333,17 +367,21 @@ const SubscriptionCards: React.FC = () => {
             } catch {}
             setConnecting(null);
             fetchStatus();
+            refreshPickerModels();
           }
         };
-        window.addEventListener('message', msgHandler);
+        if (!useExternal) window.addEventListener('message', msgHandler);
 
-        // Timeout: reset after 30s so user can try again (not 5min)
+        // Timeout: 30s for popup flow (user finishes auth in a few seconds),
+        // 5 minutes for external-browser flow (user has to tab-switch, log
+        // in, consent — takes much longer in practice).
+        const timeoutMs = useExternal ? 300_000 : 30_000;
         setTimeout(() => {
           clearInterval(statusPoller);
           setPollTimer(null);
-          window.removeEventListener('message', msgHandler);
+          if (!useExternal) window.removeEventListener('message', msgHandler);
           setConnecting(null);
-        }, 30000);
+        }, timeoutMs);
 
       } else {
         setConnecting(null);
@@ -360,8 +398,13 @@ const SubscriptionCards: React.FC = () => {
         body: JSON.stringify({ provider: providerId }),
       });
     } catch {}
-    // Wait briefly for 9Router to process, then refresh
-    setTimeout(() => { fetchStatus(); setDisconnecting(null); }, 500);
+    // Wait briefly for 9Router to process, then refresh both the
+    // subscription status and the chat model picker.
+    setTimeout(() => {
+      fetchStatus();
+      refreshPickerModels();
+      setDisconnecting(null);
+    }, 500);
   };
 
   if (!status) {
@@ -741,8 +784,15 @@ const Settings: React.FC = () => {
   }, [dispatch]);
 
   useEffect(() => {
-    if (open) setActiveTab('general');
-  }, [open]);
+    // Reset to the General tab on open, but NOT when the caller has
+    // explicitly requested a tab via openSettingsModal(<tab>) — e.g. the
+    // "Configure models" link in the warning banner dispatches
+    // openSettingsModal('models') and expects to land on Models. The
+    // separate `initialTab` effect above handles the targeted case;
+    // without this guard, that effect's write gets clobbered on the same
+    // render because React runs effects in declaration order.
+    if (open && !initialTab) setActiveTab('general');
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (loaded) {
@@ -1458,6 +1508,126 @@ const Settings: React.FC = () => {
               <Typography
                 component="a"
                 href="https://console.anthropic.com/settings/keys"
+                target="_blank"
+                rel="noopener"
+                sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}
+              >
+                Get key <OpenInNewIcon sx={{ fontSize: 11 }} />
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* OpenAI */}
+          <Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={labelSx}>OpenAI</Typography>
+              {form.openai_api_key ? (
+                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
+              ) : null}
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>GPT-5.4, GPT-5.4 Mini, o-series reasoning models.</Typography>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                type={showApiKey ? 'text' : 'password'}
+                value={form.openai_api_key ?? ''}
+                onChange={(e) => setForm({ ...form, openai_api_key: e.target.value || null })}
+                size="small"
+                fullWidth
+                placeholder="sk-..."
+                sx={{ ...fieldSx, '& .MuiOutlinedInput-root': { ...fieldSx['& .MuiOutlinedInput-root'], fontFamily: c.font.mono } }}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowApiKey(!showApiKey)} edge="end" size="small" sx={{ color: c.text.tertiary }}>
+                        {showApiKey ? <VisibilityOffIcon sx={{ fontSize: 16 }} /> : <VisibilityIcon sx={{ fontSize: 16 }} />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Typography
+                component="a"
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                rel="noopener"
+                sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}
+              >
+                Get key <OpenInNewIcon sx={{ fontSize: 11 }} />
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Google */}
+          <Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={labelSx}>Google</Typography>
+              {form.google_api_key ? (
+                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
+              ) : null}
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>Gemini 3 Pro, Gemini 3 Flash, Gemini 2.5 Pro.</Typography>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                type={showApiKey ? 'text' : 'password'}
+                value={form.google_api_key ?? ''}
+                onChange={(e) => setForm({ ...form, google_api_key: e.target.value || null })}
+                size="small"
+                fullWidth
+                placeholder="AIza..."
+                sx={{ ...fieldSx, '& .MuiOutlinedInput-root': { ...fieldSx['& .MuiOutlinedInput-root'], fontFamily: c.font.mono } }}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowApiKey(!showApiKey)} edge="end" size="small" sx={{ color: c.text.tertiary }}>
+                        {showApiKey ? <VisibilityOffIcon sx={{ fontSize: 16 }} /> : <VisibilityIcon sx={{ fontSize: 16 }} />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Typography
+                component="a"
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener"
+                sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}
+              >
+                Get key <OpenInNewIcon sx={{ fontSize: 11 }} />
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* OpenRouter */}
+          <Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={labelSx}>OpenRouter</Typography>
+              {form.openrouter_api_key ? (
+                <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: c.status.success, bgcolor: `${c.status.success}15`, px: 0.75, py: 0.15, borderRadius: '3px' }}>CONNECTED</Typography>
+              ) : null}
+            </Box>
+            <Typography sx={{ ...descSx, mb: 1 }}>300+ models from xAI, Meta, DeepSeek, Mistral, Qwen, and more.</Typography>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                type={showApiKey ? 'text' : 'password'}
+                value={form.openrouter_api_key ?? ''}
+                onChange={(e) => setForm({ ...form, openrouter_api_key: e.target.value || null })}
+                size="small"
+                fullWidth
+                placeholder="sk-or-..."
+                sx={{ ...fieldSx, '& .MuiOutlinedInput-root': { ...fieldSx['& .MuiOutlinedInput-root'], fontFamily: c.font.mono } }}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowApiKey(!showApiKey)} edge="end" size="small" sx={{ color: c.text.tertiary }}>
+                        {showApiKey ? <VisibilityOffIcon sx={{ fontSize: 16 }} /> : <VisibilityIcon sx={{ fontSize: 16 }} />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Typography
+                component="a"
+                href="https://openrouter.ai/keys"
                 target="_blank"
                 rel="noopener"
                 sx={{ color: c.accent.primary, fontSize: '0.72rem', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 0.3, '&:hover': { textDecoration: 'underline' } }}

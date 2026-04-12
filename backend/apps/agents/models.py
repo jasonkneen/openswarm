@@ -29,7 +29,7 @@ class ApprovalResponse(BaseModel):
 
 class Message(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
-    role: Literal["user", "assistant", "tool_call", "tool_result", "system"]
+    role: Literal["user", "assistant", "tool_call", "tool_result", "system", "thinking"]
     content: Any  # str or list of content blocks
     timestamp: datetime = Field(default_factory=datetime.now)
     branch_id: str = "main"

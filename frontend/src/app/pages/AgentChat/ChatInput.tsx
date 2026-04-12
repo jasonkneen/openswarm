@@ -8,6 +8,8 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Chip from '@mui/material/Chip';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 import MicNoneOutlinedIcon from '@mui/icons-material/MicNoneOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import StopIcon from '@mui/icons-material/Stop';
@@ -181,6 +183,29 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   const modesArr = useMemo(() => Object.values(modesMap), [modesMap]);
   const modelsByProvider = useAppSelector((state) => state.models.byProvider);
   const modelsLoaded = useAppSelector((state) => state.models.loaded);
+  const toolItems = useAppSelector((state) => state.tools.items);
+
+  // Count the total number of enabled MCP tool permissions (non-deny) across
+  // all enabled MCP servers. Used to warn users before they switch to a
+  // non-Claude model that can't leverage the deferred-tool pool — those
+  // models get every schema upfront and may exhaust context fast.
+  const enabledMcpToolCount = useMemo(() => {
+    let count = 0;
+    for (const id in toolItems) {
+      const t = toolItems[id];
+      if (t.enabled && t.mcp_config && t.tool_permissions) {
+        for (const name in t.tool_permissions) {
+          if (t.tool_permissions[name] !== 'deny') count++;
+        }
+      }
+    }
+    return count;
+  }, [toolItems]);
+
+  // One-time dismissible warning when picking a non-Claude model with many MCPs.
+  const [mcpWarningOpen, setMcpWarningOpen] = useState(false);
+  const MCP_WARNING_LS_KEY = 'openswarm:nonClaudeMcpWarningDismissed';
+  const MCP_WARNING_THRESHOLD = 20;
 
   // Build flat model list with provider grouping
   const allModelOptions = useMemo(() => {
@@ -1064,6 +1089,17 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
                     };
                     onProviderChange(providerMap[provLower] || provLower);
                   }
+                  // Warn (once) when switching to a non-Claude model with
+                  // many MCP tools enabled. Non-Claude models don't have
+                  // access to the deferred-tool pool and will receive every
+                  // tool schema upfront, potentially exhausting context.
+                  if (prov.toLowerCase() !== 'anthropic' && enabledMcpToolCount > MCP_WARNING_THRESHOLD) {
+                    try {
+                      if (typeof window !== 'undefined' && !window.localStorage.getItem(MCP_WARNING_LS_KEY)) {
+                        setMcpWarningOpen(true);
+                      }
+                    } catch { /* ignore localStorage errors */ }
+                  }
                   setModelAnchor(null);
                 }}
               >
@@ -1267,6 +1303,40 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           />
         </Box>
       </Modal>
+
+      <Snackbar
+        open={mcpWarningOpen}
+        autoHideDuration={12000}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        onClose={(_, reason) => {
+          if (reason === 'clickaway') return;
+          setMcpWarningOpen(false);
+          try {
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(MCP_WARNING_LS_KEY, '1');
+            }
+          } catch { /* ignore */ }
+        }}
+      >
+        <Alert
+          severity="warning"
+          variant="filled"
+          onClose={() => {
+            setMcpWarningOpen(false);
+            try {
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(MCP_WARNING_LS_KEY, '1');
+              }
+            } catch { /* ignore */ }
+          }}
+          sx={{ fontSize: '0.78rem', maxWidth: 520 }}
+        >
+          Non-Claude models don't support the deferred tool loader — all
+          {' '}{enabledMcpToolCount} MCP tool schemas will be sent upfront,
+          which may exhaust context on long sessions. Disable MCPs you
+          don't need in Settings → Tools.
+        </Alert>
+      </Snackbar>
 
     </Box>
   );

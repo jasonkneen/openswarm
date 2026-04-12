@@ -36,7 +36,6 @@ import Dashboard from '@/app/pages/Dashboard/Dashboard';
 import DashboardHost from '@/app/components/Layout/DashboardHost';
 import { useLastDashboardId } from '@/shared/hooks/useLastDashboardId';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
-import { API_BASE } from '@/shared/config';
 import { fetchDashboards, createDashboard, renameDashboard } from '@/shared/state/dashboardsSlice';
 import { addBrowserCard, addBrowserTab } from '@/shared/state/dashboardLayoutSlice';
 import { setPendingBrowserUrl } from '@/shared/state/tempStateSlice';
@@ -120,13 +119,6 @@ const AppShell: React.FC = () => {
 
   // ---- Warning banner: no internet / no model connected ----
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null); // null = still checking
-  // Narrow selectors — only re-render when an API key field actually changes,
-  // not on every settings update (theme toggle, system prompt edit, etc.).
-  const anthropicKey = useAppSelector((s) => s.settings.data.anthropic_api_key);
-  const openaiKey = useAppSelector((s) => s.settings.data.openai_api_key);
-  const googleKey = useAppSelector((s) => s.settings.data.google_api_key);
-  const openrouterKey = useAppSelector((s) => s.settings.data.openrouter_api_key);
 
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
@@ -139,28 +131,20 @@ const AppShell: React.FC = () => {
     };
   }, []);
 
-  // Check subscription status once on mount (and re-check when an API key changes)
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_BASE}/agents/subscriptions/status`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        const connections = data.providers?.connections || [];
-        setHasActiveSubscription(
-          data.running && connections.some((p: any) => p.isActive),
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setHasActiveSubscription(false);
-      });
-    return () => { cancelled = true; };
-  }, [anthropicKey]);
-
-  const hasAnyApiKey = !!(anthropicKey || openaiKey || googleKey || openrouterKey);
-  const hasModelConnected = hasAnyApiKey || hasActiveSubscription === true;
-  // Don't flash the banner while the subscription check is in flight
-  const showWarningBanner = !isOnline || (hasActiveSubscription !== null && !hasModelConnected);
+  // Derive "any model connected" from the /agents/models response (already
+  // fetched into Redux at app start via Main.tsx and re-fetched by
+  // Settings.tsx after every subscription connect/disconnect). That endpoint
+  // intersects BUILTIN_MODELS with both the user's API keys AND 9Router's
+  // live connection state, so a non-empty byProvider means there's at least
+  // one usable model — regardless of whether it came from a typed API key
+  // or an OAuth subscription flow. This replaces the previous approach of
+  // polling /agents/subscriptions/status in an effect keyed to anthropicKey,
+  // which didn't refresh when a non-Anthropic subscription was connected.
+  const modelsByProvider = useAppSelector((s) => s.models.byProvider);
+  const modelsLoaded = useAppSelector((s) => s.models.loaded);
+  const hasModelConnected = Object.keys(modelsByProvider).length > 0;
+  // Don't flash the banner while the initial /agents/models fetch is in flight
+  const showWarningBanner = !isOnline || (modelsLoaded && !hasModelConnected);
 
   const bannerDismissedForVersion = availableVersion != null && dismissedVersion === availableVersion;
   const isUpdateActionable = updateStatus === 'available' || updateStatus === 'downloaded' || updateStatus === 'downloading';
