@@ -75,13 +75,13 @@ BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
     # stronger reasoning, tool use, and agentic workflows.
     # See: https://developers.openai.com/codex/models
     "OpenAI": [
-        {"value": "gpt-5.4", "label": "GPT-5.4 (ChatGPT Plus)",
+        {"value": "gpt-5.4", "label": "GPT-5.4",
          "context_window": 1_000_000, "router_model_id": "cx/gpt-5.4",
          "api": "codex", "subscription_only": True, "reasoning": True},
-        {"value": "gpt-5.4-mini", "label": "GPT-5.4 Mini (ChatGPT Plus)",
+        {"value": "gpt-5.4-mini", "label": "GPT-5.4 Mini",
          "context_window": 400_000, "router_model_id": "cx/gpt-5.4-mini",
          "api": "codex", "subscription_only": True, "reasoning": True},
-        {"value": "gpt-5.3-codex", "label": "GPT-5.3 Codex (ChatGPT Plus)",
+        {"value": "gpt-5.3-codex", "label": "GPT-5.3 Codex",
          "context_window": 400_000, "router_model_id": "cx/gpt-5.3-codex",
          "api": "codex", "subscription_only": True, "reasoning": True},
     ],
@@ -108,25 +108,46 @@ BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
          "context_window": 1_000_000, "router_model_id": "gc/gemini-2.5-flash",
          "api": "gemini-cli", "subscription_only": True},
     ],
-    # Copilot gives access to everyone's current-gen flagships under one
-    # subscription. Note the dot-notation (4.6 not 4-6) — Copilot's model
-    # catalog is separate from Anthropic's API naming.
-    "GitHub Copilot": [
-        {"value": "copilot-sonnet-4.6", "label": "Claude Sonnet 4.6 (Copilot)",
-         "context_window": 200_000, "router_model_id": "gh/claude-sonnet-4.6",
+    # GitHub Copilot — all plans (Free/Pro/Pro+) have access to the SAME
+    # models, just with different premium request quotas (50/300/1500).
+    # Model IDs MUST match 9Router's `gh:` pricing catalog at
+    # 9router/src/shared/constants/pricing.js — NOT the Codex CLI catalog.
+    # Copilot uses its own model IDs (dot-notation for Claude versions,
+    # different names from Codex CLI for some GPT models).
+    # See: https://github.com/features/copilot/plans
+    "OpenSwarm": [
+        # --- Free-tier friendly (low premium request cost) ---
+        {"value": "gpt-5-mini", "label": "GPT-5 Mini",
+         "context_window": 200_000, "router_model_id": "gh/gpt-5-mini",
          "api": "github-copilot", "subscription_only": True},
-        {"value": "copilot-opus-4.6", "label": "Claude Opus 4.6 (Copilot)",
-         "context_window": 200_000, "router_model_id": "gh/claude-opus-4.6",
-         "api": "github-copilot", "subscription_only": True},
-        {"value": "copilot-haiku-4.5", "label": "Claude Haiku 4.5 (Copilot)",
+        {"value": "claude-haiku-4.5", "label": "Claude Haiku 4.5",
          "context_window": 200_000, "router_model_id": "gh/claude-haiku-4.5",
          "api": "github-copilot", "subscription_only": True},
-        {"value": "copilot-gpt-5.3-codex", "label": "GPT-5.3 Codex (Copilot)",
+        {"value": "grok-code-fast-1", "label": "Grok Code Fast 1",
+         "context_window": 128_000, "router_model_id": "gh/grok-code-fast-1",
+         "api": "github-copilot", "subscription_only": True},
+        {"value": "gpt-4.1", "label": "GPT-4.1",
+         "context_window": 128_000, "router_model_id": "gh/gpt-4.1",
+         "api": "github-copilot", "subscription_only": True},
+        # --- Premium models (consume more premium requests) ---
+        {"value": "claude-sonnet-4.6", "label": "Claude Sonnet 4.6",
+         "context_window": 200_000, "router_model_id": "gh/claude-sonnet-4.6",
+         "api": "github-copilot", "subscription_only": True},
+        {"value": "claude-opus-4.6", "label": "Claude Opus 4.6",
+         "context_window": 200_000, "router_model_id": "gh/claude-opus-4.6",
+         "api": "github-copilot", "subscription_only": True},
+        {"value": "gpt-5.3-codex", "label": "GPT-5.3 Codex",
          "context_window": 400_000, "router_model_id": "gh/gpt-5.3-codex",
          "api": "github-copilot", "subscription_only": True, "reasoning": True},
-        {"value": "copilot-gemini-3-pro", "label": "Gemini 3 Pro (Copilot)",
+        {"value": "gemini-3-pro", "label": "Gemini 3 Pro",
          "context_window": 1_000_000, "router_model_id": "gh/gemini-3-pro-preview",
          "api": "github-copilot", "subscription_only": True, "reasoning": True},
+        {"value": "gemini-3-flash", "label": "Gemini 3 Flash",
+         "context_window": 1_000_000, "router_model_id": "gh/gemini-3-flash-preview",
+         "api": "github-copilot", "subscription_only": True, "reasoning": True},
+        {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro",
+         "context_window": 1_000_000, "router_model_id": "gh/gemini-2.5-pro",
+         "api": "github-copilot", "subscription_only": True},
     ],
 }
 
@@ -490,11 +511,16 @@ COST_PER_1M_TOKENS: dict[tuple[str, str], tuple[float, float]] = {
     ("Qwen", "qwen/qwen3-235b-a22b"): (0.20, 0.70),
     ("Cohere", "cohere/command-a-03-2025"): (2.50, 10.0),
     # GitHub Copilot (subscription-routed; no per-token cost)
-    ("GitHub Copilot", "copilot-sonnet-4.6"): (0.0, 0.0),
-    ("GitHub Copilot", "copilot-opus-4.6"): (0.0, 0.0),
-    ("GitHub Copilot", "copilot-haiku-4.5"): (0.0, 0.0),
-    ("GitHub Copilot", "copilot-gpt-5.3-codex"): (0.0, 0.0),
-    ("GitHub Copilot", "copilot-gemini-3-pro"): (0.0, 0.0),
+    ("OpenSwarm", "claude-sonnet-4.6"): (0.0, 0.0),
+    ("OpenSwarm", "claude-opus-4.6"): (0.0, 0.0),
+    ("OpenSwarm", "claude-haiku-4.5"): (0.0, 0.0),
+    ("OpenSwarm", "gpt-5.3-codex"): (0.0, 0.0),
+    ("OpenSwarm", "gpt-5-mini"): (0.0, 0.0),
+    ("OpenSwarm", "gpt-4.1"): (0.0, 0.0),
+    ("OpenSwarm", "grok-code-fast-1"): (0.0, 0.0),
+    ("OpenSwarm", "gemini-3-pro"): (0.0, 0.0),
+    ("OpenSwarm", "gemini-3-flash"): (0.0, 0.0),
+    ("OpenSwarm", "gemini-2.5-pro"): (0.0, 0.0),
 }
 
 

@@ -59,7 +59,7 @@ const SUBSCRIPTION_PROVIDERS = [
   { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet 4.6, Opus 4.6, Haiku 4.5', color: '#E8927A', preview: false },
   { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 3 Pro, 3 Flash, 2.5 Pro, 2.5 Flash', color: '#4285F4', preview: false },
   { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex', color: '#74AA9C', preview: false },
-  { id: 'github', name: 'GitHub Copilot', desc: 'Claude, GPT, Gemini, and more', color: '#8B949E', preview: true },
+  { id: 'github', name: 'GitHub Copilot', desc: 'Claude, GPT, Gemini, and more', color: '#8B949E', preview: false },
 ];
 
 const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; connected: boolean; onConnect: () => void; onDisconnect: () => void; connecting: boolean; userCode?: string; disconnecting?: boolean }> = ({ provider, connected, onConnect, onDisconnect, connecting, userCode, disconnecting }) => {
@@ -257,48 +257,53 @@ const SubscriptionCards: React.FC = () => {
 
         setPollTimer(devicePollTimer);
 
-        // Detect when the popup is closed (user may close it after seeing
-        // GitHub's "Congratulations" page). Give 9Router 3 seconds to
-        // process the token exchange, then do a final status check. If
-        // the connection still isn't found, reset the card so it doesn't
-        // stay stuck on "Waiting for authorization" forever — the root
-        // cause is a 9Router-side issue where the GitHub device-code poll
-        // sometimes fails to detect the token exchange completion.
-        const popupCloseCheck = setInterval(() => {
-          if (stopped) { clearInterval(popupCloseCheck); return; }
-          if (devicePopup && devicePopup.closed) {
-            clearInterval(popupCloseCheck);
-            setTimeout(async () => {
-              if (stopped) return;
-              // One last status check before giving up
-              try {
-                const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
-                const sd = await sr.json();
-                const connections = sd.providers?.connections || [];
-                if (connections.some((p: any) => p.provider === providerId && (p.isActive || p.testStatus === 'active'))) {
-                  onDeviceSuccess();
-                  return;
-                }
-              } catch {}
-              // Connection not found — reset card instead of staying stuck
-              stopped = true;
-              clearInterval(devicePollTimer);
-              clearInterval(statusPollTimer);
-              setPollTimer(null);
-              setConnecting(null);
-              setUserCode('');
-              fetchStatus();
-            }, 3000);
-          }
-        }, 1000);
+        // Detect when the user returns to the main window after
+        // interacting with the popup. In Electron, `popup.closed` is
+        // unreliable (the WindowProxy may not update when the child
+        // BrowserWindow is destroyed). Listening for `focus` on the
+        // main window is more robust — it fires when the user closes
+        // the popup, switches tabs, or clicks back on the app.
+        let focusCheckDone = false;
+        const onFocus = async () => {
+          if (stopped || focusCheckDone) return;
+          focusCheckDone = true;
+          window.removeEventListener('focus', onFocus);
+          // Give 9Router 3 seconds to process the token exchange
+          await new Promise(r => setTimeout(r, 3000));
+          if (stopped) return;
+          // Final status check
+          try {
+            const sr = await fetch(`${API_BASE}/agents/subscriptions/status`);
+            const sd = await sr.json();
+            const connections = sd.providers?.connections || [];
+            if (connections.some((p: any) => p.provider === providerId && (p.isActive || p.testStatus === 'active'))) {
+              onDeviceSuccess();
+              return;
+            }
+          } catch {}
+          // Connection not found — reset card
+          stopped = true;
+          clearInterval(devicePollTimer);
+          clearInterval(statusPollTimer);
+          setPollTimer(null);
+          setConnecting(null);
+          setUserCode('');
+          fetchStatus();
+        };
+        // Delay registering the focus listener so the initial popup
+        // open doesn't immediately trigger it (opening a popup blurs
+        // then refocuses the parent in some cases).
+        setTimeout(() => {
+          if (!stopped) window.addEventListener('focus', onFocus);
+        }, 2000);
 
         // 5-minute hard timeout — clean up everything.
         setTimeout(() => {
           if (stopped) return;
           stopped = true;
+          window.removeEventListener('focus', onFocus);
           clearInterval(devicePollTimer);
           clearInterval(statusPollTimer);
-          clearInterval(popupCloseCheck);
           setPollTimer(null);
           setConnecting(null);
           setUserCode('');

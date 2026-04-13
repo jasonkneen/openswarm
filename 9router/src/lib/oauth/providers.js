@@ -499,6 +499,7 @@ const PROVIDERS = {
       return await response.json();
     },
     pollToken: async (config, deviceCode) => {
+      console.log(`[github-poll] Polling ${config.tokenUrl} with client_id=${config.clientId}, device_code=${deviceCode?.slice(0, 8)}...`);
       const response = await fetch(config.tokenUrl, {
         method: "POST",
         headers: {
@@ -521,6 +522,8 @@ const PROVIDERS = {
         const text = await response.text();
         data = { error: "invalid_response", error_description: text };
       }
+
+      console.log(`[github-poll] Response: status=${response.status}, ok=${response.ok}, data=`, JSON.stringify(data));
 
       return {
         ok: response.ok,

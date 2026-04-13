@@ -308,7 +308,18 @@ async def list_models():
         try:
             providers_data = await _9r_providers()
             conns = providers_data.get("connections", []) if isinstance(providers_data, dict) else []
-            connected = {c.get("provider", "") for c in conns if c.get("isActive")}
+            raw_providers = {c.get("provider", "") for c in conns if c.get("isActive") or c.get("testStatus") == "active"}
+            # Map 9Router's provider names to our BUILTIN_MODELS api field names.
+            # 9Router stores "github" but our models use api="github-copilot",
+            # 9Router stores "codex" but our models use api="codex" (matches),
+            # 9Router stores "claude" but our models use api="anthropic", etc.
+            _9R_TO_API = {
+                "github": "github-copilot",
+                "claude": "anthropic",
+                "codex": "codex",
+                "gemini-cli": "gemini-cli",
+            }
+            connected = raw_providers | {_9R_TO_API.get(p, p) for p in raw_providers}
         except Exception as e:
             logger.debug(f"Failed to fetch 9Router providers: {e}")
 
@@ -318,11 +329,9 @@ async def list_models():
         for m in models:
             api = m.get("api", "")
             if m.get("subscription_only"):
-                # Subscription-only models need that provider live in 9Router
                 if not nine_router_up or api not in connected:
                     continue
             elif api == "anthropic":
-                # Anthropic visible if API key set OR claude subscription connected
                 has_key = bool(getattr(settings, "anthropic_api_key", None))
                 if not has_key and "claude" not in connected:
                     continue

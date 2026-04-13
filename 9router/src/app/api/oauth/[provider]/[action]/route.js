@@ -110,6 +110,8 @@ export async function POST(request, { params }) {
         return NextResponse.json({ error: "Missing device code" }, { status: 400 });
       }
 
+      console.log(`[oauth-poll] ${provider}: polling with deviceCode=${deviceCode?.slice(0, 8)}...`);
+
       // Providers that don't use PKCE for device code
       const noPkceProviders = ["github", "kimi-coding", "kilocode"];
       let result;
@@ -125,6 +127,8 @@ export async function POST(request, { params }) {
         }
         result = await pollForToken(provider, deviceCode, codeVerifier);
       }
+
+      console.log(`[oauth-poll] ${provider}: result=`, JSON.stringify({ success: result.success, error: result.error, pending: result.pending, hasTokens: !!result.tokens }));
 
       if (result.success) {
         // Save to database

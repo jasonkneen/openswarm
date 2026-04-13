@@ -227,6 +227,12 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     if (modesArr.length === 0) dispatch(fetchModes());
   }, [dispatch, modesArr.length]);
 
+  // Collapsible provider groups in the model picker. The group containing
+  // the currently selected model is always expanded; others start collapsed
+  // when there are 3+ groups to keep the dropdown manageable.
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (prov: string) => setCollapsedGroups(prev => ({ ...prev, [prov]: !prev[prov] }));
+
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -1060,56 +1066,78 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
           slotProps={{ paper: menuPaperProps }}
         >
-          {Object.entries(allModelOptions.grouped).map(([prov, models]) => [
-            <MenuItem key={`header-${prov}`} disabled sx={{ opacity: '0.7 !important', py: 0.5, px: 1.5, minHeight: 'auto' }}>
-              <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: c.text.tertiary }}>
-                {prov}
-              </Typography>
-            </MenuItem>,
-            ...models.map((opt) => (
+          {Object.entries(allModelOptions.grouped).map(([prov, models]) => {
+            // Default: group with selected model starts expanded, others
+            // collapsed when 3+ groups. But user can manually toggle any
+            // group including the active one.
+            const groupCount = Object.keys(allModelOptions.grouped).length;
+            const hasSelectedModel = models.some(m => m.value === model);
+            const defaultCollapsed = hasSelectedModel ? false : (groupCount >= 3);
+            const isCollapsed = collapsedGroups[prov] ?? defaultCollapsed;
+            const modelCount = models.length;
+
+            return [
+              // Clickable group header with expand/collapse arrow
               <MenuItem
-                key={opt.value}
-                selected={model === opt.value}
-                onClick={() => {
-                  onModelChange(opt.value);
-                  if (onProviderChange) {
-                    // Derive API-level provider key from the display group name
-                    const provLower = prov.toLowerCase();
-                    const providerMap: Record<string, string> = {
-                      anthropic: 'anthropic',
-                      openai: 'openai',
-                      google: 'gemini',
-                      // OpenRouter-backed providers
-                      xai: 'openrouter',
-                      meta: 'openrouter',
-                      deepseek: 'openrouter',
-                      mistral: 'openrouter',
-                      qwen: 'openrouter',
-                      cohere: 'openrouter',
-                    };
-                    onProviderChange(providerMap[provLower] || provLower);
-                  }
-                  // Warn (once) when switching to a non-Claude model with
-                  // many MCP tools enabled. Non-Claude models don't have
-                  // access to the deferred-tool pool and will receive every
-                  // tool schema upfront, potentially exhausting context.
-                  if (prov.toLowerCase() !== 'anthropic' && enabledMcpToolCount > MCP_WARNING_THRESHOLD) {
-                    try {
-                      if (typeof window !== 'undefined' && !window.localStorage.getItem(MCP_WARNING_LS_KEY)) {
-                        setMcpWarningOpen(true);
-                      }
-                    } catch { /* ignore localStorage errors */ }
-                  }
-                  setModelAnchor(null);
-                }}
+                key={`header-${prov}`}
+                onClick={(e) => { e.stopPropagation(); toggleGroup(prov); }}
+                sx={{ py: 0.5, px: 1.5, minHeight: 'auto', cursor: 'pointer', '&:hover': { bgcolor: `${c.bg.secondary}80` } }}
               >
-                <ListItemText
-                  primary={opt.label}
-                  slotProps={{ primary: { sx: { fontSize: '0.8rem', color: model === opt.value ? c.text.primary : c.text.muted } } }}
-                />
-              </MenuItem>
-            )),
-          ]).flat()}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, width: '100%', justifyContent: 'space-between' }}>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: c.text.tertiary }}>
+                    {prov}
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    {isCollapsed && <Typography sx={{ fontSize: '0.58rem', color: c.text.ghost }}>{modelCount}</Typography>}
+                    <KeyboardArrowDownIcon sx={{
+                      fontSize: 12,
+                      color: c.text.ghost,
+                      transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.15s ease',
+                    }} />
+                  </Box>
+                </Box>
+              </MenuItem>,
+              // Models (hidden when collapsed)
+              ...(!isCollapsed ? models.map((opt) => (
+                <MenuItem
+                  key={opt.value}
+                  selected={model === opt.value}
+                  onClick={() => {
+                    onModelChange(opt.value);
+                    if (onProviderChange) {
+                      const provLower = prov.toLowerCase();
+                      const providerMap: Record<string, string> = {
+                        anthropic: 'anthropic',
+                        openai: 'openai',
+                        google: 'gemini',
+                        xai: 'openrouter',
+                        meta: 'openrouter',
+                        deepseek: 'openrouter',
+                        mistral: 'openrouter',
+                        qwen: 'openrouter',
+                        cohere: 'openrouter',
+                      };
+                      onProviderChange(providerMap[provLower] || provLower);
+                    }
+                    if (prov.toLowerCase() !== 'anthropic' && enabledMcpToolCount > MCP_WARNING_THRESHOLD) {
+                      try {
+                        if (typeof window !== 'undefined' && !window.localStorage.getItem(MCP_WARNING_LS_KEY)) {
+                          setMcpWarningOpen(true);
+                        }
+                      } catch {}
+                    }
+                    setModelAnchor(null);
+                  }}
+                >
+                  <ListItemText
+                    primary={opt.label}
+                    slotProps={{ primary: { sx: { fontSize: '0.8rem', color: model === opt.value ? c.text.primary : c.text.muted } } }}
+                  />
+                </MenuItem>
+              )) : []),
+            ];
+          }).flat()}
         </Menu>
 
         <Box sx={{ flex: 1 }} />
