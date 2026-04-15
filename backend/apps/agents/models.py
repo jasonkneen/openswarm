@@ -77,3 +77,13 @@ class AgentSession(BaseModel):
     browser_id: Optional[str] = None
     parent_session_id: Optional[str] = None
     needs_fork: bool = False
+    # How much the model should "think" before answering. Provider-agnostic
+    # value that gets translated per-API in agent_manager:
+    #   off    — no thinking
+    #   low    — minimal thinking (fastest)
+    #   medium — balanced
+    #   high   — extensive thinking (slowest, smartest)
+    #   auto   — let the model / provider default decide (recommended)
+    # Only applies to models flagged with reasoning: True in the registry.
+    # Existing sessions without this field will default to "auto".
+    thinking_level: Literal["off", "low", "medium", "high", "auto"] = "auto"

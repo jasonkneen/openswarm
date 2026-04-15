@@ -14,6 +14,7 @@ import MicNoneOutlinedIcon from '@mui/icons-material/MicNoneOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import StopIcon from '@mui/icons-material/Stop';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import PsychologyOutlinedIcon from '@mui/icons-material/PsychologyOutlined';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import QuestionAnswerOutlinedIcon from '@mui/icons-material/QuestionAnswerOutlined';
 import MapOutlinedIcon from '@mui/icons-material/MapOutlined';
@@ -77,6 +78,8 @@ interface Props {
   autoFocus?: boolean;
   sessionId?: string;
   queueLength?: number;
+  thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'auto';
+  onThinkingLevelChange?: (level: 'off' | 'low' | 'medium' | 'high' | 'auto') => void;
 }
 
 export interface ChatInputHandle {
@@ -100,9 +103,9 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 const FALLBACK_MODE_BASE = { label: 'Agent', icon: ICON_MAP.smart_toy };
 
 const FALLBACK_MODELS = [
-  { value: 'sonnet', label: 'Claude Sonnet 4.6', context_window: 1_000_000 },
-  { value: 'opus', label: 'Claude Opus 4.6', context_window: 1_000_000 },
-  { value: 'haiku', label: 'Claude Haiku 4.5', context_window: 200_000 },
+  { value: 'sonnet', label: 'Claude Sonnet 4.6', context_window: 1_000_000, reasoning: true },
+  { value: 'opus', label: 'Claude Opus 4.6', context_window: 1_000_000, reasoning: true },
+  { value: 'haiku', label: 'Claude Haiku 4.5', context_window: 200_000, reasoning: true },
 ];
 
 function formatTokenCount(n: number): string {
@@ -139,7 +142,23 @@ const ContextRing: React.FC<{ used: number; limit: number; accentColor: string; 
   );
 };
 
-const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, onModeChange, model, onModelChange, provider, onProviderChange, isRunning, onStop, autoRunMode, contextEstimate, embedded, autoFocus, sessionId, queueLength = 0 }, ref) => {
+// Brand colors for provider headers in the model picker — these match
+// the SubscriptionCard colors in Settings and help users distinguish
+// groups at a glance.
+const PROVIDER_COLORS: Record<string, string> = {
+  anthropic: '#E8927A',
+  openai: '#74AA9C',
+  google: '#4285F4',
+  gemini: '#4285F4',
+  xai: '#8B949E',
+  meta: '#0866FF',
+  deepseek: '#4D6BFE',
+  mistral: '#FF7000',
+  qwen: '#A974FF',
+  cohere: '#FF7759',
+};
+
+const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, onModeChange, model, onModelChange, provider, onProviderChange, isRunning, onStop, autoRunMode, contextEstimate, embedded, autoFocus, sessionId, queueLength = 0, thinkingLevel = 'auto', onThinkingLevelChange }, ref) => {
   const c = useClaudeTokens();
   const editorRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -212,12 +231,12 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
     if (!modelsLoaded || Object.keys(modelsByProvider).length === 0) {
       return { flat: FALLBACK_MODELS.map(m => ({ ...m, provider: 'Anthropic' })), grouped: { Anthropic: FALLBACK_MODELS } };
     }
-    const flat: Array<{ value: string; label: string; context_window: number; provider: string }> = [];
-    const grouped: Record<string, Array<{ value: string; label: string; context_window: number }>> = {};
+    const flat: Array<{ value: string; label: string; context_window: number; provider: string; reasoning: boolean }> = [];
+    const grouped: Record<string, Array<{ value: string; label: string; context_window: number; reasoning: boolean }>> = {};
     for (const [prov, models] of Object.entries(modelsByProvider)) {
-      grouped[prov] = models.map(m => ({ value: m.value, label: m.label, context_window: m.context_window ?? 200_000 }));
+      grouped[prov] = models.map(m => ({ value: m.value, label: m.label, context_window: m.context_window ?? 200_000, reasoning: !!m.reasoning }));
       for (const m of models) {
-        flat.push({ value: m.value, label: m.label, context_window: m.context_window ?? 200_000, provider: prov });
+        flat.push({ value: m.value, label: m.label, context_window: m.context_window ?? 200_000, provider: prov, reasoning: !!m.reasoning });
       }
     }
     return { flat, grouped };
@@ -231,7 +250,11 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   // the currently selected model is always expanded; others start collapsed
   // when there are 3+ groups to keep the dropdown manageable.
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const toggleGroup = (prov: string) => setCollapsedGroups(prev => ({ ...prev, [prov]: !prev[prov] }));
+  // Toggle based on the *effective* collapsed state (which can come from
+  // the default), not the raw stored value. Otherwise the first click on
+  // a group that was defaulted-collapsed is a no-op (undefined → true).
+  const toggleGroup = (prov: string, currentlyCollapsed: boolean) =>
+    setCollapsedGroups(prev => ({ ...prev, [prov]: !currentlyCollapsed }));
 
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -260,6 +283,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
 
   const [modeAnchor, setModeAnchor] = useState<HTMLElement | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
+  const [thinkingAnchor, setThinkingAnchor] = useState<HTMLElement | null>(null);
 
   const currentMode = modesMap[mode];
   const FALLBACK_MODE = { ...FALLBACK_MODE_BASE, color: c.accent.primary };
@@ -1067,39 +1091,39 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
           slotProps={{ paper: menuPaperProps }}
         >
           {Object.entries(allModelOptions.grouped).map(([prov, models]) => {
-            // Default: group with selected model starts expanded, others
-            // collapsed when 3+ groups. But user can manually toggle any
-            // group including the active one.
-            const groupCount = Object.keys(allModelOptions.grouped).length;
-            const hasSelectedModel = models.some(m => m.value === model);
-            const defaultCollapsed = hasSelectedModel ? false : (groupCount >= 3);
-            const isCollapsed = collapsedGroups[prov] ?? defaultCollapsed;
-            const modelCount = models.length;
-
+            // Non-interactive provider headers followed by their models.
+            // All groups always shown — no collapse/expand. Keeping the
+            // menu layout static avoids the "cursor chases a moving
+            // target" problem that happens when items above the cursor
+            // appear/disappear.
+            const brandColor = PROVIDER_COLORS[prov.toLowerCase()] ?? c.text.tertiary;
             return [
-              // Clickable group header with expand/collapse arrow
               <MenuItem
                 key={`header-${prov}`}
-                onClick={(e) => { e.stopPropagation(); toggleGroup(prov); }}
-                sx={{ py: 0.5, px: 1.5, minHeight: 'auto', cursor: 'pointer', '&:hover': { bgcolor: `${c.bg.secondary}80` } }}
+                disabled
+                sx={{ opacity: '1 !important', py: 0.75, px: 1.5, minHeight: 'auto', pointerEvents: 'none' }}
               >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, width: '100%', justifyContent: 'space-between' }}>
-                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: c.text.tertiary }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  <Box sx={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    bgcolor: brandColor,
+                    boxShadow: `0 0 6px ${brandColor}80`,
+                    flexShrink: 0,
+                  }} />
+                  <Typography sx={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: brandColor,
+                  }}>
                     {prov}
                   </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    {isCollapsed && <Typography sx={{ fontSize: '0.58rem', color: c.text.ghost }}>{modelCount}</Typography>}
-                    <KeyboardArrowDownIcon sx={{
-                      fontSize: 12,
-                      color: c.text.ghost,
-                      transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                      transition: 'transform 0.15s ease',
-                    }} />
-                  </Box>
                 </Box>
               </MenuItem>,
-              // Models (hidden when collapsed)
-              ...(!isCollapsed ? models.map((opt) => (
+              ...models.map((opt) => (
                 <MenuItem
                   key={opt.value}
                   selected={model === opt.value}
@@ -1135,10 +1159,75 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
                     slotProps={{ primary: { sx: { fontSize: '0.8rem', color: model === opt.value ? c.text.primary : c.text.muted } } }}
                   />
                 </MenuItem>
-              )) : []),
+              )),
             ];
           }).flat()}
         </Menu>
+
+        {/* Thinking-level picker — only rendered for reasoning-capable models */}
+        {(() => {
+          const currentModel = allModelOptions.flat.find((m: any) => m.value === model) as any;
+          if (!currentModel?.reasoning || !onThinkingLevelChange) return null;
+          const levels: Array<{ value: 'off' | 'low' | 'medium' | 'high' | 'auto'; label: string; desc: string }> = [
+            { value: 'auto', label: 'Auto', desc: 'Model decides (recommended)' },
+            { value: 'off', label: 'Off', desc: 'No thinking (fastest)' },
+            { value: 'low', label: 'Low', desc: 'Minimal thinking' },
+            { value: 'medium', label: 'Medium', desc: 'Balanced' },
+            { value: 'high', label: 'High', desc: 'Extensive thinking (slowest)' },
+          ];
+          const current = levels.find((l) => l.value === thinkingLevel) || levels[0];
+          return (
+            <>
+              <Box
+                onClick={(e) => setThinkingAnchor(e.currentTarget)}
+                sx={{
+                  display: 'inline-flex', alignItems: 'center', gap: 0.25,
+                  px: 0.75, py: 0.25, borderRadius: '6px', cursor: 'pointer', userSelect: 'none',
+                  color: c.text.muted,
+                  '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' },
+                  transition: 'background 0.15s',
+                }}
+              >
+                <PsychologyOutlinedIcon sx={{ fontSize: 13, opacity: 0.7 }} />
+                <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: 'inherit', lineHeight: 1 }}>
+                  {current.label}
+                </Typography>
+                <KeyboardArrowDownIcon sx={{ fontSize: 14, color: 'inherit', opacity: 0.7 }} />
+              </Box>
+              <Menu
+                anchorEl={thinkingAnchor}
+                open={Boolean(thinkingAnchor)}
+                onClose={() => setThinkingAnchor(null)}
+                anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
+                transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                slotProps={{ paper: menuPaperProps }}
+              >
+                <MenuItem disabled sx={{ opacity: '1 !important', py: 0.5, px: 1.5, minHeight: 'auto', pointerEvents: 'none' }}>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: c.text.tertiary }}>
+                    Thinking Level
+                  </Typography>
+                </MenuItem>
+                {levels.map((lvl) => (
+                  <MenuItem
+                    key={lvl.value}
+                    selected={thinkingLevel === lvl.value}
+                    onClick={() => { onThinkingLevelChange(lvl.value); setThinkingAnchor(null); }}
+                    sx={{ py: 0.6 }}
+                  >
+                    <Box>
+                      <Typography sx={{ fontSize: '0.8rem', color: thinkingLevel === lvl.value ? c.text.primary : c.text.muted }}>
+                        {lvl.label}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.65rem', color: c.text.ghost, mt: 0.1 }}>
+                        {lvl.desc}
+                      </Typography>
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Menu>
+            </>
+          );
+        })()}
 
         <Box sx={{ flex: 1 }} />
 

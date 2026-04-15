@@ -378,6 +378,14 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
     if (e.button !== 0) return;
     if (isCardTarget(e.target, e.currentTarget)) return;
 
+    // Canvas click — drop any lingering input focus so arrow-key nav
+    // works immediately without the user having to press Escape first.
+    const active = document.activeElement as HTMLElement | null;
+    const activeTag = active?.tagName;
+    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || (active as any)?.isContentEditable) {
+      active?.blur?.();
+    }
+
     if (isElementSelectMode) {
       if (e.metaKey || e.ctrlKey) {
         canvas.handlers.onMouseDown(e);
@@ -960,7 +968,10 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
 
   // Compute which directions have neighbors from the focused card
   const neighborDirections = useMemo(() => {
-    if (!focusedCardId || canvas.zoom < 0.9) return { left: false, right: false, up: false, down: false };
+    // Lowered the zoom floor from 0.9 to 0.4 so arrow nav still works
+    // when users zoom out to see the whole canvas. Below 0.4 the cards
+    // are too small to be a useful navigation target.
+    if (!focusedCardId || canvas.zoom < 0.4) return { left: false, right: false, up: false, down: false };
     return {
       left: !!findNearestCard(focusedCardId, 'left'),
       right: !!findNearestCard(focusedCardId, 'right'),
@@ -980,14 +991,38 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
   canvasZoomRef.current = canvas.zoom;
 
   useEffect(() => {
-    const handleArrowNav = (e: KeyboardEvent) => {
-      if (!isActive) return;  // Don't fire shortcuts when dashboard is hidden
-      const currentFocused = focusedCardIdRef.current;
-      if (!currentFocused || canvasZoomRef.current < 0.9) return;
+    // Helper: is the currently-focused element a text-entry field the
+    // user is actively editing? We only want to suppress dashboard
+    // navigation when the user is genuinely typing, not just because an
+    // input somewhere happens to have focus from a click long ago.
+    const isActivelyEditing = (target: EventTarget | null): boolean => {
+      const el = (target as HTMLElement) || (document.activeElement as HTMLElement | null);
+      if (!el) return false;
+      const tag = el.tagName;
+      const editable = (el as any).isContentEditable;
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !editable) return false;
+      // Only suppress when the input actually has content to navigate
+      // within. An empty input doesn't need arrow keys for cursor
+      // movement, so we can safely repurpose arrows for dashboard nav.
+      const val = (el as HTMLInputElement | HTMLTextAreaElement).value;
+      if (typeof val === 'string' && val.length === 0) return false;
+      if (editable && (el.textContent ?? '').length === 0) return false;
+      return true;
+    };
 
-      // Skip if typing in an input
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (!isActive) return;  // Don't fire shortcuts when dashboard is hidden
+
+      // Escape blurs any active input and restores focus to the canvas —
+      // so you can quickly "unstick" keyboard focus and start navigating.
+      if (e.key === 'Escape') {
+        const active = document.activeElement as HTMLElement | null;
+        const tag = active?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (active as any)?.isContentEditable) {
+          active?.blur?.();
+        }
+        return;
+      }
 
       let direction: 'left' | 'right' | 'up' | 'down' | null = null;
       switch (e.key) {
@@ -996,6 +1031,22 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
         case 'ArrowUp': direction = 'up'; break;
         case 'ArrowDown': direction = 'down'; break;
         default: return;
+      }
+
+      // Don't hijack arrows when the user is actually typing
+      if (isActivelyEditing(e.target)) return;
+
+      // Lowered zoom floor from 0.9 → 0.4 so nav still works zoomed out
+      if (canvasZoomRef.current < 0.4) return;
+
+      // If no card is focused, pick the front-most one as a fallback so
+      // nav works after the user clicked on empty canvas.
+      let currentFocused = focusedCardIdRef.current;
+      if (!currentFocused) {
+        const anyCardId = Object.keys(cards)[0] || Object.keys(viewCards)[0] || Object.keys(browserCards)[0];
+        if (!anyCardId) return;
+        currentFocused = anyCardId;
+        setFocusedCardId(anyCardId);
       }
 
       e.preventDefault();
@@ -1027,9 +1078,12 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
       }, 100);
     };
 
-    window.addEventListener('keydown', handleArrowNav);
-    return () => window.removeEventListener('keydown', handleArrowNav);
-  }, [findNearestCard, getCardRect, canvas.actions, dispatch]);
+    // Capture phase so we beat MUI Menus/Selects that also listen for
+    // arrows. We still bail early on isActivelyEditing, so this doesn't
+    // interfere with typing.
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [findNearestCard, getCardRect, canvas.actions, dispatch, isActive, cards, viewCards, browserCards]);
 
   const handleBranchFromCard = useCallback(
     (sourceSessionId: string, newSessionId: string) => {
@@ -1906,7 +1960,7 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
       </Box>
 
       {/* Arrow navigation hints when zoomed in on a card */}
-      {focusedCardId && canvas.zoom >= 0.9 && (
+      {focusedCardId && canvas.zoom >= 0.4 && (
         <DirectionHints
           hasLeft={neighborDirections.left}
           hasRight={neighborDirections.right}

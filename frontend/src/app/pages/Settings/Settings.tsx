@@ -59,7 +59,7 @@ const SUBSCRIPTION_PROVIDERS = [
   { id: 'claude', name: 'Claude Pro / Max', desc: 'Sonnet 4.6, Opus 4.6, Haiku 4.5', color: '#E8927A', preview: false },
   { id: 'gemini-cli', name: 'Gemini Advanced', desc: 'Gemini 3 Pro, 3 Flash, 2.5 Pro, 2.5 Flash', color: '#4285F4', preview: false },
   { id: 'codex', name: 'ChatGPT Plus / Pro', desc: 'GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex', color: '#74AA9C', preview: false },
-  { id: 'github', name: 'GitHub Copilot', desc: 'Claude, GPT, Gemini, and more', color: '#8B949E', preview: false },
+  { id: 'github', name: 'GitHub Copilot', desc: 'Claude, GPT, Gemini, and more', color: '#8B949E', preview: true },
 ];
 
 const SubscriptionCard: React.FC<{ provider: typeof SUBSCRIPTION_PROVIDERS[0]; connected: boolean; onConnect: () => void; onDisconnect: () => void; connecting: boolean; userCode?: string; disconnecting?: boolean }> = ({ provider, connected, onConnect, onDisconnect, connecting, userCode, disconnecting }) => {

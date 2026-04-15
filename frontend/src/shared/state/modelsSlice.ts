@@ -8,6 +8,7 @@ export interface ModelOption {
   label: string;
   version?: string;
   context_window: number;
+  reasoning?: boolean;
 }
 
 interface ModelsState {

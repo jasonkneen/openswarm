@@ -5,7 +5,7 @@ const AGENTS_API = `${API_BASE}/agents`;
 
 export interface AgentMessage {
   id: string;
-  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system';
+  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system' | 'thinking';
   content: any;
   timestamp: string;
   branch_id: string;
@@ -34,7 +34,7 @@ export interface MessageBranch {
 
 export interface StreamingMessage {
   id: string;
-  role: 'assistant' | 'tool_call';
+  role: 'assistant' | 'tool_call' | 'thinking';
   content: string;
   tool_name?: string;
 }
@@ -73,6 +73,7 @@ export interface AgentSession {
   dashboard_id?: string;
   browser_id?: string | null;
   parent_session_id?: string | null;
+  thinking_level?: 'off' | 'low' | 'medium' | 'high' | 'auto';
 }
 
 export interface AgentConfig {
@@ -307,6 +308,18 @@ export const updateSystemPrompt = createAsyncThunk(
       body: JSON.stringify({ system_prompt: systemPrompt }),
     });
     return { sessionId, systemPrompt };
+  }
+);
+
+export const updateThinkingLevel = createAsyncThunk(
+  'agents/updateThinkingLevel',
+  async ({ sessionId, level }: { sessionId: string; level: 'off' | 'low' | 'medium' | 'high' | 'auto' }) => {
+    await fetch(`${AGENTS_API}/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thinking_level: level }),
+    });
+    return { sessionId, level };
   }
 );
 
@@ -593,7 +606,7 @@ const agentsSlice = createSlice({
 
     streamStart(
       state,
-      action: PayloadAction<{ sessionId: string; messageId: string; role: 'assistant' | 'tool_call'; toolName?: string }>
+      action: PayloadAction<{ sessionId: string; messageId: string; role: 'assistant' | 'tool_call' | 'thinking'; toolName?: string }>
     ) {
       const session = state.sessions[action.payload.sessionId];
       if (session) {
@@ -697,6 +710,13 @@ const agentsSlice = createSlice({
       const session = state.sessions[action.payload.sessionId];
       if (session) {
         session.mode = action.payload.mode;
+      }
+    },
+
+    updateSessionThinkingLevel(state, action: PayloadAction<{ sessionId: string; level: 'off' | 'low' | 'medium' | 'high' | 'auto' }>) {
+      const session = state.sessions[action.payload.sessionId];
+      if (session) {
+        session.thinking_level = action.payload.level;
       }
     },
 
@@ -1029,6 +1049,7 @@ export const {
   updateSessionProvider,
   updateSessionModel,
   updateSessionMode,
+  updateSessionThinkingLevel,
   closeSessionFromWs,
   removeDraftSession,
   clearHistorySearch,

@@ -19,12 +19,6 @@ import { fetchBuiltinTools, fetchTools } from '@/shared/state/toolsSlice';
 import { fetchOutputs } from '@/shared/state/outputsSlice';
 import { fetchSkills } from '@/shared/state/skillsSlice';
 
-const XLogoIcon: React.FC<{ sx?: object }> = ({ sx }) => (
-  <SvgIcon sx={sx} viewBox="0 0 24 24">
-    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-  </SvgIcon>
-);
-
 const GoogleIcon: React.FC<{ sx?: object }> = ({ sx }) => (
   <SvgIcon sx={sx} viewBox="0 0 24 24">
     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -41,7 +35,6 @@ const RedditIcon: React.FC<{ sx?: object }> = ({ sx }) => (
 );
 
 const TOOL_GROUP_ICONS: Record<string, React.FC<{ sx?: object }>> = {
-  Twitter: XLogoIcon,
   Google: GoogleIcon,
   Reddit: RedditIcon,
   Web: LanguageIcon,

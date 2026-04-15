@@ -64,11 +64,11 @@ BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
     # production flagships in their respective size tiers.
     "Anthropic": [
         {"value": "sonnet", "label": "Claude Sonnet 4.6", "context_window": 1_000_000,
-         "model_id": "claude-sonnet-4-6", "router_model_id": "cc/claude-sonnet-4-6", "api": "anthropic"},
+         "model_id": "claude-sonnet-4-6", "router_model_id": "cc/claude-sonnet-4-6", "api": "anthropic", "reasoning": True},
         {"value": "opus", "label": "Claude Opus 4.6", "context_window": 1_000_000,
-         "model_id": "claude-opus-4-6", "router_model_id": "cc/claude-opus-4-6", "api": "anthropic"},
+         "model_id": "claude-opus-4-6", "router_model_id": "cc/claude-opus-4-6", "api": "anthropic", "reasoning": True},
         {"value": "haiku", "label": "Claude Haiku 4.5", "context_window": 200_000,
-         "model_id": "claude-haiku-4-5", "router_model_id": "cc/claude-haiku-4-5-20251001", "api": "anthropic"},
+         "model_id": "claude-haiku-4-5", "router_model_id": "cc/claude-haiku-4-5-20251001", "api": "anthropic", "reasoning": True},
     ],
     # OpenAI: ChatGPT Plus/Pro (Codex) subscription. gpt-5.4 is the
     # current flagship — combines GPT-5.3 Codex coding capabilities with
@@ -150,6 +150,61 @@ BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
          "api": "github-copilot", "subscription_only": True},
     ],
 }
+
+# ---------------------------------------------------------------------------
+# Thinking level translation
+# ---------------------------------------------------------------------------
+# Each provider has a different API shape for "how hard should the model
+# think." We expose a single provider-agnostic level (off/low/medium/high/
+# auto) on the session and translate here.
+#
+# Returns the provider-specific payload to merge into request params, or
+# None if no special thinking params should be sent (use defaults).
+
+def thinking_params_for(api: str, level: str, model_id: str = "") -> dict | None:
+    """Translate a provider-agnostic thinking level to per-provider API params.
+
+    Args:
+        api: "anthropic" | "codex" | "gemini-cli" | "github-copilot"
+        level: "off" | "low" | "medium" | "high" | "auto"
+        model_id: optional, used to pick adaptive vs legacy for Claude
+
+    Returns a dict to merge into request params, or None for "use defaults".
+    """
+    if level == "auto":
+        # Let provider use its own default. For Claude 4.6 we still want
+        # adaptive thinking on by default so users see reasoning.
+        if api == "anthropic":
+            return {"thinking": {"type": "adaptive"}}
+        return None
+
+    if level == "off":
+        if api == "anthropic":
+            return {"thinking": {"type": "disabled"}}
+        if api == "codex":
+            return {"reasoning": {"effort": "none"}}
+        # Gemini: lowest available level
+        if api == "gemini-cli":
+            return {"thinkingConfig": {"thinkingLevel": "LOW"}}
+        return None
+
+    # Claude 4.6 models use adaptive thinking (no manual budget). For older
+    # Claude models we'd use budget_tokens; we don't ship those today.
+    if api == "anthropic":
+        return {"thinking": {"type": "adaptive"}}
+
+    if api == "codex":
+        effort_map = {"low": "low", "medium": "medium", "high": "high"}
+        return {"reasoning": {"effort": effort_map[level]}}
+
+    if api == "gemini-cli":
+        level_map = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH"}
+        return {"thinkingConfig": {"thinkingLevel": level_map[level]}}
+
+    # github-copilot goes through 9Router and doesn't expose a thinking
+    # param in its Copilot catalog — leave untouched.
+    return None
+
 
 # ---------------------------------------------------------------------------
 # OpenRouter: built-in integration for 300+ models

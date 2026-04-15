@@ -51,7 +51,6 @@ const RedditIcon = (
 
 const INTEGRATION_META: Record<string, IntegrationMeta> = {
   'Google Workspace': { label: 'Google Workspace', color: '#4285F4', icon: GoogleIcon },
-  'xbird': { label: 'X / Twitter', color: '#1DA1F2', icon: <span style={{ fontSize: 14, fontWeight: 700 }}>𝕏</span> },
   'Reddit': { label: 'Reddit', color: '#FF4500', icon: RedditIcon },
 };
 

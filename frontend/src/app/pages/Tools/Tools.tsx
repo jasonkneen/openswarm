@@ -115,21 +115,6 @@ interface Integration {
 
 const INTEGRATIONS: Integration[] = [
   {
-    id: 'xbird',
-    name: 'xbird',
-    description: 'Twitter/X research — search tweets, read profiles, threads, timelines.',
-    mcp_config: { type: 'stdio', command: 'bunx', args: ['@checkra1n/xbird'] },
-    color: '#1DA1F2',
-    website: 'https://xbird.dev',
-    icon: '𝕏',
-    connectLabel: 'Connect 𝕏',
-    connectInstructions: 'Open x.com in your browser, press F12 → Application → Cookies → x.com, and copy the values for auth_token and ct0.',
-    credentialFields: [
-      { key: 'TWITTER_AUTH_TOKEN', label: 'auth_token', placeholder: 'Paste auth_token cookie value' },
-      { key: 'TWITTER_CT0', label: 'ct0', placeholder: 'Paste ct0 cookie value' },
-    ],
-  },
-  {
     id: 'reddit',
     name: 'Reddit',
     description: 'Browse subreddits, search posts, get post details, analyze users. No API keys required.',

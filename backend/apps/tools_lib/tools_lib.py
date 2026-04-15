@@ -353,80 +353,11 @@ async def create_tool(body: ToolCreate):
     return {"ok": True, "tool": tool.model_dump()}
 
 
-_XBIRD_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "xbird")
-_XBIRD_CONFIG_PATH = os.path.join(_XBIRD_CONFIG_DIR, "config.json")
-
-
-async def _fetch_twitter_screen_name(auth_token: str, ct0: str) -> str | None:
-    """Fetch the logged-in Twitter/X screen name using session cookies."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.twitter.com/1.1/account/verify_credentials.json",
-                headers={"x-csrf-token": ct0},
-                cookies={"auth_token": auth_token, "ct0": ct0},
-            )
-        if resp.status_code == 200:
-            screen_name = resp.json().get("screen_name")
-            return f"@{screen_name}" if screen_name else None
-    except Exception as e:
-        logger.warning("Failed to fetch Twitter screen name: %s", e)
-    return None
-
-
-def _sync_external_config(tool: ToolDefinition):
-    """Write credentials to external config files for tools that need them.
-
-    xbird reads auth from ~/.config/xbird/config.json rather than env vars,
-    so we sync credentials there when the user connects via the UI.
-    """
-    if tool.name == "xbird" and tool.credentials:
-        auth_token = tool.credentials.get("TWITTER_AUTH_TOKEN", "")
-        ct0 = tool.credentials.get("TWITTER_CT0", "")
-        if auth_token and ct0:
-            os.makedirs(_XBIRD_CONFIG_DIR, exist_ok=True)
-            config = {}
-            if os.path.exists(_XBIRD_CONFIG_PATH):
-                try:
-                    with open(_XBIRD_CONFIG_PATH) as f:
-                        config = json.load(f)
-                except Exception:
-                    pass
-            config["auth_token"] = auth_token
-            config["ct0"] = ct0
-            with open(_XBIRD_CONFIG_PATH, "w") as f:
-                json.dump(config, f, indent=2)
-            os.chmod(_XBIRD_CONFIG_PATH, 0o600)
-            logger.info("Synced xbird credentials to %s", _XBIRD_CONFIG_PATH)
-    elif tool.name == "xbird" and not tool.credentials:
-        if os.path.exists(_XBIRD_CONFIG_PATH):
-            try:
-                with open(_XBIRD_CONFIG_PATH) as f:
-                    config = json.load(f)
-                config.pop("auth_token", None)
-                config.pop("ct0", None)
-                with open(_XBIRD_CONFIG_PATH, "w") as f:
-                    json.dump(config, f, indent=2)
-                logger.info("Cleared xbird credentials from %s", _XBIRD_CONFIG_PATH)
-            except Exception:
-                pass
-
-
 @tools_lib.router.put("/{tool_id}")
 async def update_tool(tool_id: str, body: ToolUpdate):
     tool = _load(tool_id)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(tool, k, v)
-    _sync_external_config(tool)
-
-    if tool.name == "xbird" and tool.auth_status == "connected" and tool.credentials:
-        auth_token = tool.credentials.get("TWITTER_AUTH_TOKEN", "")
-        ct0 = tool.credentials.get("TWITTER_CT0", "")
-        if auth_token and ct0:
-            screen_name = await _fetch_twitter_screen_name(auth_token, ct0)
-            if screen_name:
-                tool.connected_account_email = screen_name
-
     _save(tool)
     return {"ok": True, "tool": tool.model_dump()}
 
@@ -674,16 +605,6 @@ _SERVICE_RULES: list[tuple[list[str], str, str]] = [
     (["post_detail"], "Posts", "Reddit"),
     (["user_analysis"], "Users", "Reddit"),
     (["reddit_explain"], "Reference", "Reddit"),
-    # Twitter / X
-    (["tweet", "thread", "reply", "replies", "quote", "retweet", "article"], "Tweets", "Twitter"),
-    (["timeline", "home", "news", "trending"], "Timeline", "Twitter"),
-    (["follower", "following", "follow", "unfollow"], "Network", "Twitter"),
-    (["like", "unlike", "bookmark"], "Engagement", "Twitter"),
-    (["mention"], "Mentions", "Twitter"),
-    (["user", "profile"], "Users", "Twitter"),
-    (["media", "upload", "image", "video"], "Media", "Twitter"),
-    (["search"], "Search", "Twitter"),
-    (["list", "list_member"], "Lists", "Twitter"),
 ]
 
 

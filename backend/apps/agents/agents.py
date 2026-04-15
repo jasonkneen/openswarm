@@ -328,6 +328,9 @@ async def list_models():
         visible = []
         for m in models:
             api = m.get("api", "")
+            # GitHub Copilot is not yet available to end users — hide its models.
+            if api == "github-copilot":
+                continue
             if m.get("subscription_only"):
                 if not nine_router_up or api not in connected:
                     continue
@@ -339,6 +342,7 @@ async def list_models():
                 "value": m["value"],
                 "label": m["label"],
                 "context_window": m.get("context_window", 128_000),
+                "reasoning": bool(m.get("reasoning", False)),
             })
         if visible:
             result[provider_name] = visible

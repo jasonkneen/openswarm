@@ -1166,6 +1166,27 @@ class AgentManager:
             if session.cwd:
                 options_kwargs["cwd"] = session.cwd
 
+            # Apply the session's thinking_level. Claude SDK accepts both a
+            # `thinking` config and a simple `effort` level. "auto" is the
+            # default path — we still enable adaptive thinking for Claude
+            # 4.6 so reasoning bubbles surface. For non-Claude models, the
+            # reasoning params are applied by 9Router (see resolve_model_id).
+            try:
+                level = getattr(session, "thinking_level", "auto") or "auto"
+                if api_type == "anthropic":
+                    if level == "off":
+                        options_kwargs["thinking"] = {"type": "disabled"}
+                    elif level == "auto":
+                        # Keep existing behavior — let the SDK / Claude Code
+                        # preset decide. Don't force adaptive here because
+                        # some 9Router-relayed paths may choke on unknown
+                        # thinking config shapes.
+                        pass
+                    elif level in ("low", "medium", "high"):
+                        options_kwargs["effort"] = level
+            except Exception as e:
+                logger.debug(f"thinking_level param injection skipped: {e}")
+
             if session.sdk_session_id:
                 options_kwargs["resume"] = session.sdk_session_id
                 if fork_session or session.needs_fork:
@@ -1973,9 +1994,12 @@ class AgentManager:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
-        allowed = {"system_prompt", "name"}
+        allowed = {"system_prompt", "name", "thinking_level"}
         for key, value in fields.items():
             if key in allowed:
+                # Defend against bad thinking_level values
+                if key == "thinking_level" and value not in ("off", "low", "medium", "high", "auto"):
+                    continue
                 setattr(session, key, value)
 
         await ws_manager.send_to_session(session_id, "agent:status", {

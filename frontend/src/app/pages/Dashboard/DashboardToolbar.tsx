@@ -95,6 +95,7 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
     const defaultModel = useAppSelector((s) => s.settings.data.default_model);
     const [mode, setMode] = useState(defaultMode || 'agent');
     const [model, setModel] = useState(defaultModel || 'sonnet');
+    const [thinkingLevel, setThinkingLevel] = useState<'off' | 'low' | 'medium' | 'high' | 'auto'>('auto');
     const settingsApplied = useRef(false);
     useEffect(() => {
       if (!settingsApplied.current) {
@@ -368,6 +369,8 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
               embedded
               autoFocus
               sessionId={TOOLBAR_OWNER_ID}
+              thinkingLevel={thinkingLevel}
+              onThinkingLevelChange={setThinkingLevel}
             />
           </div>
         ) : historyOpen ? (

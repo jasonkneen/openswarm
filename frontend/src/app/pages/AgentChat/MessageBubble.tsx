@@ -29,6 +29,17 @@ const streamingCursorKeyframes = `
 }
 `;
 
+// Claude.ai-style shimmer that sweeps left → right across text while the
+// model is actively thinking. Uses background-clip: text to mask a moving
+// linear gradient onto the text glyphs so the effect looks like a light
+// wave traveling through the letters.
+const thinkingShimmerKeyframes = `
+@keyframes thinking-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+`;
+
 const StreamingCursor: React.FC = () => {
   const c = useClaudeTokens();
   return (
@@ -388,6 +399,145 @@ const MessageImageThumbnails: React.FC<{
   );
 };
 
+// ── ThinkingBubble ──────────────────────────────────────────────────
+// Collapsible reasoning section styled after Claude.ai / ChatGPT /
+// Gemini. Defaults to expanded so thinking is always visible when
+// present. User can click the header to collapse. If we observed the
+// stream live we show "Thought for Ns"; otherwise (history replay) we
+// just show "Thoughts".
+const ThinkingBubble: React.FC<{
+  content: string;
+  isStreaming?: boolean;
+  timestamp?: string;
+}> = ({ content, isStreaming }) => {
+  const c = useClaudeTokens();
+
+  // Only time a think-session that we actually saw start live. For saved
+  // messages loaded from history, we don't have reliable start/end, so
+  // we fall back to a generic "Thoughts" label.
+  const [startedStreamingAt, setStartedStreamingAt] = useState<number | null>(
+    isStreaming ? Date.now() : null
+  );
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [frozenElapsed, setFrozenElapsed] = useState<number | null>(null);
+
+  // Record start time the first time we see streaming
+  React.useEffect(() => {
+    if (isStreaming && startedStreamingAt === null) {
+      setStartedStreamingAt(Date.now());
+    }
+  }, [isStreaming, startedStreamingAt]);
+
+  // Tick the timer while streaming
+  React.useEffect(() => {
+    if (!isStreaming || startedStreamingAt === null) return;
+    const iv = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedStreamingAt) / 1000));
+    }, 250);
+    return () => clearInterval(iv);
+  }, [isStreaming, startedStreamingAt]);
+
+  // Freeze elapsed when streaming ends
+  React.useEffect(() => {
+    if (!isStreaming && startedStreamingAt !== null && frozenElapsed === null) {
+      setFrozenElapsed(Math.max(1, Math.floor((Date.now() - startedStreamingAt) / 1000)));
+    }
+  }, [isStreaming, startedStreamingAt, frozenElapsed]);
+
+  // Always default to expanded — user can click to collapse
+  const [userOverride, setUserOverride] = useState<boolean | null>(null);
+  const expanded = userOverride ?? true;
+  const toggle = () => setUserOverride(!expanded);
+
+  const displayedSeconds = frozenElapsed ?? elapsed;
+  const label = isStreaming
+    ? 'Thinking...'
+    : startedStreamingAt !== null
+      ? `Thought for ${displayedSeconds}s`
+      : 'Thoughts';
+
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+
+  // Shimmer colors — use a bright mid-tone against the muted base to make
+  // the sweep visible without being loud. The base color matches the
+  // static "Thought for Ns" state so the only visible change is the moving
+  // highlight band.
+  const shimmerBase = c.text.tertiary;
+  const shimmerHighlight = c.text.primary;
+
+  return (
+    <Box sx={{ my: 0.5 }}>
+      <style>{thinkingShimmerKeyframes}</style>
+      <Box
+        onClick={toggle}
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 0.75,
+          cursor: 'pointer',
+          color: c.text.tertiary,
+          fontSize: '0.78rem',
+          py: 0.5,
+          px: 1,
+          ml: -1,
+          borderRadius: `${c.radius.sm}px`,
+          transition: 'all 0.15s ease',
+          '&:hover': { color: c.text.secondary, bgcolor: c.bg.secondary },
+          userSelect: 'none',
+        }}
+      >
+        <PsychologyOutlinedIcon sx={{ fontSize: 14, opacity: 0.75 }} />
+        <Typography
+          sx={{
+            fontSize: '0.78rem',
+            fontWeight: 500,
+            ...(isStreaming ? {
+              // Moving gradient masked onto the text glyphs
+              background: `linear-gradient(90deg, ${shimmerBase} 0%, ${shimmerBase} 40%, ${shimmerHighlight} 50%, ${shimmerBase} 60%, ${shimmerBase} 100%)`,
+              backgroundSize: '200% 100%',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              color: 'transparent',
+              animation: 'thinking-shimmer 2s linear infinite',
+            } : { color: 'inherit' }),
+          }}
+        >
+          {label}
+        </Typography>
+        <ExpandMoreIcon
+          sx={{
+            fontSize: 16,
+            opacity: 0.6,
+            transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+            transition: 'transform 0.2s ease',
+          }}
+        />
+      </Box>
+      <Collapse in={expanded} timeout={200}>
+        <Box
+          sx={{
+            mt: 0.5,
+            ml: 0.5,
+            pl: 1.5,
+            borderLeft: `2px solid ${c.border.subtle}`,
+            color: c.text.tertiary,
+            fontSize: '0.85rem',
+            lineHeight: 1.55,
+            fontStyle: 'normal',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: c.font.sans,
+          }}
+        >
+          {text}
+          {isStreaming && <StreamingCursor />}
+        </Box>
+      </Collapse>
+    </Box>
+  );
+};
+
 interface Props {
   message: AgentMessage;
   editing?: boolean;
@@ -408,6 +558,16 @@ const MessageBubble: React.FC<Props> = React.memo(({ message, editing = false, o
           {typeof content === 'string' ? content : JSON.stringify(content)}
         </Typography>
       </Box>
+    );
+  }
+
+  if (role === 'thinking') {
+    return (
+      <ThinkingBubble
+        content={typeof content === 'string' ? content : JSON.stringify(content)}
+        isStreaming={isStreaming}
+        timestamp={message.timestamp}
+      />
     );
   }
 

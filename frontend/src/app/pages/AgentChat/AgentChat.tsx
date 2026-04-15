@@ -29,6 +29,8 @@ import {
   setActiveSession,
   updateSessionModel,
   updateSessionMode,
+  updateSessionThinkingLevel,
+  updateThinkingLevel,
   fetchSession,
   AgentMessage,
 } from '@/shared/state/agentsSlice';
@@ -135,6 +137,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
   const dispatch = useAppDispatch();
   const session = useAppSelector((state) => (id ? state.agents.sessions[id] : undefined));
   const modesMap = useAppSelector((state) => state.modes.items);
+  const modelsByProvider = useAppSelector((state) => state.models.byProvider);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const isAtBottomRef = useRef(true);
@@ -364,6 +367,12 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
     if (id && !isDraft) dispatch(updateSessionModel({ sessionId: id, model: newModel }));
   }, [id, isDraft, dispatch]);
 
+  const handleThinkingLevelChange = useCallback((level: 'off' | 'low' | 'medium' | 'high' | 'auto') => {
+    if (!id) return;
+    dispatch(updateSessionThinkingLevel({ sessionId: id, level }));
+    if (!isDraft) dispatch(updateThinkingLevel({ sessionId: id, level }));
+  }, [id, isDraft, dispatch]);
+
   const handleApprove = (requestId: string, updatedInput?: Record<string, any>) => {
     dispatch(handleApproval({ requestId, behavior: 'allow', updatedInput }));
   };
@@ -482,7 +491,15 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
   }, [id, dispatch, onBranch, session?.dashboard_id]);
 
   const contextEstimate = useMemo(() => {
-    const limit = CONTEXT_WINDOWS[model] || 200_000;
+    // Look up the actual context window from the models store (backend
+    // registry is the source of truth). Fall back to the legacy hardcoded
+    // map for any model that isn't in the store yet.
+    let limit = 0;
+    for (const ms of Object.values(modelsByProvider)) {
+      const hit = ms.find((m) => m.value === model);
+      if (hit?.context_window) { limit = hit.context_window; break; }
+    }
+    if (!limit) limit = CONTEXT_WINDOWS[model] || 200_000;
     let totalChars = 0;
     if (session?.system_prompt) totalChars += session.system_prompt.length;
     for (const msg of activeBranchMessages) {
@@ -493,7 +510,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
     }
     const used = Math.round(totalChars / 4);
     return { used, limit };
-  }, [activeBranchMessages, session?.system_prompt, session?.streamingMessage?.content, model]);
+  }, [activeBranchMessages, session?.system_prompt, session?.streamingMessage?.content, model, modelsByProvider]);
 
   const sessionRunning = session?.status === 'running' || session?.status === 'waiting_approval';
 
@@ -1177,6 +1194,8 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                 contextEstimate={contextEstimate}
                 sessionId={id}
                 autoFocus={autoFocus}
+                thinkingLevel={session?.thinking_level ?? 'auto'}
+                onThinkingLevelChange={handleThinkingLevelChange}
               />
             </Box>
           </ClickAwayListener>
