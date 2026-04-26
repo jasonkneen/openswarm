@@ -66,7 +66,7 @@ const StreamingCursor: React.FC = () => {
 const ELEMENT_SEPARATOR = '\n\n---\nSelected UI Elements:\n';
 
 interface OpenSwarmErrorInfo {
-  kind: 'cap' | 'auth' | 'network';
+  kind: 'cap' | 'auth' | 'network' | 'too_many_tools';
   title: string;
   detail: string;
   ctaLabel?: string;
@@ -104,6 +104,25 @@ function parseOpenSwarmError(text: string): OpenSwarmErrorInfo | null {
       kind: 'network',
       title: 'Connection hiccup',
       detail: 'That request timed out after a few retries. Send the message again to continue.',
+    };
+  }
+  // Too many MCP tool definitions for the chosen model's input window.
+  // Classic case: user has 5+ apps connected (M365 alone has 141 actions),
+  // chose Haiku (200K context), and even a one-line message can't fit
+  // because the tool schemas alone push past the limit. Bigger models
+  // (Sonnet/Opus, 1M) absorb it fine.
+  if (/Prompt is too long|prompt_too_long|input length and `max_tokens`|context length/i.test(text)) {
+    return {
+      kind: 'too_many_tools',
+      title: 'Too many connected apps for this model',
+      detail:
+        "Haiku is fast but has the smallest memory of the three Claude models. " +
+        "Each connected app adds instructions Claude has to read before it can answer, " +
+        "and you've added more than Haiku can hold in one go. Either turn off a few apps " +
+        "(Microsoft 365 is the heaviest by far), or switch to Sonnet or Opus — both have " +
+        "5× more room.",
+      ctaLabel: 'Open Settings',
+      ctaAction: 'settings',
     };
   }
   // Auth / subscription problems

@@ -48,6 +48,8 @@ declare global {
     openExternal: (url: string) => Promise<void>;
     // Deep-link listener — fires when OS opens the app with openswarm://... URL.
     onAuthUrl?: (cb: (url: string) => void) => () => void;
+    // OAuth claim deep-link listener — fires for openswarm://oauth/{provider}/complete.
+    onOauthClaim?: (cb: (url: string) => void) => () => void;
   }
 
   interface Window {

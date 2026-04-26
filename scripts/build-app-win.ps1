@@ -299,35 +299,27 @@ Copy-Excluded `
     (Join-Path $ProjectRoot 'backend') (Join-Path $Staging 'backend') `
     @{ Dirs = @('__pycache__','.venv','tools','tests'); Files = @('*.pyc','.env','.env.*') }
 
-# Generate a SAFE production .env containing ONLY OAuth provider credentials.
-# Drops APPLE_*/GH_TOKEN/BACKEND_PORT/etc. so signing keys + personal tokens
-# never ship to users. Per-user API keys (Anthropic/OpenAI/Gemini) come from
-# the in-app Settings UI. Backend's tools_lib.py:34 auto-loads this file.
-$ShipEnvKeys = @(
-    'GOOGLE_OAUTH_CLIENT_ID','GOOGLE_OAUTH_CLIENT_SECRET',
-    'NOTION_OAUTH_CLIENT_ID','NOTION_OAUTH_CLIENT_SECRET',
-    'AIRTABLE_OAUTH_CLIENT_ID','AIRTABLE_OAUTH_CLIENT_SECRET',
-    'HUBSPOT_OAUTH_CLIENT_ID','HUBSPOT_OAUTH_CLIENT_SECRET',
-    'DISCORD_OAUTH_CLIENT_ID','DISCORD_OAUTH_CLIENT_SECRET',
-    'DISCORD_BOT_TOKEN'
-)
-$DevEnvPath = Join-Path $ProjectRoot 'backend\.env'
-$ShipEnvPath = Join-Path $Staging 'backend\.env'
-if (Test-Path $DevEnvPath) {
-    $kept = Get-Content $DevEnvPath | Where-Object {
-        $line = $_
-        $keep = $false
-        foreach ($k in $ShipEnvKeys) {
-            if ($line -match "^$k=") { $keep = $true; break }
-        }
-        $keep
-    }
-    Set-Content -Path $ShipEnvPath -Value $kept
-    Write-Host "Staged OAuth credentials: $($kept.Count) keys (release secrets + personal API keys excluded)"
+# Production .env: only the OAuth helper base URL + local Google credentials.
+$ShipOauthBaseUrl = if ($env:OPENSWARM_OAUTH_BASE_URL_OVERRIDE) {
+    $env:OPENSWARM_OAUTH_BASE_URL_OVERRIDE
 } else {
-    Write-Host "WARNING: backend\.env not found -- packaged build will have no OAuth credentials configured."
-    Set-Content -Path $ShipEnvPath -Value '' -NoNewline
+    'https://api.openswarm.com'
 }
+$GoogleClientIdShip     = $env:GOOGLE_OAUTH_CLIENT_ID
+$GoogleClientSecretShip = $env:GOOGLE_OAUTH_CLIENT_SECRET
+if (-not $GoogleClientIdShip -or -not $GoogleClientSecretShip) {
+    Write-Host "ERROR: GOOGLE_OAUTH_CLIENT_ID/SECRET missing in backend\.env -- required for Google MCP." -ForegroundColor Red
+    exit 1
+}
+$ShipEnvPath = Join-Path $Staging 'backend\.env'
+New-Item -ItemType Directory -Force -Path (Split-Path $ShipEnvPath -Parent) | Out-Null
+@(
+    "# OAuth helper base URL + local Google OAuth credentials.",
+    "OPENSWARM_OAUTH_BASE_URL=$ShipOauthBaseUrl",
+    "GOOGLE_OAUTH_CLIENT_ID=$GoogleClientIdShip",
+    "GOOGLE_OAUTH_CLIENT_SECRET=$GoogleClientSecretShip"
+) | Set-Content -Path $ShipEnvPath
+Write-Host "Staged production .env: OPENSWARM_OAUTH_BASE_URL + Google client_id/secret"
 New-Item -ItemType Directory -Force -Path (Join-Path $Staging 'backend\data\tools') | Out-Null
 
 Copy-Excluded `

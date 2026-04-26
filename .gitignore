@@ -31,3 +31,5 @@ backend/.venv/
 openswarm-cloud
 .openswarm-cloud
 .claude/
+# Local-only operator helpers (never commit)
+scripts/set-fly-*.sh

@@ -30,10 +30,25 @@ let pendingDeepLink = null;
 
 function forwardDeepLinkToRenderer(url) {
   if (!url) return;
+  // openswarm:// URLs split by host: "auth" → subscription token,
+  // "oauth/{provider}/complete" → OAuth claim. Each goes to its own
+  // IPC channel so the renderer can route without parsing twice.
+  let channel = 'openswarm:auth-url';
+  try {
+    const u = new URL(url);
+    if (u.host === 'oauth' && u.pathname.endsWith('/complete')) {
+      channel = 'openswarm:oauth-claim';
+    }
+  } catch (_) {
+    // Malformed URL — fall back to legacy channel; renderer ignores anything
+    // it doesn't recognise.
+  }
   if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isLoading()) {
-    mainWindow.webContents.send('openswarm:auth-url', url);
+    mainWindow.webContents.send(channel, url);
   } else {
-    pendingDeepLink = url;
+    // Stash both URL and target channel so we can flush correctly when
+    // the renderer is ready. Replaces the simple string with a {channel,url}.
+    pendingDeepLink = { channel, url };
   }
 }
 
@@ -558,10 +573,15 @@ function createWindow() {
   });
 
   // Once the renderer has loaded, flush any deep-link URL we captured before
-  // the window existed (cold-launch via openswarm://).
+  // the window existed (cold-launch via openswarm://). pendingDeepLink may
+  // be a string (legacy) OR a {channel, url} object (v1.0.26+ OAuth claims).
   mainWindow.webContents.once('did-finish-load', () => {
     if (pendingDeepLink) {
-      mainWindow.webContents.send('openswarm:auth-url', pendingDeepLink);
+      if (typeof pendingDeepLink === 'string') {
+        mainWindow.webContents.send('openswarm:auth-url', pendingDeepLink);
+      } else {
+        mainWindow.webContents.send(pendingDeepLink.channel, pendingDeepLink.url);
+      }
       pendingDeepLink = null;
     }
   });
@@ -647,9 +667,10 @@ function killBackend() {
 app.whenReady().then(async () => {
   // Cold-launch: if the OS opened us via openswarm:// (Windows/Linux it's
   // in argv; macOS fires open-url AFTER whenReady which we handle above)
-  // buffer the URL for when mainWindow loads.
+  // route through forwardDeepLinkToRenderer so the URL gets stashed under
+  // its correct IPC channel (auth-url vs oauth-claim).
   const initialDeepLink = extractOpenswarmUrl(process.argv);
-  if (initialDeepLink) pendingDeepLink = initialDeepLink;
+  if (initialDeepLink) forwardDeepLinkToRenderer(initialDeepLink);
 
   if (process.platform === 'darwin' && !isPackaged) {
     try { app.dock.setIcon(iconPath); } catch (_) {}

@@ -95,6 +95,10 @@ _AUTH_EXEMPT_EXACT = {
     # Without this exemption the redirect lands a 401 page in the user's
     # browser — see tools_lib.py:1156 where redirect_uri is constructed.
     "/api/tools/oauth/callback",
+    # Browser-redirect target for the proxied OAuth claim handoff. Browser
+    # has no way to inject our bearer token; the install_id check inside
+    # the handler is what binds the request to this user.
+    "/api/tools/oauth/cloud-claim",
     "/api/version",
 }
 

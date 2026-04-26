@@ -73,6 +73,14 @@ const { contextBridge, ipcRenderer } = require('electron');
       return () => ipcRenderer.removeListener('openswarm:auth-url', listener);
     },
 
+    // OAuth claim deep-link channel. Receives openswarm://oauth/{provider}/complete
+    // after the user finishes an OAuth flow in their browser.
+    onOauthClaim: (cb) => {
+      const listener = (_event, url) => cb(url);
+      ipcRenderer.on('openswarm:oauth-claim', listener);
+      return () => ipcRenderer.removeListener('openswarm:oauth-claim', listener);
+    },
+
     // OAuth popup callback. Fires when any child webContents navigates to
     // localhost:20128/callback?code=... — main.js watches for this and
     // forwards the parsed params here. Used as a belt-and-suspenders

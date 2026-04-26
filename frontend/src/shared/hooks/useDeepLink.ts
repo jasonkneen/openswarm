@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useAppDispatch } from '@/shared/hooks';
 import { activateSubscription } from '@/shared/state/settingsSlice';
 import { fetchModels } from '@/shared/state/modelsSlice';
+import { fetchTools } from '@/shared/state/toolsSlice';
+import { API_BASE } from '@/shared/config';
 import { trackEvent } from '@/shared/analytics';
 
 // Listens for openswarm://auth?token=...&plan=...&expires=... URLs coming
@@ -15,9 +17,11 @@ export function useDeepLink(): void {
 
   useEffect(() => {
     const api = (window as any).openswarm as OpenSwarmAPI | undefined;
-    if (!api?.onAuthUrl) return;
+    // Both listeners are optional — useDeepLink no-ops in browser/web context
+    // where window.openswarm is undefined.
+    if (!api) return;
 
-    const unsubscribe = api.onAuthUrl((rawUrl: string) => {
+    const unsubscribe = api.onAuthUrl?.((rawUrl: string) => {
       try {
         // openswarm://auth?token=...  (host = "auth", search carries fields)
         const url = new URL(rawUrl);
@@ -62,6 +66,51 @@ export function useDeepLink(): void {
       }
     });
 
-    return unsubscribe;
+    // OAuth claim deep-link listener. The Electron main process routes
+    // openswarm://oauth/{provider}/complete to its own IPC channel so we
+    // can claim tokens immediately rather than routing through Settings.
+    let unsubscribeOauth: (() => void) | undefined;
+    if (api?.onOauthClaim) {
+      unsubscribeOauth = api.onOauthClaim(async (rawUrl: string) => {
+        try {
+          const url = new URL(rawUrl);
+          // Expected: openswarm://oauth/{provider}/complete?session_id=...&tool_id=...
+          if (url.host !== 'oauth' || !url.pathname.endsWith('/complete')) {
+            console.warn('[deep-link] Unexpected oauth-claim URL:', rawUrl);
+            return;
+          }
+          const sessionId = url.searchParams.get('session_id');
+          const toolId = url.searchParams.get('tool_id');
+          if (!sessionId || !toolId) {
+            console.warn('[deep-link] Missing session_id or tool_id in', rawUrl);
+            return;
+          }
+
+          trackEvent('oauth.deep_link_received', { provider: url.pathname.split('/')[1] || 'unknown' });
+
+          const resp = await fetch(`${API_BASE}/tools/oauth/claim`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, tool_id: toolId }),
+          });
+          if (!resp.ok) {
+            const text = await resp.text();
+            console.error('[deep-link] OAuth claim failed:', resp.status, text);
+            trackEvent('oauth.claim_failed', { status: resp.status });
+            return;
+          }
+          trackEvent('oauth.claim_succeeded');
+          // Refresh tools so the UI reflects the newly-connected tool.
+          dispatch(fetchTools());
+        } catch (e) {
+          console.error('[deep-link] OAuth claim threw:', e);
+        }
+      });
+    }
+
+    return () => {
+      unsubscribe?.();
+      unsubscribeOauth?.();
+    };
   }, [dispatch]);
 }

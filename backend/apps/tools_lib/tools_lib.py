@@ -16,18 +16,16 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import HTTPException, Query
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from backend.config.Apps import SubApp
 from backend.apps.tools_lib.models import ToolDefinition, ToolCreate, ToolUpdate, BUILTIN_TOOLS
 
 logger = logging.getLogger(__name__)
 
-# Default Google OAuth credentials for the OpenSwarm project.
-# These are public credentials for a desktop/web OAuth client (safe to embed per Google's docs).
-# Users can override via GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET env vars.
-_DEFAULT_GOOGLE_CLIENT_ID = "6741219524-8vpt07arcc5rvkdb4j1b6v9g53469ugq.apps.googleusercontent.com"
-_DEFAULT_GOOGLE_CLIENT_SECRET = "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"
-os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", _DEFAULT_GOOGLE_CLIENT_ID)
-os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", _DEFAULT_GOOGLE_CLIENT_SECRET)
+# Base URL for the OAuth helper service. Override via env in dev if needed.
+OPENSWARM_OAUTH_BASE_URL = os.environ.get(
+    "OPENSWARM_OAUTH_BASE_URL", "https://api.openswarm.com"
+).rstrip("/")
 
 from backend.config.paths import BACKEND_DIR, DATA_ROOT, TOOLS_DIR as DATA_DIR, BUILTIN_PERMISSIONS_PATH as BUILTIN_PERMS_PATH
 
@@ -44,35 +42,27 @@ async def tools_lib_lifespan():
 
 tools_lib = SubApp("tools", tools_lib_lifespan)
 
+# Most providers go through a small HTTP claim handoff. Google uses a direct
+# local callback. Both flows return an auto-closing HTML page when done.
+
+# Google OAuth (local callback flow).
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GOOGLE_SCOPES = [
     "openid",
-    "https://www.googleapis.com/auth/userinfo.email",
+    "email",
+    "profile",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/contacts.readonly",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/presentations",
 ]
 
-AIRTABLE_AUTH_URL = "https://airtable.com/oauth2/v1/authorize"
-AIRTABLE_TOKEN_URL = "https://airtable.com/oauth2/v1/token"
-AIRTABLE_SCOPES = [
-    "data.records:read", "data.records:write",
-    "data.recordComments:read", "data.recordComments:write",
-    "schema.bases:read", "schema.bases:write",
-    "user.email:read",
-]
-
-HUBSPOT_AUTH_URL = "https://mcp-na2.hubspot.com/oauth/authorize/user"
-HUBSPOT_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
-
-DISCORD_AUTH_URL = "https://discord.com/oauth2/authorize"
-DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
-
-
-# Maps state -> {tool_id, code_verifier (for PKCE flows)}
+# Per-flow state for the local Google OAuth callback. Keyed by the OAuth
+# `state` param; value is {tool_id} (PKCE verifier not used for Google).
 _pending_oauth: dict[str, dict] = {}
 
 
@@ -142,193 +132,84 @@ async def list_tools():
 
 @tools_lib.router.get("/oauth/callback")
 async def oauth_callback(code: str = Query(...), state: str = Query("")):
+    """Local Google OAuth callback (v1.0.25 flow, Google-only in v1.0.26).
+
+    Notion / Airtable / HubSpot / Discord all flow through the cloud and
+    land at /oauth/cloud-claim instead. This endpoint stays Google-only
+    because the production Google OAuth client has localhost registered
+    and the user doesn't control the console to add a cloud URL.
+    """
     pending = _pending_oauth.pop(state, None)
     if not pending:
-        return HTMLResponse("<html><body><h2>Invalid OAuth state</h2></body></html>", status_code=400)
+        return HTMLResponse(
+            "<html><body><h2>Invalid OAuth state</h2></body></html>",
+            status_code=400,
+        )
 
-    tool_id = pending if isinstance(pending, str) else pending["tool_id"]
-    code_verifier = pending.get("code_verifier") if isinstance(pending, dict) else None
-
+    tool_id = pending["tool_id"] if isinstance(pending, dict) else pending
     tool = _load(tool_id)
+
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        return HTMLResponse(
+            "<html><body><h2>Google OAuth not configured</h2><p>"
+            "GOOGLE_OAUTH_CLIENT_ID/SECRET missing from .env</p></body></html>",
+            status_code=500,
+        )
     _port = os.environ.get("OPENSWARM_PORT", "8324")
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
 
-    if tool.name.lower() == "airtable":
-        # Airtable OAuth: PKCE flow
-        client_id = os.environ.get("AIRTABLE_OAUTH_CLIENT_ID", "")
-        client_secret = os.environ.get("AIRTABLE_OAUTH_CLIENT_SECRET", "")
-        import base64
-        credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(AIRTABLE_TOKEN_URL, data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier or "",
-                "client_id": client_id,
-            }, headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            })
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(GOOGLE_TOKEN_URL, data={
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        })
+    if resp.status_code != 200:
+        logger.warning("Google OAuth token exchange failed: %s", resp.text[:240])
+        return HTMLResponse(
+            f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>",
+            status_code=400,
+        )
 
-        if resp.status_code != 200:
-            logger.warning(f"Airtable OAuth token exchange failed: {resp.text}")
-            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
+    tokens = resp.json()
+    access_token = tokens.get("access_token", "")
+    tool.oauth_tokens = {
+        "access_token": access_token,
+        "refresh_token": tokens.get("refresh_token", ""),
+        "token_expiry": time.time() + tokens.get("expires_in", 3600),
+    }
+    tool.auth_type = "oauth2"
+    tool.auth_status = "connected"
 
-        tokens = resp.json()
-        tool.oauth_tokens = {
-            "access_token": tokens.get("access_token", ""),
-            "refresh_token": tokens.get("refresh_token", ""),
-            "token_expiry": time.time() + tokens.get("expires_in", 7200),
-        }
-        tool.auth_type = "oauth2"
-        tool.auth_status = "connected"
-        tool.connected_account_email = "Airtable account"
-
-    elif tool.name.lower() == "hubspot":
-        # HubSpot OAuth 2.1: PKCE flow
-        client_id = os.environ.get("HUBSPOT_OAUTH_CLIENT_ID", "")
-        client_secret = os.environ.get("HUBSPOT_OAUTH_CLIENT_SECRET", "")
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(HUBSPOT_TOKEN_URL, data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "code_verifier": code_verifier or "",
-            }, headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            })
-
-        if resp.status_code != 200:
-            logger.warning(f"HubSpot OAuth token exchange failed: {resp.text}")
-            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
-
-        tokens = resp.json()
-        tool.oauth_tokens = {
-            "access_token": tokens.get("access_token", ""),
-            "refresh_token": tokens.get("refresh_token", ""),
-            "token_expiry": time.time() + tokens.get("expires_in", 1800),
-        }
-        tool.auth_type = "oauth2"
-        tool.auth_status = "connected"
-        tool.connected_account_email = "HubSpot account"
-
-    elif tool.name.lower() == "discord":
-        # Discord bot install OAuth: exchange code, capture guild_id of the
-        # server the user added the bot to. Multiple connect calls APPEND
-        # additional guild_ids so users can authorize multiple servers.
-        client_id = os.environ.get("DISCORD_OAUTH_CLIENT_ID", "")
-        client_secret = os.environ.get("DISCORD_OAUTH_CLIENT_SECRET", "")
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(DISCORD_TOKEN_URL, data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": client_id,
-                "client_secret": client_secret,
-            }, headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            })
-
-        if resp.status_code != 200:
-            logger.warning(f"Discord OAuth token exchange failed: {resp.text}")
-            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
-
-        tokens = resp.json()
-        guild = tokens.get("guild") or {}
-        new_guild_id = guild.get("id", "")
-        new_guild_name = guild.get("name", "")
-        existing = tool.oauth_tokens.get("guilds") or []
-        # Append unless this guild was already authorized
-        if new_guild_id and not any(g.get("id") == new_guild_id for g in existing):
-            existing.append({"id": new_guild_id, "name": new_guild_name})
-        tool.oauth_tokens = {
-            # Bot token lives in .env, NEVER stored on the tool. We only
-            # track the list of authorized guilds for scope enforcement.
-            "guilds": existing,
-        }
-        tool.auth_type = "oauth2"
-        tool.auth_status = "connected"
-        names = ", ".join(g.get("name", "") for g in existing if g.get("name"))
-        tool.connected_account_email = f"{len(existing)} server{'s' if len(existing) != 1 else ''}" + (f" · {names}" if names else "")
-
-    elif tool.name.lower() == "notion":
-        # Notion OAuth: Basic auth with client_id:secret
-        notion_client_id = os.environ.get("NOTION_OAUTH_CLIENT_ID", "")
-        notion_client_secret = os.environ.get("NOTION_OAUTH_CLIENT_SECRET", "")
-        import base64
-        credentials = base64.b64encode(f"{notion_client_id}:{notion_client_secret}".encode()).decode()
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post("https://api.notion.com/v1/oauth/token", json={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-            }, headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/json",
-            })
-
-        if resp.status_code != 200:
-            logger.warning(f"Notion OAuth token exchange failed: {resp.text}")
-            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
-
-        tokens = resp.json()
-        tool.oauth_tokens = {
-            "access_token": tokens.get("access_token", ""),
-        }
-        tool.auth_type = "oauth2"
-        tool.auth_status = "connected"
-        tool.connected_account_email = tokens.get("workspace_name", "Notion workspace")
-    else:
-        # Google OAuth
-        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-        client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(GOOGLE_TOKEN_URL, data={
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            })
-
-        if resp.status_code != 200:
-            logger.warning(f"OAuth token exchange failed: {resp.text}")
-            return HTMLResponse(f"<html><body><h2>Token exchange failed</h2><pre>{resp.text}</pre></body></html>", status_code=400)
-
-        tokens = resp.json()
-        access_token = tokens.get("access_token", "")
-        tool.oauth_tokens = {
-            "access_token": access_token,
-            "refresh_token": tokens.get("refresh_token", ""),
-            "token_expiry": time.time() + tokens.get("expires_in", 3600),
-        }
-        tool.auth_type = "oauth2"
-        tool.auth_status = "connected"
-
-        if access_token:
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as info_client:
-                    info_resp = await info_client.get(
-                        GOOGLE_USERINFO_URL,
-                        headers={"Authorization": f"Bearer {access_token}"},
-                    )
-                if info_resp.status_code == 200:
-                    tool.connected_account_email = info_resp.json().get("email")
-            except Exception as e:
-                logger.warning(f"Failed to fetch Google userinfo: {e}")
+    if access_token:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as info_client:
+                info_resp = await info_client.get(
+                    GOOGLE_USERINFO_URL,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            if info_resp.status_code == 200:
+                tool.connected_account_email = info_resp.json().get("email")
+        except Exception as e:
+            logger.warning("Failed to fetch Google userinfo: %s", e)
 
     _save(tool)
+    return _connected_html()
 
+
+def _connected_html() -> HTMLResponse:
+    """v1.0.25-style auto-close page. Same markup so the UX is unchanged."""
     return HTMLResponse("""
     <html><body>
     <h2 style="font-family:sans-serif;color:#22c55e">Connected successfully!</h2>
     <p style="font-family:sans-serif;color:#666">You can close this window.</p>
     <script>
-      if (window.opener) window.opener.postMessage({type:'oauth_complete', tool_id:'""" + tool_id + """'}, '*');
-      setTimeout(() => window.close(), 1500);
+      if (window.opener) window.opener.postMessage({type:'oauth_complete'}, '*');
+      setTimeout(function(){ window.close(); }, 1500);
     </script>
     </body></html>
     """)
@@ -491,15 +372,24 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
             if client_secret:
                 env["GOOGLE_WORKSPACE_CLIENT_SECRET"] = client_secret
 
-    # Discord: bot token is loaded from .env at MCP launch time. It is NEVER
-    # stored on the tool definition or exposed to the frontend. The tool only
-    # tracks the list of authorized guild IDs (in oauth_tokens.guilds) which
-    # are used by the agent system prompt to scope what the agent may access.
+    # Discord MCP runs as a small Python shim (backend.apps.discord_mcp_shim).
+    # We pass install_id + base URL via env so the shim subprocess doesn't
+    # need to import backend.config.* itself.
     if tool.name.lower() == "discord" and config.get("type") == "stdio":
-        bot_token = os.environ.get("DISCORD_BOT_TOKEN", "")
-        if bot_token:
-            env = config.setdefault("env", {})
-            env["DISCORD_TOKEN"] = bot_token
+        from backend.config.install_id import get_install_id
+        env = config.setdefault("env", {})
+        env["OPENSWARM_OAUTH_BASE_URL"] = OPENSWARM_OAUTH_BASE_URL
+        env["OPENSWARM_INSTALL_ID"] = get_install_id()
+        # Pass the authorized guild IDs so the shim can scope-enforce.
+        guild_ids = [g.get("id", "") for g in (tool.oauth_tokens.get("guilds") or []) if g.get("id")]
+        if guild_ids:
+            env["OPENSWARM_DISCORD_GUILD_IDS"] = ",".join(guild_ids)
+        # The shim runs as a subprocess and needs to import
+        # `backend.apps.discord_mcp_shim` — set PYTHONPATH to the project
+        # root (parent of the backend/ dir) so that import resolves.
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        existing_pp = env.get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (_project_root + os.pathsep + existing_pp) if existing_pp else _project_root
 
     # Microsoft 365 MCP: use a stable token cache path shared across process spawns
     if tool.name.lower() == "microsoft 365" and config.get("type") == "stdio":
@@ -511,6 +401,17 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
 
     if config.get("type") == "stdio":
         if config.get("command"):
+            # `python` (no version suffix) doesn't exist on a stock macOS,
+            # so a tool config that asks for "python" silently fails to
+            # spawn — Claude Agent SDK then exposes zero tools from that
+            # MCP. We resolve to the actual interpreter running the
+            # backend (sys.executable), which is guaranteed to exist and
+            # have backend modules importable. `python3` and absolute
+            # paths pass through unchanged.
+            if config["command"] == "python":
+                resolved_python = sys.executable or shutil.which("python3") or shutil.which("python")
+                if resolved_python:
+                    config["command"] = resolved_python
             # Check for bundled npm MCP servers — use Electron's Node.js instead of npx
             if config["command"] in ("npx", "bunx"):
                 pkg_name = next((a for a in (config.get("args") or []) if not a.startswith("-")), None)
@@ -965,7 +866,24 @@ _m365_login_processes: dict[str, dict] = {}  # tool_id -> {proc, device_code, st
 
 
 def _m365_server_script() -> str:
+    """Return the on-disk path to the bundled MS365 MCP server entry.
+
+    v1.0.26 replaced the heavy backend/npm-servers/softeria-ms-365-mcp-server/
+    node_modules tree (~93MB / 11k files) with a single esbuild bundle at
+    backend/mcp-bundles/softeria-ms-365-mcp-server/dist/index.js (4.7MB).
+    The new path mirrors the SDK's internal layout (dist/index.js + sibling
+    package.json) because cli.js reads __dirname/../package.json for the
+    --version flag — see scripts/build-app.sh `build_mcp_bundle_dir`.
+    """
     _backend = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    bundle = os.path.join(
+        _backend, "mcp-bundles", "softeria-ms-365-mcp-server", "dist", "index.js",
+    )
+    if os.path.isfile(bundle):
+        return bundle
+    # Fallback for any user still on a v1.0.25 install whose backend/ folder
+    # was left over from before the bundle migration. Will return the legacy
+    # path; if that doesn't exist either, the caller raises a clear error.
     return os.path.join(
         _backend, "npm-servers", "softeria-ms-365-mcp-server",
         "node_modules", "@softeria", "ms-365-mcp-server", "dist", "index.js",
@@ -1148,101 +1066,216 @@ async def oauth_disconnect(tool_id: str):
     return {"ok": True, "tool": tool.model_dump()}
 
 
+# Tool name → provider key for the OAuth helper service. Google is not in
+# this map (it uses the direct local callback); anything else falls back to
+# the local Google flow.
+_TOOL_NAME_TO_PROVIDER = {
+    "airtable": "airtable",
+    "hubspot": "hubspot",
+    "discord": "discord",
+    "notion": "notion",
+}
+
+
+def _proxied_provider_for(tool: ToolDefinition) -> Optional[str]:
+    return _TOOL_NAME_TO_PROVIDER.get(tool.name.lower())
+
+
 @tools_lib.router.post("/{tool_id}/oauth/start")
 async def oauth_start(tool_id: str):
+    """Return the OAuth start URL for this tool."""
     tool = _load(tool_id)
+    proxied = _proxied_provider_for(tool)
     _port = os.environ.get("OPENSWARM_PORT", "8324")
+
+    if proxied:
+        from backend.config.install_id import get_install_id
+        install_id = get_install_id()
+        params = {
+            "install_id": install_id,
+            "tool_id": tool_id,
+            "local_port": _port,
+        }
+        auth_url = (
+            f"{OPENSWARM_OAUTH_BASE_URL}/api/oauth/{proxied}/start?"
+            f"{urlencode(params)}"
+        )
+        return {"auth_url": auth_url}
+
+    # Local Google flow. State is a one-shot CSRF nonce keyed to the tool.
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="GOOGLE_OAUTH_CLIENT_ID not set in backend .env",
+        )
+    state = secrets.token_urlsafe(24)
+    _pending_oauth[state] = {"tool_id": tool_id}
     redirect_uri = f"http://localhost:{_port}/api/tools/oauth/callback"
-    state = tool_id
-
-    if tool.name.lower() == "airtable":
-        client_id = os.environ.get("AIRTABLE_OAUTH_CLIENT_ID", "")
-        if not client_id:
-            raise HTTPException(status_code=400, detail="AIRTABLE_OAUTH_CLIENT_ID not set in backend .env")
-        # PKCE: generate code_verifier and code_challenge
-        code_verifier = secrets.token_urlsafe(96)
-        code_challenge = hashlib.sha256(code_verifier.encode()).digest()
-        import base64
-        code_challenge_b64 = base64.urlsafe_b64encode(code_challenge).rstrip(b"=").decode()
-        _pending_oauth[state] = {"tool_id": tool_id, "code_verifier": code_verifier}
-        params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": " ".join(AIRTABLE_SCOPES),
-            "state": state,
-            "code_challenge": code_challenge_b64,
-            "code_challenge_method": "S256",
-        }
-        auth_url = f"{AIRTABLE_AUTH_URL}?{urlencode(params)}"
-    elif tool.name.lower() == "hubspot":
-        client_id = os.environ.get("HUBSPOT_OAUTH_CLIENT_ID", "")
-        if not client_id:
-            raise HTTPException(status_code=400, detail="HUBSPOT_OAUTH_CLIENT_ID not set in backend .env")
-        code_verifier = secrets.token_urlsafe(96)
-        code_challenge = hashlib.sha256(code_verifier.encode()).digest()
-        import base64
-        code_challenge_b64 = base64.urlsafe_b64encode(code_challenge).rstrip(b"=").decode()
-        _pending_oauth[state] = {"tool_id": tool_id, "code_verifier": code_verifier}
-        params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "code_challenge": code_challenge_b64,
-            "code_challenge_method": "S256",
-            "state": state,
-        }
-        auth_url = f"{HUBSPOT_AUTH_URL}?{urlencode(params)}"
-    elif tool.name.lower() == "discord":
-        client_id = os.environ.get("DISCORD_OAUTH_CLIENT_ID", "")
-        if not client_id:
-            raise HTTPException(status_code=400, detail="DISCORD_OAUTH_CLIENT_ID not set in backend .env")
-        permissions = os.environ.get("DISCORD_BOT_PERMISSIONS", "0")
-        _pending_oauth[state] = {"tool_id": tool_id}
-        params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": "bot identify",
-            "permissions": permissions,
-            "state": state,
-        }
-        auth_url = f"{DISCORD_AUTH_URL}?{urlencode(params)}"
-    elif tool.name.lower() == "notion":
-        _pending_oauth[state] = {"tool_id": tool_id}
-        client_id = os.environ.get("NOTION_OAUTH_CLIENT_ID", "")
-        if not client_id:
-            raise HTTPException(status_code=400, detail="NOTION_OAUTH_CLIENT_ID not set in backend .env")
-        params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "owner": "user",
-            "state": state,
-        }
-        auth_url = f"https://api.notion.com/v1/oauth/authorize?{urlencode(params)}"
-    else:
-        _pending_oauth[state] = {"tool_id": tool_id}
-        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-        if not client_id:
-            raise HTTPException(status_code=400, detail="GOOGLE_OAUTH_CLIENT_ID not set in backend .env")
-        params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": " ".join(GOOGLE_SCOPES),
-            "access_type": "offline",
-            "prompt": "consent",
-            "state": state,
-        }
-        auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": " ".join(GOOGLE_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
     return {"auth_url": auth_url}
 
 
+@tools_lib.router.get("/oauth/cloud-claim")
+async def oauth_cloud_claim(
+    session_id: str = Query(...),
+    tool_id: str = Query(...),
+):
+    """Browser-facing callback for the proxied OAuth flow.
+
+    Receives a single-use session_id, exchanges it for the tokens (using
+    install_id as the binding), persists them, and serves an auto-close page.
+    """
+    from backend.config.install_id import get_install_id
+
+    install_id = get_install_id()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{OPENSWARM_OAUTH_BASE_URL}/api/oauth/session/{session_id}/claim",
+                json={"install_id": install_id},
+            )
+    except Exception as e:
+        logger.exception("Cloud OAuth claim threw: %s", e)
+        return HTMLResponse(
+            f"<html><body><h2>Connection failed</h2><pre>{e}</pre>"
+            f"<p>Please retry from OpenSwarm.</p></body></html>",
+            status_code=502,
+        )
+
+    if resp.status_code in (404, 410):
+        return HTMLResponse(
+            "<html><body><h2>Session expired</h2>"
+            "<p>Please retry from OpenSwarm.</p></body></html>",
+            status_code=410,
+        )
+    if resp.status_code == 403:
+        return HTMLResponse(
+            "<html><body><h2>OAuth session not bound to this install</h2>"
+            "<p>Please retry from OpenSwarm.</p></body></html>",
+            status_code=403,
+        )
+    if resp.status_code != 200:
+        logger.warning("Cloud OAuth claim failed: HTTP %d %s", resp.status_code, resp.text[:200])
+        return HTMLResponse(
+            f"<html><body><h2>Cloud OAuth claim failed</h2><pre>{resp.text}</pre></body></html>",
+            status_code=502,
+        )
+
+    data = resp.json()
+    tokens = data.get("tokens", {}) or {}
+    tool = _load(tool_id)
+    _persist_cloud_tokens(tool, tokens)
+    _save(tool)
+    return _connected_html()
+
+
+def _persist_cloud_tokens(tool: ToolDefinition, tokens: dict) -> None:
+    """Normalise the cloud's claim response into tool.oauth_tokens.
+
+    Per-provider shaping mirrors what the v1.0.25 local-callback flow used
+    to write — the rest of the app (refresh helpers, MCP env injection)
+    expects exactly this shape.
+    """
+    name = tool.name.lower()
+    if name == "discord":
+        new_guilds = (tokens.get("_guilds") or []) if isinstance(tokens, dict) else []
+        existing = tool.oauth_tokens.get("guilds") or []
+        for g in new_guilds:
+            if g.get("id") and not any(e.get("id") == g["id"] for e in existing):
+                existing.append({"id": g["id"], "name": g.get("name", "")})
+        tool.oauth_tokens = {"guilds": existing}
+        names = ", ".join(g.get("name", "") for g in existing if g.get("name"))
+        tool.connected_account_email = (
+            f"{len(existing)} server{'s' if len(existing) != 1 else ''}"
+            + (f" · {names}" if names else "")
+        )
+    elif name == "notion":
+        tool.oauth_tokens = {"access_token": tokens.get("access_token", "")}
+        tool.connected_account_email = tokens.get("workspace_name", "Notion workspace")
+    else:
+        tool.oauth_tokens = {
+            "access_token": tokens.get("access_token", ""),
+            "refresh_token": tokens.get("refresh_token", ""),
+            "token_expiry": time.time() + (tokens.get("expires_in") or 3600),
+        }
+        tool.connected_account_email = (
+            tokens.get("hub_domain")       # HubSpot
+            or tokens.get("workspace_name")
+            or f"{tool.name} account"
+        )
+    tool.auth_type = "oauth2"
+    tool.auth_status = "connected"
+
+
+async def _refresh_via_proxy(provider: str, tool: ToolDefinition, default_expiry: int) -> Optional[str]:
+    """Refresh an OAuth access_token by POSTing the refresh_token to the
+    helper service. Per-provider wrappers below pass a default expires_in
+    fallback for providers that don't return one.
+    """
+    if tool.auth_type != "oauth2":
+        return None
+    refresh_token = tool.oauth_tokens.get("refresh_token")
+    if not refresh_token:
+        return None
+    expiry = tool.oauth_tokens.get("token_expiry", 0)
+    if time.time() < expiry - 60:
+        return tool.oauth_tokens.get("access_token")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{OPENSWARM_OAUTH_BASE_URL}/api/oauth/{provider}/refresh",
+                json={"refresh_token": refresh_token},
+            )
+        if resp.status_code == 401:
+            # Provider rejected — user revoked at the provider's side. Mark
+            # as needing re-auth so the UI prompts a Reconnect.
+            tool.auth_status = "expired"
+            _save(tool)
+            logger.warning(f"{provider} refresh rejected (user revoked); marking tool as expired")
+            return None
+        if resp.status_code != 200:
+            logger.warning(f"{provider} cloud refresh failed: HTTP %d %s", resp.status_code, resp.text[:200])
+            return None
+
+        data = (resp.json() or {}).get("tokens") or {}
+        new_token = data.get("access_token", "")
+        if not new_token:
+            return None
+        tool.oauth_tokens["access_token"] = new_token
+        tool.oauth_tokens["token_expiry"] = time.time() + (data.get("expires_in") or default_expiry)
+        if data.get("refresh_token"):
+            # Some providers (HubSpot, Airtable) rotate refresh_tokens on every
+            # refresh. Persist the new one or future refreshes will fail.
+            tool.oauth_tokens["refresh_token"] = data["refresh_token"]
+        # Backfill identity label on first successful refresh after upgrade.
+        if not tool.connected_account_email and data.get("email"):
+            tool.connected_account_email = data["email"]
+        _save(tool)
+        return new_token
+    except Exception as e:
+        logger.warning(f"{provider} cloud refresh exception for tool {tool.id}: {e}")
+        return None
 
 
 async def refresh_google_token(tool: ToolDefinition) -> Optional[str]:
-    """Refresh an expired Google OAuth token. Returns the fresh access_token or None."""
+    """Refresh an expired Google OAuth token using the local client_secret.
+
+    Google stays on the v1.0.25 local flow because we don't control the
+    Google Cloud Console for the production OAuth client and can't add the
+    cloud's redirect URI. The client_secret ships in the production .env —
+    standard "public OAuth app" pattern.
+    """
     if tool.auth_type != "oauth2":
         return None
     refresh_token = tool.oauth_tokens.get("refresh_token")
@@ -1265,106 +1298,38 @@ async def refresh_google_token(tool: ToolDefinition) -> Optional[str]:
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             })
-        if resp.status_code == 200:
-            data = resp.json()
-            new_token = data["access_token"]
-            tool.oauth_tokens["access_token"] = new_token
-            tool.oauth_tokens["token_expiry"] = time.time() + data.get("expires_in", 3600)
-
-            if not tool.connected_account_email:
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as info_client:
-                        info_resp = await info_client.get(
-                            GOOGLE_USERINFO_URL,
-                            headers={"Authorization": f"Bearer {new_token}"},
-                        )
-                    if info_resp.status_code == 200:
-                        tool.connected_account_email = info_resp.json().get("email")
-                except Exception:
-                    pass
-
-            _save(tool)
-            return new_token
+        if resp.status_code != 200:
+            logger.warning("Google token refresh failed: HTTP %d %s", resp.status_code, resp.text[:200])
+            return None
+        data = resp.json()
+        new_token = data.get("access_token", "")
+        if not new_token:
+            return None
+        tool.oauth_tokens["access_token"] = new_token
+        tool.oauth_tokens["token_expiry"] = time.time() + data.get("expires_in", 3600)
+        if not tool.connected_account_email:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as info_client:
+                    info_resp = await info_client.get(
+                        GOOGLE_USERINFO_URL,
+                        headers={"Authorization": f"Bearer {new_token}"},
+                    )
+                if info_resp.status_code == 200:
+                    tool.connected_account_email = info_resp.json().get("email")
+            except Exception:
+                pass
+        _save(tool)
+        return new_token
     except Exception as e:
-        logger.warning(f"Google token refresh failed for tool {tool.id}: {e}")
-    return None
+        logger.warning("Google token refresh exception for tool %s: %s", tool.id, e)
+        return None
 
 
 async def refresh_airtable_token(tool: ToolDefinition) -> Optional[str]:
-    """Refresh an expired Airtable OAuth token. Returns the fresh access_token or None."""
-    if tool.auth_type != "oauth2":
-        return None
-    refresh_token = tool.oauth_tokens.get("refresh_token")
-    if not refresh_token:
-        return None
-    expiry = tool.oauth_tokens.get("token_expiry", 0)
-    if time.time() < expiry - 60:
-        return tool.oauth_tokens.get("access_token")
-
-    client_id = os.environ.get("AIRTABLE_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("AIRTABLE_OAUTH_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        return None
-
-    try:
-        import base64
-        credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(AIRTABLE_TOKEN_URL, data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-            }, headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            })
-        if resp.status_code == 200:
-            data = resp.json()
-            tool.oauth_tokens["access_token"] = data["access_token"]
-            tool.oauth_tokens["token_expiry"] = time.time() + data.get("expires_in", 7200)
-            if data.get("refresh_token"):
-                tool.oauth_tokens["refresh_token"] = data["refresh_token"]
-            _save(tool)
-            return data["access_token"]
-    except Exception as e:
-        logger.warning(f"Airtable token refresh failed for tool {tool.id}: {e}")
-    return None
+    """Refresh an expired Airtable OAuth access_token."""
+    return await _refresh_via_proxy("airtable", tool, default_expiry=7200)
 
 
 async def refresh_hubspot_token(tool: ToolDefinition) -> Optional[str]:
-    """Refresh an expired HubSpot OAuth token. Returns the fresh access_token or None."""
-    if tool.auth_type != "oauth2":
-        return None
-    refresh_token = tool.oauth_tokens.get("refresh_token")
-    if not refresh_token:
-        return None
-    expiry = tool.oauth_tokens.get("token_expiry", 0)
-    if time.time() < expiry - 60:
-        return tool.oauth_tokens.get("access_token")
-
-    client_id = os.environ.get("HUBSPOT_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("HUBSPOT_OAUTH_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(HUBSPOT_TOKEN_URL, data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret,
-            }, headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            })
-        if resp.status_code == 200:
-            data = resp.json()
-            tool.oauth_tokens["access_token"] = data["access_token"]
-            tool.oauth_tokens["token_expiry"] = time.time() + data.get("expires_in", 1800)
-            if data.get("refresh_token"):
-                tool.oauth_tokens["refresh_token"] = data["refresh_token"]
-            _save(tool)
-            return data["access_token"]
-    except Exception as e:
-        logger.warning(f"HubSpot token refresh failed for tool {tool.id}: {e}")
-    return None
+    """Refresh an expired HubSpot OAuth access_token."""
+    return await _refresh_via_proxy("hubspot", tool, default_expiry=1800)
