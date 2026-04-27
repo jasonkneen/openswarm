@@ -436,14 +436,14 @@ const agentsSlice = createSlice({
   initialState,
   reducers: {
     createDraftSession: {
-      reducer(state, action: PayloadAction<{ draftId: string; mode: string; setActive: boolean; targetDirectory?: string }>) {
-        const { draftId, mode, setActive, targetDirectory } = action.payload;
+      reducer(state, action: PayloadAction<{ draftId: string; mode: string; setActive: boolean; targetDirectory?: string; model?: string; provider?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'auto' }>) {
+        const { draftId, mode, setActive, targetDirectory, model, provider, thinkingLevel } = action.payload;
         state.sessions[draftId] = {
           id: draftId,
           name: 'New chat',
           status: 'draft',
-          provider: 'anthropic',
-          model: 'sonnet',
+          provider: provider || 'anthropic',
+          model: model || 'sonnet',
           mode,
           worktree_path: null,
           branch_name: null,
@@ -461,6 +461,7 @@ const agentsSlice = createSlice({
           streamingMessage: null,
           target_directory: targetDirectory || null,
           tool_group_meta: {},
+          thinking_level: thinkingLevel,
         };
         if (setActive) {
           state.activeSessionId = draftId;
@@ -469,13 +470,16 @@ const agentsSlice = createSlice({
           }
         }
       },
-      prepare(opts?: { mode?: string; setActive?: boolean; targetDirectory?: string }) {
+      prepare(opts?: { mode?: string; setActive?: boolean; targetDirectory?: string; model?: string; provider?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'auto' }) {
         return {
           payload: {
             draftId: `draft-${Date.now().toString(36)}`,
             mode: opts?.mode || 'agent',
             setActive: opts?.setActive !== false,
             targetDirectory: opts?.targetDirectory,
+            model: opts?.model,
+            provider: opts?.provider,
+            thinkingLevel: opts?.thinkingLevel,
           },
         };
       },

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import logging
 import mimetypes
 import base64
@@ -7,6 +8,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import HTTPException, Query
 from fastapi.responses import Response
+from backend.auth import get_auth_token
 from jsonschema import validate as schema_validate, ValidationError as SchemaValidationError
 from backend.config.Apps import SubApp
 from backend.apps.outputs.models import (
@@ -77,6 +79,53 @@ def _inject_data_into_html(html: str, input_json: str = "{}", result_json: str =
     if "<body" in html:
         return html.replace("<body", f"{injection}\n<body", 1)
     return f"{injection}\n{html}"
+
+
+# URL schemes / prefixes that must NOT have ?token= appended. These are either
+# external (CDNs, mailto) or non-network references that the auth middleware
+# never sees. Anything else is treated as a same-origin relative URL pointing
+# at our /api/outputs/.../serve/ subtree, which DOES need the token.
+_ABSOLUTE_URL_PREFIXES = (
+    "http://", "https://", "//", "data:", "blob:",
+    "mailto:", "tel:", "javascript:", "about:", "#",
+)
+
+_HREF_SRC_ATTR_RE = re.compile(
+    r"""(\s(?:href|src))\s*=\s*(["'])([^"']+)\2""",
+    re.IGNORECASE,
+)
+
+
+def _inject_token_into_relative_urls(html: str, token: str) -> str:
+    """Append `?token=<t>` to every relative href/src in the served HTML.
+
+    Browsers strip the parent iframe URL's query string before resolving
+    relative `<link href="styles.css">` / `<script src="x.js">`, so without
+    this rewrite the sub-resource fetch lands at the auth middleware with no
+    credentials and gets a 401. Idempotent: skips URLs that already carry a
+    `token=` param. Skips absolute URLs (CDN, data:, etc.) — see prefix list.
+    """
+    if not token:
+        return html
+
+    def _patch(match: re.Match) -> str:
+        attr, quote, url = match.group(1), match.group(2), match.group(3)
+        lowered = url.lower().lstrip()
+        if lowered.startswith(_ABSOLUTE_URL_PREFIXES):
+            return match.group(0)
+        if "token=" in url:
+            return match.group(0)
+        # Split off any hash fragment so `?token=` lands in the query, not in
+        # the fragment: `page.html?v=1#sec` → `page.html?v=1&token=X#sec`.
+        hash_idx = url.find("#")
+        if hash_idx >= 0:
+            base, frag = url[:hash_idx], url[hash_idx:]
+        else:
+            base, frag = url, ""
+        sep = "&" if "?" in base else "?"
+        return f'{attr}={quote}{base}{sep}token={token}{frag}{quote}'
+
+    return _HREF_SRC_ATTR_RE.sub(_patch, html)
 
 
 def _decode_data_param(d: str) -> tuple[str, str]:
@@ -170,6 +219,10 @@ async def serve_workspace_file(workspace_id: str, filepath: str, _d: str = ""):
     if filepath == "index.html":
         input_json, result_json = _decode_data_param(_d) if _d else ("{}", "null")
         content = _inject_data_into_html(content, input_json, result_json)
+        # Iframe sub-resource fetches (<link>, <script src>, <img>) drop the
+        # parent's ?token= query string, so rewrite the HTML to put the token
+        # back on every relative URL — otherwise sub-resources 401.
+        content = _inject_token_into_relative_urls(content, get_auth_token())
 
     mime, _ = mimetypes.guess_type(filepath)
     return Response(content=content, media_type=mime or "text/plain")
@@ -186,6 +239,7 @@ async def serve_output_file(output_id: str, filepath: str, _d: str = ""):
     if filepath == "index.html":
         input_json, result_json = _decode_data_param(_d) if _d else ("{}", "null")
         content = _inject_data_into_html(content, input_json, result_json)
+        content = _inject_token_into_relative_urls(content, get_auth_token())
 
     mime, _ = mimetypes.guess_type(filepath)
     return Response(content=content, media_type=mime or "text/plain")
@@ -216,7 +270,10 @@ async def read_workspace(workspace_id: str):
         except (json.JSONDecodeError, ValueError):
             pass
 
-    return {"files": files, "meta": meta}
+    # Include `path` so the frontend can rehydrate without re-calling /seed.
+    # /seed unconditionally overwrites, which would clobber any in-progress edits
+    # the agent made since the last save.
+    return {"files": files, "meta": meta, "path": os.path.abspath(folder)}
 
 
 @outputs.router.post("/workspace/seed")

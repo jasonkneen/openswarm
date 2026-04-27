@@ -103,9 +103,39 @@ const SkillBuilderChat: React.FC<SkillBuilderChatProps> = ({ onSkillPreview, onS
     [workspacePath],
   );
 
+  // Honor Settings → default_model + default_thinking_level. createDraftSession's
+  // hardcoded 'sonnet' / undefined-thinking would otherwise win and force every
+  // Skill Builder draft onto Sonnet + Auto thinking.
+  const defaultModel = useAppSelector((s) => s.settings.data.default_model);
+  const defaultThinkingLevel = useAppSelector((s) => s.settings.data.default_thinking_level);
+  const settingsLoaded = useAppSelector((s) => s.settings.loaded);
+  const modelsByProvider = useAppSelector((s) => s.models.byProvider);
+  const modelsLoaded = useAppSelector((s) => s.models.loaded);
+
   const initSession = useCallback(async () => {
     const wsId = `skill-ws-${Date.now().toString(36)}`;
     setStableWorkspaceId(wsId);
+
+    // Resolve provider from the model registry (mirrors ChatInput.tsx provider map).
+    const PROVIDER_MAP: Record<string, string> = {
+      anthropic: 'anthropic',
+      'openswarm pro': 'anthropic',
+      openai: 'openai',
+      google: 'gemini',
+      xai: 'openrouter',
+      meta: 'openrouter',
+      deepseek: 'openrouter',
+      mistral: 'openrouter',
+      qwen: 'openrouter',
+      cohere: 'openrouter',
+    };
+    let resolvedProvider: string | undefined;
+    for (const [prov, models] of Object.entries(modelsByProvider)) {
+      if (models.some((m: any) => m.value === defaultModel)) {
+        resolvedProvider = PROVIDER_MAP[prov.toLowerCase()] || prov.toLowerCase();
+        break;
+      }
+    }
 
     try {
       const res = await fetch(`${SKILLS_WORKSPACE_API}/workspace/seed`, {
@@ -119,19 +149,30 @@ const SkillBuilderChat: React.FC<SkillBuilderChatProps> = ({ onSkillPreview, onS
         mode: 'skill-builder',
         setActive: false,
         targetDirectory: data.path,
+        model: defaultModel || undefined,
+        provider: resolvedProvider,
+        thinkingLevel: defaultThinkingLevel || undefined,
       }));
       setInitialDraftId(action.payload.draftId);
     } catch {
-      const action = dispatch(createDraftSession({ mode: 'skill-builder', setActive: false }));
+      const action = dispatch(createDraftSession({
+        mode: 'skill-builder',
+        setActive: false,
+        model: defaultModel || undefined,
+        provider: resolvedProvider,
+        thinkingLevel: defaultThinkingLevel || undefined,
+      }));
       setInitialDraftId(action.payload.draftId);
     }
-  }, [dispatch]);
+  }, [dispatch, defaultModel, defaultThinkingLevel, modelsByProvider]);
 
   useEffect(() => {
     if (draftCreated.current) return;
+    // Wait for settings + model registry so we don't snapshot stale 'sonnet'.
+    if (!settingsLoaded || !modelsLoaded) return;
     draftCreated.current = true;
     initSession();
-  }, [initSession]);
+  }, [initSession, settingsLoaded, modelsLoaded]);
 
   // Poll workspace for updates
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

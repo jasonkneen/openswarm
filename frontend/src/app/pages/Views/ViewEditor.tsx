@@ -27,7 +27,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
-import { createDraftSession, removeDraftSession, AgentMessage } from '@/shared/state/agentsSlice';
+import { createDraftSession, removeDraftSession, fetchSession, AgentMessage } from '@/shared/state/agentsSlice';
 import { createOutput, updateOutput, Output, executeOutput, OutputExecuteResult, autoRunOutput, autoRunAgentOutput, cleanupAutoRunAgent, AutoRunConfig, SERVE_BASE } from '@/shared/state/outputsSlice';
 import { createSessionWs } from '@/shared/ws/WebSocketManager';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
@@ -559,14 +559,73 @@ const ViewEditor: React.FC<Props> = ({ output, onClose }) => {
 
   const [initialDraftId, setInitialDraftId] = useState<string | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
-  const [stableWorkspaceId] = useState(() => `ws-${Date.now().toString(36)}`);
+  // Reuse the workspace_id stored on the Output if present so we don't seed a
+  // fresh folder every time the editor remounts (which would orphan the agent's
+  // in-progress edits and lose chat continuity). Only mint a new id for first-
+  // time outputs that don't yet have one persisted.
+  const [stableWorkspaceId] = useState(() => output?.workspace_id || `ws-${Date.now().toString(36)}`);
   const draftCreated = useRef(false);
+
+  // Honor the user's Settings → default_model + default_thinking_level.
+  // Without this, createDraftSession's hardcoded 'sonnet' / undefined-thinking
+  // fallbacks win and App Builder always opens on Sonnet + Auto thinking
+  // regardless of what the user picked in Settings.
+  const defaultModel = useAppSelector((s) => s.settings.data.default_model);
+  const defaultThinkingLevel = useAppSelector((s) => s.settings.data.default_thinking_level);
+  const settingsLoaded = useAppSelector((s) => s.settings.loaded);
+  const modelsByProvider = useAppSelector((s) => s.models.byProvider);
+  const modelsLoaded = useAppSelector((s) => s.models.loaded);
 
   useEffect(() => {
     if (draftCreated.current) return;
+    // Wait for settings + model registry before seeding the draft, otherwise
+    // we'd snapshot the Redux initial 'sonnet' default and ignore the user's pick.
+    if (!settingsLoaded || !modelsLoaded) return;
     draftCreated.current = true;
 
+    // Resolve provider from the model registry. Group names mirror the
+    // provider map in ChatInput.tsx (Anthropic / OpenSwarm Pro → 'anthropic',
+    // Google → 'gemini', xAI/Meta/etc → 'openrouter').
+    const PROVIDER_MAP: Record<string, string> = {
+      anthropic: 'anthropic',
+      'openswarm pro': 'anthropic',
+      openai: 'openai',
+      google: 'gemini',
+      xai: 'openrouter',
+      meta: 'openrouter',
+      deepseek: 'openrouter',
+      mistral: 'openrouter',
+      qwen: 'openrouter',
+      cohere: 'openrouter',
+    };
+    let resolvedProvider: string | undefined;
+    for (const [prov, models] of Object.entries(modelsByProvider)) {
+      if (models.some((m: any) => m.value === defaultModel)) {
+        resolvedProvider = PROVIDER_MAP[prov.toLowerCase()] || prov.toLowerCase();
+        break;
+      }
+    }
+
     (async () => {
+      // Reattach branch: this Output already has a session + workspace from a
+      // prior visit. Skip seeding (would clobber any in-progress edits the
+      // agent made) and skip createDraftSession (would orphan the live session).
+      // Just resolve the workspace path and tell AgentChat which session to bind to.
+      if (output?.session_id && output?.workspace_id) {
+        try {
+          const res = await fetch(`${WORKSPACE_API}/${output.workspace_id}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.path) setWorkspacePath(data.path);
+          }
+        } catch { /* path is best-effort; chat still works without it */ }
+        // Pull the latest session state from the backend so the chat catches up
+        // on anything the agent did while the user was on another tab.
+        dispatch(fetchSession(output.session_id));
+        setInitialDraftId(output.session_id);
+        return;
+      }
+
       const seedBody: Record<string, any> = { workspace_id: stableWorkspaceId };
       if (output) {
         const seedFiles: Record<string, string> = { ...output.files };
@@ -588,14 +647,23 @@ const ViewEditor: React.FC<Props> = ({ output, onClose }) => {
           mode: 'view-builder',
           setActive: false,
           targetDirectory: data.path,
+          model: defaultModel || undefined,
+          provider: resolvedProvider,
+          thinkingLevel: defaultThinkingLevel || undefined,
         }));
         setInitialDraftId(action.payload.draftId);
       } catch {
-        const action = dispatch(createDraftSession({ mode: 'view-builder', setActive: false }));
+        const action = dispatch(createDraftSession({
+          mode: 'view-builder',
+          setActive: false,
+          model: defaultModel || undefined,
+          provider: resolvedProvider,
+          thinkingLevel: defaultThinkingLevel || undefined,
+        }));
         setInitialDraftId(action.payload.draftId);
       }
     })();
-  }, [dispatch, output, stableWorkspaceId]);
+  }, [dispatch, output, stableWorkspaceId, settingsLoaded, modelsLoaded, defaultModel, defaultThinkingLevel, modelsByProvider]);
 
   const effectiveSessionId = useAppSelector((state) => {
     if (!initialDraftId) return null;
@@ -671,13 +739,45 @@ const ViewEditor: React.FC<Props> = ({ output, onClose }) => {
     prevAgentActive.current = isAgentActive;
   }, [isAgentActive, workspaceId, pollWorkspace]);
 
+  // Hold the latest session status in a ref so the unmount cleanup can read it
+  // at teardown time (the cleanup closure would otherwise capture a stale value
+  // from when the effect first ran).
+  const sessionStatusRef = useRef<string | null>(null);
+  sessionStatusRef.current = agentStatus;
+  const isLaunchedRef = useRef(false);
+  isLaunchedRef.current = isLaunched;
+
   useEffect(() => {
     return () => {
-      if (initialDraftId) {
+      // Only garbage-collect drafts the user abandoned without launching. Once
+      // a session is launched, the agent runs on the backend independent of
+      // the frontend — leave the Redux entry alive so navigating away doesn't
+      // wipe in-progress work or chat history.
+      if (initialDraftId && sessionStatusRef.current === 'draft' && !isLaunchedRef.current) {
         dispatch(removeDraftSession(initialDraftId));
       }
     };
   }, [initialDraftId, dispatch]);
+
+  // Persist session_id + workspace_id onto the saved Output the moment the
+  // session goes from draft to launched. Without this, reopening the App later
+  // would have no way to find its in-progress session and would seed a fresh one.
+  // Use `createdId` (state) not `createdIdRef.current` so the effect re-fires
+  // after autosave creates the Output for a brand-new app. `output` prop is a
+  // parent snapshot that doesn't refresh, so we dedup via a ref.
+  const persistedLinkageRef = useRef<string | null>(null);
+  useEffect(() => {
+    const eid = output?.id ?? createdId;
+    if (!eid || !effectiveSessionId || !isLaunched) return;
+    const fingerprint = `${eid}:${effectiveSessionId}:${stableWorkspaceId}`;
+    if (persistedLinkageRef.current === fingerprint) return;
+    persistedLinkageRef.current = fingerprint;
+    dispatch(updateOutput({
+      id: eid,
+      session_id: effectiveSessionId,
+      workspace_id: stableWorkspaceId,
+    }));
+  }, [effectiveSessionId, isLaunched, output?.id, createdId, stableWorkspaceId, dispatch]);
 
   const schemaText = files['schema.json'] ?? '{"type":"object","properties":{},"required":[]}';
 

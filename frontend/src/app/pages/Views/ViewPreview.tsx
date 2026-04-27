@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useMemo, forwardRef, useImperativeHandle, use
 import Box from '@mui/material/Box';
 import { useElementSelection } from '@/app/components/ElementSelectionContext';
 import { useIframeElementSelector } from './useIframeElementSelector';
+import { getAuthToken, ensureAuthToken } from '@/shared/config';
 
 export interface ViewPreviewHandle {
   reload: () => void;
@@ -54,6 +55,19 @@ const ViewPreview = forwardRef<ViewPreviewHandle, Props>(({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const ctx = useElementSelection();
   const [reloadKey, setReloadKey] = useState(0);
+  // Track auth token in state so the iframe URL is rebuilt the moment the
+  // token IPC roundtrip resolves. Without this, the first render runs while
+  // _authTokenCache is still '' and the iframe loads a tokenless URL → 401
+  // → the JSON error renders inside the preview pane.
+  const [authToken, setAuthToken] = useState(() => getAuthToken());
+  useEffect(() => {
+    if (authToken) return;
+    let cancelled = false;
+    ensureAuthToken().then((tok) => {
+      if (!cancelled && tok) setAuthToken(tok);
+    });
+    return () => { cancelled = true; };
+  }, [authToken]);
 
   useEffect(() => {
     if (ctx && iframeRef.current) {
@@ -65,10 +79,13 @@ const ViewPreview = forwardRef<ViewPreviewHandle, Props>(({
 
   const iframeSrc = useMemo(() => {
     if (!serveUrl) return undefined;
+    // Don't ship a tokenless URL — the backend auth middleware would 401 and
+    // the iframe would render the JSON error. Wait for the token to load.
+    if (!authToken) return undefined;
     const dataParam = encodeDataParam(inputData, backendResult);
     const sep = serveUrl.includes('?') ? '&' : '?';
-    return `${serveUrl}${sep}_d=${encodeURIComponent(dataParam)}&_v=${reloadKey}`;
-  }, [serveUrl, inputData, backendResult, reloadKey]);
+    return `${serveUrl}${sep}_d=${encodeURIComponent(dataParam)}&_v=${reloadKey}&token=${encodeURIComponent(authToken)}`;
+  }, [serveUrl, inputData, backendResult, reloadKey, authToken]);
 
   const srcdoc = useMemo(() => {
     if (serveUrl || !frontendCode) return undefined;

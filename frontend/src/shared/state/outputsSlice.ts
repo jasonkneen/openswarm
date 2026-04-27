@@ -25,6 +25,10 @@ export interface Output {
   permission: string;
   auto_run_config?: AutoRunConfig | null;
   thumbnail?: string | null;
+  // Linkage so reopening App Builder reattaches to the in-progress session
+  // and reuses the on-disk workspace folder instead of seeding a fresh one.
+  session_id?: string | null;
+  workspace_id?: string | null;
   created_at: string;
   updated_at: string;
 }

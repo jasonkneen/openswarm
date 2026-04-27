@@ -27,6 +27,11 @@ class Output(BaseModel):
     permission: str = "ask"
     auto_run_config: Optional[AutoRunConfig] = None
     thumbnail: Optional[str] = None
+    # Linkage so reopening the App Builder reattaches to the in-progress session
+    # and reuses the same on-disk workspace folder instead of seeding a fresh one
+    # (which would orphan the running agent + lose chat history on every navigate).
+    session_id: Optional[str] = None
+    workspace_id: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
@@ -71,6 +76,8 @@ class OutputCreate(BaseModel):
     files: dict[str, str] = Field(default_factory=dict)
     auto_run_config: Optional[dict[str, Any]] = None
     thumbnail: Optional[str] = None
+    session_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -101,6 +108,8 @@ class OutputUpdate(BaseModel):
     permission: Optional[str] = None
     auto_run_config: Optional[dict[str, Any]] = None
     thumbnail: Optional[str] = None
+    session_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

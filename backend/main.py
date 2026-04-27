@@ -107,7 +107,10 @@ async def _auth_middleware(request: Request, call_next):
         # (CLI path — CLI sends x-api-key with our token as value).
         headers = dict(request.headers)
         x_api_key = headers.get("x-api-key") or headers.get("X-API-Key")
-        auth_ok = request_matches_token(headers)
+        # Accept `?token=<token>` query param too. Required for browser-driven
+        # GETs that can't set headers — notably the App Builder iframe loading
+        # /api/outputs/.../serve/index.html via <iframe src="...">.
+        auth_ok = request_matches_token(headers, query_params=dict(request.query_params))
         if not auth_ok and x_api_key:
             import secrets as _s
             from backend.auth import get_auth_token as _gt
