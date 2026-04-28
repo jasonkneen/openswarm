@@ -68,32 +68,31 @@ if $SIGN_MODE; then
     fi
 fi
 
-# Step 0: Ensure bundled uvx binary exists.
-# We deliberately ship ONLY uvx (~681KB universal), NOT uv (~97MB universal).
-# tools_lib.py probes for both, but the only tool config that uses either is
-# Google Workspace (cmd: "uvx"). Bare `uv` (the package installer/manager) is
-# never invoked at runtime by any shipped tool — it's a build-time tool.
-# Saves 97MB from the Mac DMG. If a future MCP needs `uv`, this is a one-line
-# add-back here.
+# Step 0: Ensure bundled uv + uvx binaries exist.
+# IMPORTANT: uvx is a tiny ~700KB shim that just resolves to a sibling `uv`
+# binary on disk. It does NOT contain the package-installer logic itself;
+# at runtime `uvx` errors with "Could not find the `uv` binary at either of:
+# .../uv-bin/uv  .../uv-bin/uv" if `uv` is missing. So we must ship both,
+# even though only Google Workspace MCP uses uvx as its `command`. A prior
+# revision tried to save ~30MB by shipping only uvx — that broke MCP boot
+# on fresh Macs. Don't repeat the mistake.
 UV_BIN_DIR="$PROJECT_ROOT/backend/uv-bin"
-# Defensively drop a stale `uv` from prior builds so it doesn't ride along.
-if [[ -f "$UV_BIN_DIR/uv" ]]; then
-    echo "[0] Removing legacy uv binary (we now ship uvx only)..."
-    rm -f "$UV_BIN_DIR/uv"
-fi
-if [[ ! -f "$UV_BIN_DIR/uvx" ]]; then
-    echo "[0] Downloading uvx binary..."
-    mkdir -p "$UV_BIN_DIR"
+mkdir -p "$UV_BIN_DIR"
+NEED_UV=false
+[[ ! -f "$UV_BIN_DIR/uv"  ]] && NEED_UV=true
+[[ ! -f "$UV_BIN_DIR/uvx" ]] && NEED_UV=true
+if $NEED_UV; then
+    echo "[0] Downloading uv + uvx binaries (universal arm64+x64)..."
     TMPDIR_UV=$(mktemp -d)
     curl -sL "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz" | tar xz -C "$TMPDIR_UV"
-    curl -sL "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz" | tar xz -C "$TMPDIR_UV"
-    # Only lipo uvx — skip uv entirely.
+    curl -sL "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz"  | tar xz -C "$TMPDIR_UV"
+    lipo -create "$TMPDIR_UV/uv-aarch64-apple-darwin/uv"  "$TMPDIR_UV/uv-x86_64-apple-darwin/uv"  -output "$UV_BIN_DIR/uv"
     lipo -create "$TMPDIR_UV/uv-aarch64-apple-darwin/uvx" "$TMPDIR_UV/uv-x86_64-apple-darwin/uvx" -output "$UV_BIN_DIR/uvx"
-    chmod +x "$UV_BIN_DIR/uvx"
+    chmod +x "$UV_BIN_DIR/uv" "$UV_BIN_DIR/uvx"
     rm -rf "$TMPDIR_UV"
-    echo "uvx downloaded and bundled."
+    echo "uv + uvx downloaded and bundled."
 else
-    echo "[0] uvx binary already present."
+    echo "[0] uv + uvx already present."
 fi
 echo ""
 
@@ -277,6 +276,74 @@ if [[ ! -f "$STAGING_DIR/router/server.js" ]]; then
     exit 1
 fi
 echo "Router staged."
+echo ""
+
+# Step 3b: Bundle a real Node.js binary so 9Router and MCP servers don't
+# fall back to ELECTRON_RUN_AS_NODE on user machines without system node.
+# Two wins:
+#   1. Dock cleanliness — Electron-as-Node fallback is the second probable
+#      source of the bouncing "exec" icon next to OpenSwarm on fresh Macs
+#      (Python.app wrapping addresses the first). Real node is a clean
+#      background process that LaunchServices never registers in the dock.
+#   2. Cold-start speed — re-execing the OpenSwarm Electron binary as Node
+#      pays the full Electron startup cost (~5-15s on first launch incl.
+#      Gatekeeper/XProtect verification), then more for the Next.js server
+#      to boot. Real node starts in ~50ms. Shrinks the splash window
+#      proportionally and reduces the "frontend up but nothing works"
+#      tail (analytics.py:196 awaits 9Router during backend lifespan).
+# Pinned to Node 20 LTS (NODE_MODULE_VERSION 115). 9router 0.3.60 has zero
+# native bindings (sql.js, not better-sqlite3), so any Node 18+ works
+# regardless. The bundled MCP servers (mcp-bundles/) are esbuild outputs
+# with target=node22 — Node 20 covers the syntax + builtins they use.
+echo "[3b/5] Bundling Node.js runtime..."
+NODE_VERSION="v20.18.1"
+NODE_STAGE_DIR="$STAGING_DIR/node"
+mkdir -p "$NODE_STAGE_DIR"
+
+# Per-arch download helper. Stages each arch under its own subdir so the
+# .app can ship both and pick at runtime via process.arch (see
+# electron/main.js getBundledNodePath). Slightly larger DMG (~25MB extra
+# per arch we ship) but eliminates any beforePack-hook complexity in
+# electron-builder's publish-mode dual-arch flow.
+download_node_for_arch() {
+    local arch="$1"  # arm64 | x64
+    local out_dir="$NODE_STAGE_DIR/$arch"
+    if [[ -f "$out_dir/bin/node" ]]; then
+        echo "[3b] Node $NODE_VERSION ($arch) already cached"
+        return 0
+    fi
+    rm -rf "$out_dir"
+    mkdir -p "$out_dir/bin"
+    local tarball="node-${NODE_VERSION}-darwin-${arch}.tar.gz"
+    local url="https://nodejs.org/dist/${NODE_VERSION}/${tarball}"
+    echo "[3b] Downloading $tarball..."
+    local tmp; tmp=$(mktemp -d)
+    curl -fsSL --progress-bar -o "$tmp/node.tar.gz" "$url"
+    tar xzf "$tmp/node.tar.gz" -C "$tmp"
+    # Ship just the `node` binary. We don't need npm/npx/corepack at runtime —
+    # all router + MCP code is pre-bundled. ~50 MB per arch -> ~25 MB after
+    # gzip/dmg compression.
+    cp "$tmp/node-${NODE_VERSION}-darwin-${arch}/bin/node" "$out_dir/bin/node"
+    chmod +x "$out_dir/bin/node"
+    rm -rf "$tmp"
+    echo "[3b] Node $NODE_VERSION ($arch) staged ($(du -h "$out_dir/bin/node" | cut -f1))"
+}
+
+# Publish mode builds both DMGs from one invocation, so always stage both.
+# Single-arch local/sign builds only need the host arch.
+if $PUBLISH_MODE; then
+    download_node_for_arch arm64
+    download_node_for_arch x64
+else
+    HOST_ARCH=$(uname -m)
+    if [[ "$HOST_ARCH" == "arm64" ]]; then
+        download_node_for_arch arm64
+    elif [[ "$HOST_ARCH" == "x86_64" ]]; then
+        download_node_for_arch x64
+    else
+        echo "WARNING: unknown host arch $HOST_ARCH — skipping node bundle (will fall back to ELECTRON_RUN_AS_NODE)"
+    fi
+fi
 echo ""
 
 # Step 4: Snapshot source directories for packaging

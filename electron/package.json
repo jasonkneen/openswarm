@@ -1,6 +1,6 @@
 {
   "name": "openswarm",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "description": "OpenSwarm — AI Agent Orchestrator",
   "main": "main.js",
   "scripts": {
@@ -119,6 +119,13 @@
       {
         "from": "build-staging/router",
         "to": "router",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build-staging/node",
+        "to": "node",
         "filter": [
           "**/*"
         ]

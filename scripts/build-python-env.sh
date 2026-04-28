@@ -186,6 +186,87 @@ echo "Pre-compiling bytecode..."
 "$PYTHON_BIN" -m compileall -q -j 4 "$PYTHON_ENV_DIR/lib" || \
     echo "WARNING: some files failed to compile; runtime will fall back to in-memory compile."
 
+# ----- macOS: hide bundled python from the Dock -----
+# python-build-standalone ships a bare Mach-O at bin/python3.13 with NO
+# embedded __TEXT,__info_plist section, but libpython3.13.dylib is linked
+# against AppKit / Cocoa / ApplicationServices. On a fresh user Mac (with
+# .app quarantine attrs + first-launch XProtect inspection), spawning that
+# binary from Electron causes LaunchServices to register it as a generic
+# bundleless GUI process and render the macOS "exec" placeholder dock icon
+# (bouncing for the entire boot window). Wrapping the binary in a tiny .app
+# whose Info.plist sets LSUIElement=1 tells LaunchServices to skip the dock
+# entry entirely. Python.org's framework Python uses the same trick.
+#
+# Invariants this layout depends on (don't break them):
+#   - codesign rejects symlinks as CFBundleExecutable ("the main executable
+#     or Info.plist must be a regular file (no symlinks, etc.)") — so
+#     python3 inside Python.app MUST be a real Mach-O copy, not a symlink.
+#     We copy bin/python3.13 in and rewrite its LC_LOAD_DYLIB so it still
+#     finds the single libpython3.13.dylib at python-env/lib/.
+#   - Python.getpath() calls realpath() on argv[0], so sys.prefix still
+#     resolves to python-env/ even though the launcher lives inside the
+#     wrapper bundle. All stdlib + site-packages discovery is unchanged.
+#   - The launcher binary is tiny (~50 KB), so the duplicate copy is
+#     negligible. We deliberately do NOT duplicate libpython3.13.dylib
+#     (~18 MB) — only the launcher.
+if [[ "$(uname)" == "Darwin" ]]; then
+    echo "Creating Python.app launcher (LSUIElement=1, hides from Dock)..."
+    PY_APP="$PYTHON_ENV_DIR/Python.app"
+    rm -rf "$PY_APP"
+    mkdir -p "$PY_APP/Contents/MacOS"
+    cat > "$PY_APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>python3</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.clusterlabs.openswarm.python</string>
+  <key>CFBundleName</key>
+  <string>OpenSwarm Backend</string>
+  <key>CFBundleDisplayName</key>
+  <string>OpenSwarm Backend</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>3.13</string>
+  <key>CFBundleVersion</key>
+  <string>3.13</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+    # Copy the launcher binary into the bundle. codesign requires a
+    # regular file here (symlinks are rejected outright). Then rewrite
+    # the LC_LOAD_DYLIB so @executable_path resolves correctly from
+    # Python.app/Contents/MacOS/ — three levels up reaches python-env/,
+    # then ../lib gets us to libpython3.13.dylib without duplication.
+    cp "$PYTHON_ENV_DIR/bin/python3.13" "$PY_APP/Contents/MacOS/python3"
+    chmod +x "$PY_APP/Contents/MacOS/python3"
+    install_name_tool \
+        -change "@executable_path/../lib/libpython3.13.dylib" \
+                "@executable_path/../../../lib/libpython3.13.dylib" \
+        "$PY_APP/Contents/MacOS/python3"
+    # install_name_tool invalidates the existing adhoc signature; re-sign
+    # ad-hoc so the binary loads cleanly during the build's self-test.
+    # electron-builder's full sign pass will replace this with a proper
+    # Developer ID signature later.
+    codesign --force --sign - "$PY_APP/Contents/MacOS/python3" 2>/dev/null
+
+    # Sanity-check: the wrapper actually runs, sys.prefix resolves to
+    # python-env/ via realpath, and libpython loads via the rewritten
+    # @executable_path path.
+    if ! "$PY_APP/Contents/MacOS/python3" -c \
+            "import sys; assert sys.prefix.endswith('python-env'), sys.prefix" 2>/dev/null; then
+        echo "ERROR: Python.app wrapper failed self-test (libpython or stdlib not findable)" >&2
+        echo "  Try: $PY_APP/Contents/MacOS/python3 -c 'import sys; print(sys.prefix)'" >&2
+        exit 1
+    fi
+    echo "Python.app wrapper installed at $PY_APP"
+fi
+
 TOTAL_SIZE=$(du -sh "$PYTHON_ENV_DIR" | cut -f1)
 PYC_COUNT=$(find "$PYTHON_ENV_DIR" -name '*.pyc' -type f | wc -l | tr -d ' ')
 echo ""

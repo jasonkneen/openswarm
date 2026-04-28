@@ -296,10 +296,26 @@ function getPythonPath() {
   // python-build-standalone layout differs by OS:
   //   macOS / Linux: <env>/bin/python3
   //   Windows:       <env>\python.exe   (no bin/, no python3)
+  //
+  // macOS extra: invoke via Python.app/Contents/MacOS/python3 instead of
+  // bin/python3 so LaunchServices reads LSUIElement=1 from the wrapper
+  // bundle's Info.plist and skips the Dock entry. Without this, the
+  // bundleless python3.13 binary appears as a generic "exec" placeholder
+  // in the Dock on fresh user Macs, bouncing for the entire boot window.
+  // sys.prefix / sys.executable still resolve via realpath so all stdlib
+  // and site-packages discovery is unchanged. See scripts/build-python-env.sh
+  // for the wrapper layout invariants.
   if (isPackaged) {
     const envPath = path.join(process.resourcesPath, 'python-env');
     if (process.platform === 'win32') {
       return path.join(envPath, 'python.exe');
+    }
+    if (process.platform === 'darwin') {
+      const wrapped = path.join(envPath, 'Python.app', 'Contents', 'MacOS', 'python3');
+      // Defensive fallback: if the wrapper is missing for any reason
+      // (e.g. older build cache), fall back to the bare binary so boot
+      // still succeeds — only the Dock-icon suppression is lost.
+      if (fs.existsSync(wrapped)) return wrapped;
     }
     return path.join(envPath, 'bin', 'python3');
   }
@@ -307,6 +323,32 @@ function getPythonPath() {
     return path.join(__dirname, '..', 'backend', '.venv', 'Scripts', 'python.exe');
   }
   return path.join(__dirname, '..', 'backend', '.venv', 'bin', 'python3');
+}
+
+// Path to a real Node.js binary bundled in extraResources, or null if not
+// shipped (dev mode, or build that skipped the node-fetch step). Backend
+// reads OPENSWARM_NODE_PATH env var to prefer this over both system `node`
+// (which fresh user Macs lack) and the ELECTRON_RUN_AS_NODE fallback
+// (which has flaky Dock behavior + slow cold-start). Used by 9Router and
+// MCP bundle spawning.
+//
+// Layout shipped by scripts/build-app.sh:
+//   <resources>/node/arm64/bin/node
+//   <resources>/node/x64/bin/node
+// Both arches are staged so a single extraResources entry covers
+// publish-mode dual-arch builds without per-arch staging hooks; the
+// runtime picks the matching one by process.arch. Wasted ~25 MB per
+// DMG of cross-arch payload is the cost of avoiding electron-builder's
+// per-arch beforePack complexity. Windows uses node.exe at the root of
+// the per-arch subdir.
+function getBundledNodePath() {
+  if (!isPackaged) return null;
+  const arch = process.arch === 'x64' ? 'x64' : (process.arch === 'arm64' ? 'arm64' : null);
+  if (!arch) return null;
+  const candidate = process.platform === 'win32'
+    ? path.join(process.resourcesPath, 'node', arch, 'node.exe')
+    : path.join(process.resourcesPath, 'node', arch, 'bin', 'node');
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 // Polls /api/health/check until the backend answers 200, or the spawned
@@ -408,6 +450,18 @@ async function startBackend() {
     // .md / .json files without an explicit encoding= argument.
     PYTHONUTF8: '1',
   };
+
+  // Tell the backend where to find a real Node binary for 9Router and
+  // bundled MCP servers. Preferring this over ELECTRON_RUN_AS_NODE avoids
+  // (a) the second OpenSwarm-as-Node process briefly registering in the
+  // Dock on fresh Macs, and (b) the slow Electron cold-start tail (~5-15s)
+  // that Electron-as-Node adds vs. native node (~1-2s). Falls back to the
+  // existing system-node / Electron-as-Node chain in nine_router._find_node()
+  // if the env var is unset (dev mode, or build without node fetch).
+  const bundledNode = getBundledNodePath();
+  if (bundledNode) {
+    env.OPENSWARM_NODE_PATH = bundledNode;
+  }
 
   if (isPackaged) {
     // site-packages location differs by OS — Windows has no lib/python3.13/.

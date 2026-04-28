@@ -88,13 +88,28 @@ def _find_9router_dir() -> str | None:
 
 
 def _find_node() -> str | None:
-    """Find a Node.js binary (works in both dev and packaged mode)."""
-    # Check system node first
+    """Find a Node.js binary (works in both dev and packaged mode).
+
+    Priority order:
+      1. OPENSWARM_NODE_PATH — set by electron/main.js when a real Node
+         binary is bundled in extraResources. Always preferred on user
+         machines because it (a) avoids the bouncing "exec" Dock icon
+         that ELECTRON_RUN_AS_NODE produces on fresh Macs and (b) starts
+         in ~50ms vs Electron-as-Node's 5–15s cold-start, shrinking the
+         splash window the user stares at.
+      2. System `node` on PATH — dev convenience.
+      3. ELECTRON_RUN_AS_NODE fallback — last resort. Only hits this on
+         packaged builds that for some reason shipped without the bundled
+         node payload.
+    """
+    bundled = os.environ.get("OPENSWARM_NODE_PATH")
+    if bundled and os.path.exists(bundled):
+        return bundled
+
     node = shutil.which("node")
     if node:
         return node
 
-    # In packaged Electron app, use the Electron binary with ELECTRON_RUN_AS_NODE=1
     electron_path = os.environ.get("OPENSWARM_ELECTRON_PATH")
     if electron_path and os.path.exists(electron_path):
         return electron_path

@@ -60,34 +60,33 @@ if ($Sign) {
     }
 }
 
-# --- Step 0: Bundled uvx for Windows ---
-# We deliberately ship ONLY uvx.exe (~700KB), NOT uv.exe (~30MB). Tools
-# only ever invoke uvx; bare uv is a build-time installer/manager. Saves
-# ~30MB from the Windows installer. See scripts/build-app.sh for context.
+# --- Step 0: Bundled uv + uvx for Windows ---
+# IMPORTANT: uvx.exe is a tiny shim that requires sibling uv.exe at runtime.
+# Without uv.exe, MCPs that use `command: uvx` (e.g. Google Workspace) fail
+# with "Could not find the `uv` binary". A prior revision shipped only uvx
+# to save ~30MB; that broke first-launch MCP discovery on fresh Macs and
+# Windows machines without a system uv install. Ship both.
 $UvBinDir = Join-Path $ProjectRoot 'backend\uv-bin'
-# Defensively drop a stale uv.exe from prior builds.
-if (Test-Path (Join-Path $UvBinDir 'uv.exe')) {
-    Write-Host "[0] Removing legacy uv.exe (we now ship uvx only)..."
-    Remove-Item -Force (Join-Path $UvBinDir 'uv.exe')
-}
-if (-not (Test-Path (Join-Path $UvBinDir 'uvx.exe'))) {
-    Write-Host "[0] Downloading uvx for Windows..."
-    New-Item -ItemType Directory -Force -Path $UvBinDir | Out-Null
+New-Item -ItemType Directory -Force -Path $UvBinDir | Out-Null
+$NeedUv = -not (Test-Path (Join-Path $UvBinDir 'uv.exe')) -or `
+          -not (Test-Path (Join-Path $UvBinDir 'uvx.exe'))
+if ($NeedUv) {
+    Write-Host "[0] Downloading uv + uvx for Windows..."
     $UvUrl = 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip'
     $TmpZip = Join-Path $env:TEMP "uv-win-$([guid]::NewGuid()).zip"
     $TmpExtract = Join-Path $env:TEMP "uv-win-extract-$([guid]::NewGuid())"
     try {
         Invoke-WebRequest -Uri $UvUrl -OutFile $TmpZip -UseBasicParsing
         Expand-Archive -Path $TmpZip -DestinationPath $TmpExtract -Force
-        # Only copy uvx.exe -- skip uv.exe entirely.
+        Get-ChildItem -Path $TmpExtract -Recurse -Filter 'uv.exe'  | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName (Join-Path $UvBinDir 'uv.exe')  -Force }
         Get-ChildItem -Path $TmpExtract -Recurse -Filter 'uvx.exe' | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName (Join-Path $UvBinDir 'uvx.exe') -Force }
-        Write-Host "uvx.exe downloaded and bundled."
+        Write-Host "uv.exe + uvx.exe downloaded and bundled."
     } finally {
         Remove-Item -Force $TmpZip -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $TmpExtract -ErrorAction SilentlyContinue
     }
 } else {
-    Write-Host "[0] uvx.exe already present."
+    Write-Host "[0] uv.exe + uvx.exe already present."
 }
 Write-Host ""
 
@@ -278,6 +277,38 @@ if (-not (Test-Path (Join-Path $Staging 'router\server.js'))) {
     throw "Router fetch failed - server.js not found in staging"
 }
 Write-Host "Router staged."
+Write-Host ""
+
+# --- Step 3b: Bundle a real Node.js binary so 9Router and MCP servers
+# don't fall back to ELECTRON_RUN_AS_NODE on user machines without system
+# node. Wins: (1) avoids the bouncing "exec" Dock icon (irrelevant on
+# Windows but matches the macOS build for consistency); (2) shrinks
+# 9Router cold-start from ~10s (Electron-as-Node) to ~1-2s (real node),
+# which directly shrinks the splash window the user sees during boot.
+# Pinned to Node 20 LTS, NODE_MODULE_VERSION 115. 9router 0.3.60 has
+# no native bindings (sql.js, not better-sqlite3) so any Node 18+ works.
+Write-Host "[3b/5] Bundling Node.js runtime..."
+$NodeVersion = 'v20.18.1'
+$NodeStageDir = Join-Path $Staging 'node\x64'
+New-Item -ItemType Directory -Force -Path $NodeStageDir | Out-Null
+$NodeZip = Join-Path $env:TEMP "node-win-$([guid]::NewGuid()).zip"
+$NodeExtract = Join-Path $env:TEMP "node-win-extract-$([guid]::NewGuid())"
+try {
+    $NodeUrl = "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-x64.zip"
+    Write-Host "[3b] Downloading $NodeUrl..."
+    Invoke-WebRequest -Uri $NodeUrl -OutFile $NodeZip -UseBasicParsing
+    Expand-Archive -Path $NodeZip -DestinationPath $NodeExtract -Force
+    # Ship just node.exe — npm/npx are unused at runtime (router + MCP
+    # bundles are pre-built). Saves ~70 MB from the installer.
+    $SrcNode = Join-Path $NodeExtract "node-$NodeVersion-win-x64\node.exe"
+    if (-not (Test-Path $SrcNode)) { throw "node.exe not found at $SrcNode after extract" }
+    Copy-Item -Force $SrcNode (Join-Path $NodeStageDir 'node.exe')
+    $Size = (Get-Item (Join-Path $NodeStageDir 'node.exe')).Length / 1MB
+    Write-Host ("[3b] Node {0} (x64) staged ({1:N1} MB)" -f $NodeVersion, $Size)
+} finally {
+    if (Test-Path $NodeZip) { Remove-Item -Force $NodeZip }
+    if (Test-Path $NodeExtract) { Remove-Item -Recurse -Force $NodeExtract }
+}
 Write-Host ""
 
 # --- Step 4: Snapshot source dirs into electron\build-staging\ ---

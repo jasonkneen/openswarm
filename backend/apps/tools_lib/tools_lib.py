@@ -460,7 +460,17 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                         bundle_path = bundle_dir_path
                     elif os.path.isfile(bundle_file_path):
                         bundle_path = bundle_file_path
-                    if bundle_path and electron_path:
+                    # Prefer the bundled real-Node binary over Electron-as-Node:
+                    # avoids the bouncing "exec" Dock icon on fresh user Macs +
+                    # spawns ~10x faster than re-execing the OpenSwarm Electron
+                    # binary as Node. Falls back to Electron-as-Node only if
+                    # the bundled node payload wasn't shipped (legacy builds).
+                    bundled_node = os.environ.get("OPENSWARM_NODE_PATH")
+                    if bundle_path and bundled_node and os.path.exists(bundled_node):
+                        config["command"] = bundled_node
+                        config["args"] = [bundle_path]
+                        logger.info(f"Using bundled MCP server for {pkg_name} via bundled node ({bundle_path})")
+                    elif bundle_path and electron_path:
                         config["command"] = electron_path
                         config["args"] = [bundle_path]
                         config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
@@ -476,11 +486,14 @@ def derive_mcp_config(tool: ToolDefinition) -> Optional[dict]:
                                 pkg_meta = _json.load(f)
                             bin_field = pkg_meta.get("bin", {})
                             entry = list(bin_field.values())[0] if isinstance(bin_field, dict) else bin_field
-                            node_cmd = electron_path or shutil.which("node")
+                            # Same priority as 9Router / MCP-bundle paths: bundled node > system node > Electron-as-Node.
+                            node_cmd = (bundled_node if bundled_node and os.path.exists(bundled_node) else None) \
+                                or shutil.which("node") \
+                                or electron_path
                             if node_cmd:
                                 config["command"] = node_cmd
                                 config["args"] = [os.path.join(npm_dir, "node_modules", pkg_name, entry)]
-                                if electron_path:
+                                if node_cmd == electron_path:
                                     config.setdefault("env", {})["ELECTRON_RUN_AS_NODE"] = "1"
                                 logger.info(f"Using pre-installed npm MCP server for {pkg_name}")
 
@@ -929,14 +942,18 @@ async def m365_device_login(tool_id: str):
     if not os.path.isfile(script):
         raise HTTPException(status_code=500, detail="M365 MCP server not installed")
 
+    # Same priority as MCP-bundle / 9Router paths: bundled real node first
+    # (clean, no Dock flicker, fast cold-start), then system node, then
+    # Electron-as-Node as last resort.
+    bundled = os.environ.get("OPENSWARM_NODE_PATH")
     node = shutil.which("node")
     electron = os.environ.get("OPENSWARM_ELECTRON_PATH")
-    cmd = electron or node
+    cmd = (bundled if bundled and os.path.exists(bundled) else None) or node or electron
     if not cmd:
         raise HTTPException(status_code=500, detail="No node/electron found")
 
     env = {**os.environ, **_m365_cache_env()}
-    if electron:
+    if cmd == electron:
         env["ELECTRON_RUN_AS_NODE"] = "1"
 
     # Kill any existing login process for this tool
