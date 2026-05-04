@@ -842,11 +842,23 @@ const ProviderReasoningExplanation: React.FC<{
     }
     return segs.join(' · ');
   })();
+  // Stable per-mount variant pick. Each render of the same bubble keeps
+  // its line; new bubbles get a fresh roll. Adds a touch of personality
+  // without becoming repetitive across the transcript.
+  const variants = [
+    "It's still thinking — we just aren't allowed to peek behind the curtain.",
+    "Wheels are turning, but this provider keeps its thoughts private.",
+    "Brain's busy back there; the provider just isn't letting us listen in.",
+    "Mulling it over quietly — only Claude shows its work out loud.",
+    "Thinking happened, just not in the open. (GPT and Gemini play their cards close.)",
+    "Reasoning's underway, but this provider doesn't broadcast it. Trust the process.",
+  ];
+  const idx = useMemo(() => Math.floor(Math.random() * variants.length), []);
+  const line = variants[idx];
+
   return (
     <Box component="span" sx={{ fontStyle: 'italic', opacity: 0.85 }}>
-      The model reasoned about this turn, but the provider didn't expose
-      the reasoning text — only Anthropic emits a full chain-of-thought
-      stream. {metric ? `Spent ${metric} thinking.` : 'No reasoning trace available.'}
+      {line} {metric ? `Took ${metric}.` : ''}
     </Box>
   );
 };

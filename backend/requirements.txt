@@ -11,8 +11,6 @@ claude-agent-sdk==0.1.70
 jsonschema
 fastapi[standard]
 pydantic==2.13.3
-langchain-core==0.3.51
-langchain-openai==0.3.12
 typeguard==4.4.2
 python-dotenv==1.1.1
 Pillow

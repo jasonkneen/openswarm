@@ -947,20 +947,6 @@ export const dashboardWs = new WebSocketManager(`${WS_BASE}/ws/dashboard`, { ski
 // to a no-op replay. Safe.
 const _sessionLastSeq: Map<string, number> = new Map();
 
-export function getPersistedLastSeq(sessionId: string): number {
-  return _sessionLastSeq.get(sessionId) ?? 0;
-}
-
-export function setPersistedLastSeq(sessionId: string, seq: number): void {
-  if (seq > (_sessionLastSeq.get(sessionId) ?? 0)) {
-    _sessionLastSeq.set(sessionId, seq);
-  }
-}
-
-export function clearPersistedLastSeq(sessionId: string): void {
-  _sessionLastSeq.delete(sessionId);
-}
-
 export function createSessionWs(sessionId: string): WebSocketManager {
   return new WebSocketManager(`${WS_BASE}/ws/agents/${sessionId}`, { sessionId });
 }

@@ -2886,17 +2886,82 @@ class AgentManager:
                                 _ticker_task = asyncio.create_task(_ticker_loop())
 
                         if content_parts:
-                            asst_msg = Message(
-                                id=stream_text_msg_id or uuid4().hex,
-                                role="assistant",
-                                content="\n".join(content_parts),
-                                branch_id=session.active_branch_id,
+                            _asst_text = "\n".join(content_parts)
+                            # 9Router can deliver upstream auth failures
+                            # AS the assistant's reply ("Failed to
+                            # authenticate. API Error: 401 ... [codex/...]
+                            # Provided authentication token is expired").
+                            # When that happens, the SDK doesn't raise —
+                            # so our catch-all _is_auth_error path never
+                            # fires. Detect the pattern in the text
+                            # itself and substitute a friendly system
+                            # bubble + auth_error WS event so the user
+                            # gets an actionable message instead of a
+                            # raw 401 JSON dump in the chat.
+                            _lower_text = _asst_text.lower()
+                            _looks_like_router_auth_error = (
+                                ("failed to authenticate" in _lower_text and "401" in _lower_text)
+                                or ("authentication token is expired" in _lower_text)
+                                or ("authentication token has expired" in _lower_text)
+                                or ("provided authentication token" in _lower_text and ("401" in _lower_text or "expired" in _lower_text))
                             )
-                            session.messages.append(asst_msg)
-                            await ws_manager.send_to_session(session_id, "agent:message", {
-                                "session_id": session_id,
-                                "message": asst_msg.model_dump(mode="json"),
-                            })
+                            if _looks_like_router_auth_error:
+                                # Build a friendly message keyed off the
+                                # provider name in the upstream error.
+                                if "codex/" in _lower_text or "[codex" in _lower_text:
+                                    friendly = (
+                                        "GPT subscription token expired. Open Settings → Models and click "
+                                        "Reconnect on the OpenAI / GPT row to refresh — should take ~10s, "
+                                        "then send your message again."
+                                    )
+                                    reason = "codex_token_expired"
+                                elif "gemini-cli/" in _lower_text or "[gemini" in _lower_text:
+                                    friendly = (
+                                        "Gemini subscription token expired. Open Settings → Models and click "
+                                        "Reconnect on the Google / Gemini row, then send your message again."
+                                    )
+                                    reason = "gemini_token_expired"
+                                else:
+                                    friendly = (
+                                        "Provider authentication expired. Open Settings → Models and "
+                                        "reconnect, then send your message again."
+                                    )
+                                    reason = "router_auth_expired"
+                                _err_msg = Message(
+                                    id=uuid4().hex,
+                                    role="system",
+                                    content=friendly,
+                                    branch_id=session.active_branch_id,
+                                )
+                                session.messages.append(_err_msg)
+                                await ws_manager.send_to_session(session_id, "agent:auth_error", {
+                                    "session_id": session_id,
+                                    "reason": reason,
+                                    "message": friendly,
+                                    "model": session.model,
+                                })
+                                await ws_manager.send_to_session(session_id, "agent:message", {
+                                    "session_id": session_id,
+                                    "message": _err_msg.model_dump(mode="json"),
+                                })
+                                _analytics("auth.error", {
+                                    "reason": reason,
+                                    "model": session.model,
+                                    "provider": session.provider,
+                                    "via": "router_streamed_text",
+                                }, session_id=session_id, dashboard_id=session.dashboard_id)
+                            else:
+                                asst_msg = Message(
+                                    id=stream_text_msg_id or uuid4().hex,
+                                    role="assistant",
+                                    content=_asst_text,
+                                    branch_id=session.active_branch_id,
+                                )
+                                session.messages.append(asst_msg)
+                                await ws_manager.send_to_session(session_id, "agent:message", {
+                                    "session_id": session_id,
+                                    "message": asst_msg.model_dump(mode="json"),
+                                })
 
                         for i, tu in enumerate(tool_uses):
                             msg_id = stream_tool_msg_ids_ordered[i] if i < len(stream_tool_msg_ids_ordered) else uuid4().hex
@@ -3197,7 +3262,22 @@ class AgentManager:
                 #   3. Anthropic API key 401 — wrong key. Re-enter.
                 _model = (session.model or "").lower()
                 _combined = f"{e!s}\n{_stderr_tail}".lower()
-                if "no credentials for provider" in _combined:
+                # Codex/OpenAI subscription tokens rotate every ~2-3
+                # minutes — the user sees the rotation window as a 401
+                # with "reset after 1m 59s" or similar. Don't ask them to
+                # reconnect; just tell them to wait it out and retry.
+                if (
+                    ("codex/" in _combined or "[codex/" in _combined or _model.startswith(("cx/", "gpt-")))
+                    and ("authentication token is expired" in _combined or "authentication token has expired" in _combined or "401" in _combined)
+                ):
+                    friendly_msg = (
+                        "GPT subscription token just rotated — this is "
+                        "automatic and resets every couple minutes. Send "
+                        "your message again in ~1 minute and it'll go "
+                        "through. (No need to reconnect anything.)"
+                    )
+                    reason = "codex_token_rotating"
+                elif "no credentials for provider" in _combined:
                     friendly_msg = (
                         "Selected route requires Claude Pro / Max, but it's "
                         "not connected. Open Settings → Models and either "

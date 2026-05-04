@@ -423,7 +423,7 @@ async def resolve_aux_model(
     2. Anthropic API key set → bare haiku/sonnet on real Anthropic API
     3. 9Router + Claude subscription connected → cc/<model>
     4. 9Router + Codex connected → cx/gpt-5.4-mini
-    5. 9Router + Gemini connected → gc/gemini-2.5-flash
+    5. 9Router + Gemini connected → gc/gemini-3.1-flash-lite-preview
     6. Nothing available → raise ValueError
 
     When primary_api is provided, the resolver tries that family first
@@ -458,9 +458,9 @@ async def resolve_aux_model(
         # primary is Codex but it's not reachable — fall through to default
     elif primary_api == "gemini-cli" or primary_api == "gemini":
         if "gemini-cli" in connected:
-            return ("gc/gemini-2.5-flash", base_url)
+            return ("gc/gemini-3.1-flash-lite-preview", base_url)
         if getattr(settings, "google_api_key", None):
-            return ("gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta")
+            return ("gemini-3.1-flash-lite-preview", "https://generativelanguage.googleapis.com/v1beta")
         # fall through to default
     # primary_api == "anthropic" naturally falls into the Anthropic-first
     # cascade below — no special branch needed.
@@ -485,7 +485,7 @@ async def resolve_aux_model(
     if "codex" in connected:
         return ("cx/gpt-5.4-mini", base_url)
     if "gemini-cli" in connected:
-        return ("gc/gemini-2.5-flash", base_url)
+        return ("gc/gemini-3.1-flash-lite-preview", base_url)
 
     raise ValueError(
         "No AI provider connected for auxiliary LLM call. "
